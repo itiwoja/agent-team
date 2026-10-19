@@ -11,4 +11,18 @@ regexes = [
   # 規則 github-app-token の一致は ghs_ のあと36文字までなので、末尾の f は含めない
   '''ghs_testinstallationtoken0123456789abcde''',
   '''ghs_installationtokenforgatewaytests0123''',
+  # fixture の destination_key（宛先を数える SHA-256。秘密ではない）
+  '''destination_key":"[0-9a-f]{64}''',
+  # 試験の冪等キー（固定の UUID）
+  '''(?i)key = "[0-9a-f]b[0-9a-f]{2}[0-9a-f]{4}-[0-9a-f]{4}-4[0-9a-f]{3}-9[0-9a-f]{3}-0[0-9a-f]{11}"''',
+  # 試験だけで使う偽の秘密・トークン（packages/db/src/system/entry.test.ts・packages/platform/src/log.test.ts・mask.test.ts）
+  '''test-secret-0123456789''',
+  '''tt-0123456789''',
+  '''tt-1234567890''',
 ]
+
+# 偽の秘密鍵でマスクを試す試験（packages/platform/src/mask.test.ts）
+[[rules]]
+id = "private-key"
+[rules.allowlist]
+paths = ['''^packages/platform/src/mask\.test\.ts$''']

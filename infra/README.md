@@ -6,7 +6,6 @@
 > 3. デプロイは「イメージ → マイグレーション（Cloud Run Job）→ 各サービス → スモークテスト」。スモークテストが落ちたら前のリビジョンに自動で戻す（[§4.3](#43-ロールバック)）。DB は毎日自動でバックアップを取る（[§3 の補足](#cloud-sql-の補足)）。
 > 4. 鍵ファイルは作らない。GitHub から GCP に入れるのは「このリポジトリの `main` への push」だけ（PR・手動実行・ほかのブランチは通らない）。
 
-出典：`docs/design/15_hackathon.md` §構成・§公開時のセキュリティ、D-50〜52。
 
 ## 1. 流し方
 
@@ -30,7 +29,7 @@ bash infra/gcp-setup.sh
 | `BUDGET_AMOUNT` | | `100USD` | 予算（通貨つき）。30%・100% で通知。請求先の通貨が USD でなければ `15000JPY` のように入れる |
 | `SQL_INSTANCE`・`SQL_TIER`・`SQL_ZONE` | | `open-team-db`・`db-f1-micro`・`<REGION>-a` | Cloud SQL の名前・マシン・ゾーン。**インスタンスがなければ作るときだけ効く**（作成済みなら変えない） |
 | `ROTATE_MIGRATOR_PASSWORD` | | `0` | `1` で `ot_migrator` のパスワードを決め直し、`database-url-migrator` に新しい版を足す（既定は、有効な版がなければ入れるだけ） |
-| `BUDGET_START`・`BUDGET_END` | | `2026-10-01`・`2026-12-31` | 予算の期間（ハッカソンの間を通しで数える） |
+| `BUDGET_START`・`BUDGET_END` | | `2026-10-01`・`2026-12-31` | 予算の期間 |
 
 終わると、GitHub に入れる値（`gh variable set …` の形も）が出る。
 
@@ -80,7 +79,7 @@ Cloud Run の呼び出し元（`run.invoker`）は `deploy.yml` がサービス�
 - 秘密に有効な版があれば何もしない（流し直しでパスワードが変わって、動いている Cloud Run が切れるのを防ぐ）。値を作り直したいときは、新しい版を足すか、`gcloud sql users set-password` で変えて秘密も合わせる。
 - `ot_migrator` のパスワードは `gcp-setup.sh` が乱数（英数字32文字）で決め直し、接続文字列を秘密 `database-url-migrator` に入れる（形式は上と同じ：`postgres://ot_migrator:<パスワード>@localhost/openteam?host=/cloudsql/<プロジェクト>:<リージョン>:open-team-db`）。パスワード単体はどこにも保存しない（秘密の中の接続文字列だけ）。使うのはマイグレーションの Job だけなので、決め直しても動いているサービスは切れない。決め直したいときは `ROTATE_MIGRATOR_PASSWORD=1` で流し直す（D-102）。ローカルから `ot_migrator` で繋ぐときは、下の手順の前に自分でパスワードを決め直して控える。
 - インスタンスは作成済みなら設定を変えない（`db-f1-micro` を変えるときは `SQL_TIER`。新規作成のときだけ効く）。新規作成のときは `--backup-start-time=19:00 --retained-backups-count=7 --deletion-protection` を付ける。
-- 自動バックアップは**インスタンス丸ごと**の毎日1回（7世代まで）。`db-f1-micro` は共有コアなので、取っている間は少し重くなりうる（JST 4:00 は審査員が使わない時間）。復元は §4.3 の「DB を戻す」。
+- 自動バックアップは**インスタンス丸ごと**の毎日1回（7世代まで）。`db-f1-micro` は共有コアなので、取っている間は少し重くなりうる（JST 4:00 は利用者が少ない時間）。復元は §4.3 の「DB を戻す」。
 
 ### 既存のインスタンスにバックアップを足す（一度だけ・流し直してよい）
 
@@ -107,7 +106,7 @@ gcloud sql backups create --instance=open-team-db --project="$PROJECT_ID" --desc
 gcloud sql backups list --instance=open-team-db --project="$PROJECT_ID"
 ```
 
-- **再起動**：公式の文書（[Cloud SQL の設定の変更で起きること](https://cloud.google.com/sql/docs/postgres/instance-settings)）に、自動バックアップの有効化・バックアップ時刻の変更・削除保護でインスタンスが再起動する・止まるという記載は見つからなかった。再起動・停止が書かれているのは、CPU・メモリの変更（Enterprise は60秒未満の停止）と、**ポイントインタイムリカバリ（PITR）の有効化・無効化**など。この手順は PITR を付けない。ただし「再起動しない」と明記されているわけでもないので、流す前後に `curl https://<app の URL>/api/health` が 200 を返すことを確かめ、審査員が使わない時間に流す。
+- **再起動**：公式の文書（[Cloud SQL の設定の変更で起きること](https://cloud.google.com/sql/docs/postgres/instance-settings)）に、自動バックアップの有効化・バックアップ時刻の変更・削除保護でインスタンスが再起動する・止まるという記載は見つからなかった。再起動・停止が書かれているのは、CPU・メモリの変更（Enterprise は60秒未満の停止）と、**ポイントインタイムリカバリ（PITR）の有効化・無効化**など。この手順は PITR を付けない。ただし「再起動しない」と明記されているわけでもないので、流す前後に `curl https://<app の URL>/api/health` が 200 を返すことを確かめ、利用者が少ない時間に流す。
 - 削除保護が付くと `gcloud sql instances delete` は失敗する（消すときは `--no-deletion-protection` を先に）。
 - 戻し方（バックアップをやめる・削除保護を外す）：
 
@@ -116,7 +115,7 @@ gcloud sql instances patch open-team-db --project="$PROJECT_ID" --no-backup --no
 ```
 
   取れたバックアップは残る（個別に消すなら `gcloud sql backups delete <ID> --instance=open-team-db`）。
-- 費用：バックアップの保管は 10GB のインスタンスで月数十円未満（使用量の課金。ハッカソンの間の予算 100USD に比べて無視できる）。
+- 費用：バックアップの保管は 10GB のインスタンスで月数十円未満（使用量の課金。予算 100USD に比べて無視できる）。
 - 各ユーザーの DB 内の権限は `packages/db/migrations/roles.sql` とマイグレーションが付ける（このスクリプトは付けない）。
 
 ### ローカルから Cloud SQL に繋ぐ（authorized-networks を一時的に足す）
@@ -151,7 +150,7 @@ gcloud sql instances patch open-team-db --project="$PROJECT_ID" --clear-authoriz
 5. `sim-world` → `gateway` → `app` の順に Cloud Run へ（`app`：Ingress 全体・最大10・タイムアウト3600秒、`sim-world`：Ingress 内部・最大3・90秒。どちらも最小0）。環境変数 `DEPLOYMENT_MODE=public`・`COMMIT_SHA`、ラベル `commit-sha` が付く。デプロイのたびにトラフィックは最新のリビジョンに 100%（`revision_traffic: LATEST=100`）。
 6. **スモークテスト**（[§4.2](#42-スモークテスト)）。落ちたら**前のリビジョンへトラフィックを戻す**（[§4.3](#43-ロールバック)）。
 
-入口のトークン（オーナー）と審査員のトークン：
+入口のトークン（オーナー）とゲスト用のトークン：
 
 ```bash
 gcloud secrets versions access latest --secret=phase0-access-token --project=<PROJECT_ID>
@@ -181,7 +180,7 @@ gcloud secrets versions access latest --secret=guest-entry-token --project=<PROJ
 [`.github/scripts/smoke.mjs`](../.github/scripts/smoke.mjs)（Node だけ・依存なし）。`deploy.yml` が `app` のデプロイのあとに流す。
 
 1. `GET /api/health` の `commit` が `GITHUB_SHA` になるまで最大2分待つ（新しいリビジョンにトラフィックが移るまで）。
-2. `POST /api/v1/entry`（審査員用のトークン）で入り、`GET /api/v1/session` で `csrfToken`・`firstAskId` を取る。
+2. `POST /api/v1/entry`（ゲスト用のトークン）で入り、`GET /api/v1/session` で `csrfToken`・`firstAskId` を取る。
 3. 用意した依頼の担当が2人、リハーサルの結果が試験12件・すり抜け2件。
 4. `SMOKE_RETEST=1`（`deploy.yml` は1）：締める提案を上から順に（まだ塞がれていない状況を塞ぐものだけ）適用し、最後の1件で再試験。2分以内に終わって合格証が出る（走行の `certificateId` と `GET …/certificate` が 200）。**用意した依頼の再試験は台本での再現なので Gemini の費用は 0**（D-101）。
 5. `POST /api/v1/logout` で後片付け（失敗は警告だけ）。
@@ -266,7 +265,7 @@ done
 
 ## 7. 次の段階（この設定ではまだ作らない）
 
-- 今の Cloud SQL は設計（SO §4.6：private IP・`db-g1-small` 以上）より小さく、公開 IP で NAT 経由（ハッカソンの間の割り切り）。
+- 今の Cloud SQL は設計（SO §4.6：private IP・`db-g1-small` 以上）より小さく、公開 IP で NAT 経由（費用を抑えるための割り切り）。
 - `gateway` のサービス（`sa-gateway`、Ingress 内部、呼べるのは `sa-app` だけ、`ALLOWED_CONNECTOR_URLS`）。順番は `sim-world` → `gateway` → `app`。
 - `/internal/selfcheck`（`sa-deployer` に `sa-app` の `serviceAccountTokenCreator`）。
 - Vertex AI のクォータ（下げられるか 10/4 に確かめる：SO §4.9）。
