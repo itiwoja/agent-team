@@ -1,0 +1,305 @@
+/* SCR-010 記録（監査ログ）。行は詰めて並べ、タップで JSON 全文を開く。幅400pxでも横にはみ出さない */
+.audit-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.audit-page .audit-head .ask-head {
+  margin: 0;
+}
+.audit-lead {
+  font-size: 14px;
+  margin: 0 0 12px;
+}
+/* 見出しの右の小さめの操作（高さ 38px。タップ領域は .btn の 44px より少し小さいが、見出しの脇に置く） */
+.audit-verify-btn {
+  min-height: 38px;
+  padding: 0 14px;
+  font-size: 14px;
+}
+
+/* 検証の結果 */
+.audit-verify {
+  margin: 0 0 16px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--surface);
+  font-size: 15px;
+  font-weight: 600;
+}
+.audit-verify.is-ok {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.audit-verify.is-ng {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.audit-broken-link {
+  color: var(--red);
+  font-size: 15px;
+  padding: 0;
+}
+
+/* 絞り込み */
+.audit-filter {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 16px;
+  margin-bottom: 16px;
+}
+.audit-field {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+.audit-field > span {
+  flex: none;
+  white-space: nowrap;
+}
+.audit-field select {
+  min-height: 44px; /* タップ領域 44px（F-027） */
+  min-width: 0;
+  max-width: 100%;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.audit-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px; /* タップ領域 44px（F-027） */
+  font-size: 14px;
+}
+.audit-check input {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+.audit-from {
+  margin: 0 0 12px;
+}
+/* 日付の小見出し（記録・済んだもので共通） */
+.day-group + .day-group {
+  margin-top: 20px;
+}
+.day-group-head {
+  margin: 0 0 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.audit-error {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+/* 一覧 */
+.audit-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+.audit-row {
+  border-radius: 14px;
+  background: var(--surface);
+  min-width: 0;
+  scroll-margin-top: 72px;
+}
+/* 行は詰める（スマホで 200 件を続けて読めるように） */
+.audit-row.is-target {
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.audit-row.is-broken {
+  background: var(--red-bg);
+  box-shadow: inset 0 0 0 2px var(--red);
+}
+.audit-row.is-broken .audit-seq {
+  color: var(--red);
+}
+.audit-main {
+  display: grid;
+  gap: 1px;
+  width: 100%;
+  min-width: 0;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 14px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  font-weight: 400;
+  white-space: normal;
+}
+.audit-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 8px;
+  min-width: 0;
+  font-size: 12.5px;
+}
+.audit-seq {
+  font-weight: 700;
+  font-size: 12.5px;
+}
+.audit-time {
+  font-size: 12.5px;
+}
+.audit-type {
+  font-size: 12.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+/* 要約は2行まで折り返して省く（F-022。全文は開いた中の「要約」に出す） */
+.audit-summary {
+  font-size: 15px;
+  line-height: 1.4;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow-wrap: anywhere;
+}
+.audit-row.is-shadow .audit-summary,
+.audit-row.is-quiet .audit-summary {
+  color: var(--muted);
+}
+.audit-meta {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 開いたとき：ハッシュと payload 全文 */
+.audit-detail {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+  min-width: 0;
+}
+.audit-detail .kv {
+  font-size: 13px;
+  min-width: 0;
+}
+.audit-detail .kv dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.audit-hash {
+  font-size: 12px;
+  word-break: break-all;
+}
+.audit-json {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-all;
+  max-height: 360px;
+  overflow: auto;
+}
+.audit-more {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+
+/* 済んだもの（Done）：行全体を押せる札つきのカード。見た目は check.css の .row に揃える */
+.done-empty {
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  padding: 48px 0;
+  text-align: center;
+}
+.done-empty p {
+  margin: 0;
+}
+.done-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+.done-card.is-link {
+  transition: background 0.15s ease;
+}
+.done-card.is-link:hover,
+.done-card.is-link:active {
+  background: var(--surface);
+}
+.done-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+}
+.done-main .row-title {
+  overflow-wrap: anywhere;
+}
+.done-main .row-meta {
+  margin-top: 0;
+}
+/* 結果の札（送りました・送りませんでした・期限切れ） */
+.done-outcome {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--gray-bg);
+  color: var(--muted);
+}
+.done-outcome.is-approved {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.done-outcome.is-rejected {
+  background: var(--gray-bg);
+  color: var(--muted);
+}
+.done-outcome.is-expired {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+/* 予定の登録の「カレンダーで開く」（済んだものの行の下に小さく） */
+.done-cal {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  margin: 4px 0 0 16px;
+  color: var(--accent, var(--text));
+  font-size: 13px;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.done-chev {
+  flex: none;
+  color: var(--muted);
+}

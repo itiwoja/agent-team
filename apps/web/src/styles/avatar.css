@@ -1,0 +1,172 @@
+/* エージェントのアイコン（components/Avatar.tsx）。表情の動きはここだけに置き、動きを減らす設定では止める */
+.avatar {
+  display: inline-block;
+  flex: none;
+  line-height: 0;
+}
+.avatar svg {
+  display: block;
+  overflow: visible;
+}
+.avatar-figure,
+.avatar-eye,
+.avatar-hand,
+.avatar-mark,
+.avatar-sprout {
+  transform-box: fill-box;
+}
+
+/* まばたき（待っている・動いている・入口） */
+.mood-idle .avatar-eye,
+.mood-waiting .avatar-eye,
+.mood-running .avatar-eye {
+  transform-origin: center;
+  animation: av-blink 4.2s infinite;
+}
+
+/* 動いている：ぴょこぴょこ跳ねて、点々が順に光る */
+.mood-running .avatar-figure {
+  transform-origin: 50% 100%;
+  animation: av-bob 0.62s ease-in-out infinite alternate;
+}
+.mood-running .avatar-shadow {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: av-shadow 0.62s ease-in-out infinite alternate;
+}
+.avatar-dots circle {
+  animation: av-dot 1.2s ease-in-out infinite;
+}
+.avatar-dots circle:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.avatar-dots circle:nth-child(3) {
+  animation-delay: 0.4s;
+}
+
+/* 確認待ち：手を振る、？がふわっと揺れる */
+.mood-approval .avatar-hand {
+  transform-origin: 100% 100%;
+  animation: av-wave 0.9s ease-in-out infinite alternate;
+}
+.avatar-question {
+  transform-origin: center;
+  animation: av-float 1.6s ease-in-out infinite alternate;
+}
+
+/* 済み：きらりと光る */
+.avatar-sparkle {
+  transform-origin: center;
+  animation: av-twinkle 1.8s ease-in-out infinite;
+}
+
+/* 止めた：zz が浮かぶ */
+.avatar-zz {
+  animation: av-float 2.2s ease-in-out infinite alternate;
+}
+
+/* 失敗：少し傾いてしょんぼり */
+.mood-failed .avatar-figure {
+  transform-origin: 50% 100%;
+  transform: rotate(-6deg);
+}
+
+/* 待っている：少し薄く（まだ順番が来ていない） */
+.mood-waiting .avatar-figure {
+  opacity: 0.72;
+}
+
+/* 芽がそよぐ */
+.avatar-sprout {
+  transform-origin: 50% 100%;
+  animation: av-sway 2.4s ease-in-out infinite alternate;
+}
+
+/* 生まれる（入口で編成ができたとき）：ぽんと出てくる */
+.avatar-pop {
+  animation: av-pop 0.55s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+  animation-delay: calc(var(--i, 0) * 0.35s + 0.1s);
+}
+
+@keyframes av-blink {
+  0%,
+  93%,
+  100% {
+    transform: scaleY(1);
+  }
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+@keyframes av-bob {
+  from {
+    transform: translateY(0) scale(1.02, 0.98);
+  }
+  to {
+    transform: translateY(-3.5px) scale(0.98, 1.02);
+  }
+}
+@keyframes av-shadow {
+  to {
+    transform: scaleX(0.8);
+    opacity: 0.06;
+  }
+}
+@keyframes av-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+@keyframes av-wave {
+  from {
+    transform: rotate(-8deg);
+  }
+  to {
+    transform: rotate(10deg);
+  }
+}
+@keyframes av-float {
+  to {
+    transform: translateY(-2px);
+  }
+}
+@keyframes av-twinkle {
+  0%,
+  100% {
+    transform: scale(0.75) rotate(0deg);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.1) rotate(20deg);
+    opacity: 1;
+  }
+}
+@keyframes av-sway {
+  from {
+    transform: rotate(-6deg);
+  }
+  to {
+    transform: rotate(6deg);
+  }
+}
+@keyframes av-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.2) translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .avatar *,
+  .avatar-pop {
+    animation: none !important;
+  }
+}

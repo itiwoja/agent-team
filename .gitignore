@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+*.tsbuildinfo
+
+# 秘密情報（値は Secret Manager か手元の .env だけ。例は .env.example）
+.env
+.env.*
+!.env.example
+
+# 計測の結果（scripts/measure。README に載せる表は条件と一緒に手で写す：15 §引っかかり率の計測）
+scripts/measure/results/
+.claude/worktrees/

@@ -1,0 +1,23 @@
+{
+  "name": "open-team",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@10.27.0",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "dev": "pnpm -r --parallel run dev",
+    "build": "pnpm -r run build",
+    "typecheck": "pnpm -r run typecheck",
+    "test": "pnpm -r run test",
+    "lint:deps": "depcruise --config .dependency-cruiser.cjs packages apps scripts",
+    "measure": "pnpm --filter @open-team/measure run measure"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "dependency-cruiser": "^18.4.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}

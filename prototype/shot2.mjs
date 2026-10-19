@@ -1,0 +1,20 @@
+import { chromium } from "playwright";
+const base = "http://localhost:5173", out = "shots/r2/";
+const b = await chromium.launch({ channel: "chrome" });
+const p = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: "dark" });
+await p.goto(base + "/"); await p.waitForSelector(".entrance", { timeout: 60000 });
+await p.screenshot({ path: out + "dark-home.png" });
+await p.goto(base + "/check"); await p.waitForTimeout(2500);
+await p.screenshot({ path: out + "dark-check.png" });
+await p.goto(base + "/asks/5c2c2870-5f18-4263-bea7-e6d6f90760bb"); await p.waitForTimeout(2500);
+await p.screenshot({ path: out + "dark-ask.png", fullPage: true });
+const q = await b.newPage({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+await q.goto(base + "/check"); await q.waitForTimeout(2500);
+const rows = await q.$$(".row");
+console.log("rows", rows.length);
+const t = await q.$(".row .row-title, .row button");
+if (t) { await t.click(); await q.waitForTimeout(1200); }
+await q.screenshot({ path: out + "check-open.png", fullPage: true });
+const rid = (await q.$$eval("a[href^='/asks/']", as => as.map(a => a.getAttribute("href"))));
+console.log(rid.slice(0,5));
+await b.close();

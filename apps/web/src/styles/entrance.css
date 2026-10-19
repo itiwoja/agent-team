@@ -1,0 +1,336 @@
+/* SCR-020 任せる（D-100：prototype の .hero / .dock / .composer-box / .chip に揃える） */
+.entrance {
+  /* 見えている高さ（--app-h）から AppHeader（shell.css：min-height 56px ＋ safe-area 上）と .screen の上の余白 8px を引く。
+     .screen の下の余白 64px は下の負の margin で打ち消し、入力欄（.dock）を画面の下に置く。
+     合計がちょうど --app-h になるので縦スクロールは出ない（F-034） */
+  min-height: calc(var(--app-h) - 56px - env(safe-area-inset-top, 0px) - 8px);
+  margin-bottom: -64px;
+  display: flex;
+  flex-direction: column;
+}
+.entrance-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 16px;
+  padding-bottom: 8vh;
+}
+.hero,
+.entrance-title {
+  font-size: 30px;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+  font-weight: 650;
+  text-align: center;
+  text-wrap: balance;
+}
+@media (max-width: 380px) {
+  .hero,
+  .entrance-title {
+    font-size: 26px;
+  }
+}
+.entrance-note {
+  text-align: center;
+  font-size: 14px;
+}
+
+/* 頼み方の例（入力欄が空で頼める状態のときだけ出す）。タップで入力欄に入れる */
+.entrance-examples {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  /* 縦並びの flex の子は、左右の margin: auto だと幅が中身（1行の長い例文）の幅になり、スマホで画面からはみ出して
+     ページ全体が横に広がる。幅を親に合わせ、長い例文は札の中で … で切る */
+  width: 100%;
+  max-width: 640px;
+  margin: 0 auto;
+}
+/* 札ごとにふわっと出る（入れ替えたときは新しい札だけ動く：key が変わる） */
+.entrance-example {
+  animation: examples-in 0.4s ease both;
+  flex: 0 1 auto;
+  min-height: 44px;
+  padding: 10px 16px;
+  line-height: 1.4;
+  text-align: center;
+  /* 長い例文は2行に折らず、1行で切る（全文は入力欄に入る） */
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+  color: var(--text);
+}
+.entrance-example:active {
+  background: var(--surface-2);
+}
+
+@keyframes examples-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* 画面下に固定する入力エリア */
+.dock {
+  position: sticky;
+  bottom: 0;
+  z-index: 5;
+  display: grid;
+  gap: 10px;
+  margin: 0 calc(var(--gutter) * -1);
+  padding: 8px 12px calc(env(safe-area-inset-bottom) + 12px);
+  background: linear-gradient(to bottom, transparent, var(--bg) 22px);
+}
+.composer-box {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  padding: 6px;
+  border-radius: 28px;
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+}
+.composer-box textarea {
+  flex: 1;
+  min-width: 0;
+  display: block;
+  resize: none;
+  min-height: 44px;
+  padding: 10px 6px 10px 14px;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  line-height: 24px;
+  font-size: 16px; /* iOS の自動ズームを避ける */
+  outline: 0;
+}
+.composer-box:focus-within {
+  box-shadow: var(--shadow), 0 0 0 2px var(--accent);
+}
+.composer-box .round-btn {
+  flex: none;
+  min-height: 0;
+  padding: 0;
+}
+/* 空のとき：矢印のまま薄くして押せないことを示す（F-011） */
+.composer-box .round-btn:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+/* エージェント生成中・できた編成 */
+.gen,
+.gen-live {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.gen-link {
+  color: inherit;
+  display: block;
+}
+.gen-members {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+  text-align: left;
+}
+.gen-members li {
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+}
+.gen-members li,
+.gen-shape {
+  animation: gen-in 0.4s ease both;
+  animation-delay: calc(var(--i, 0) * 0.35s);
+}
+/* 担当：左にアイコン（ぽんと生まれる）、右に名前（見出し）・すること（小見出し）・新しく作ったか */
+.gen-member {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+/* 生成中のたまご：ゆらゆら揺れ、ひびが少しずつ入る */
+.gen-egg {
+  display: grid;
+  place-items: center;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.gen-egg-body {
+  transform-box: fill-box;
+  transform-origin: 50% 95%;
+  animation: egg-wobble 1.6s ease-in-out infinite;
+}
+.gen-egg-crack {
+  stroke-dasharray: 40;
+  stroke-dashoffset: 40;
+  animation: egg-crack 6s ease-out forwards;
+}
+@keyframes egg-wobble {
+  0%,
+  60%,
+  100% {
+    transform: rotate(0deg);
+  }
+  70% {
+    transform: rotate(-9deg);
+  }
+  80% {
+    transform: rotate(8deg);
+  }
+  90% {
+    transform: rotate(-4deg);
+  }
+}
+@keyframes egg-crack {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gen-egg-body,
+  .gen-egg-crack,
+  .entrance-example {
+    animation: none;
+  }
+  .gen-egg-crack {
+    stroke-dashoffset: 0;
+  }
+}
+.gen-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+}
+.gen-summary {
+  margin: 2px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+.gen-members .muted {
+  margin: 2px 0 0;
+}
+.gen-members .muted {
+  font-size: 13px;
+}
+.gen-shape {
+  text-align: center;
+  font-size: 14px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  align-self: center;
+}
+@keyframes gen-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* 質問 */
+.question-text {
+  font-size: 24px;
+}
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+}
+/* 入口の質問（section.gen.question）だけに絞る。check.css の .choice（リハーサル区画）と衝突させない（F-037） */
+.question .choice {
+  min-height: 44px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 500;
+  background: var(--surface);
+  color: var(--text);
+  border: 0;
+  white-space: normal;
+}
+.question .choice:active {
+  background: var(--surface-2);
+}
+.question .choice-own {
+  min-height: 44px;
+  padding: 0 18px;
+  font-size: 15px;
+  font-weight: 500;
+  background: transparent;
+  color: var(--muted);
+}
+.own-answer {
+  display: flex;
+  gap: 8px;
+}
+.own-answer input {
+  flex: 1;
+  min-width: 0;
+  border-radius: 999px;
+}
+
+/* デスクトップ（ChatGPT 風）：見出しのすぐ下に入力欄、その下に例文・件数。全体を中央に寄せる */
+@media (min-width: 768px) {
+  .entrance {
+    justify-content: center;
+    gap: 16px;
+  }
+  /* .entrance-body の箱をなくし、中の要素を .entrance の flex 列に並べ直す */
+  .entrance-body {
+    display: contents;
+  }
+  .dock {
+    order: 1;
+    position: static;
+    width: 100%;
+    max-width: 640px;
+    margin: 0 auto;
+    padding: 0;
+    background: none;
+  }
+  .entrance-examples {
+    order: 2;
+  }
+  .entrance-note {
+    order: 3;
+  }
+}
+
+.connect-note {
+  margin: 0;
+}
+/* 審査用のトークンで入った直後の知らせ（用意した依頼が待っている。D-118）。開くか「あとで」で消える */
+.prepared-note {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+}
+.prepared-note-text {
+  margin: 0;
+}
+.prepared-note-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}

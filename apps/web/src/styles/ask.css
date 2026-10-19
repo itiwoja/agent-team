@@ -1,0 +1,812 @@
+/* SCR-021 依頼 */
+/* 区画（回答・担当の段・リハーサル）の間は 16px で揃える */
+.ask {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.ask-head {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+/* 頼んだ文が頁の主題（見出し）。check.css の .row-title（16px）より明示的に勝たせる */
+.ask .ask-head .ask-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: -0.01em;
+}
+/* 長い文は3行で畳む。is-clampable は溢れているか測るための3行、is-clamped は溢れていると分かった状態（下端をぼかす） */
+.ask .ask-head .ask-title.is-clampable,
+.ask .ask-head .ask-title.is-clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  line-clamp: 3;
+  overflow: hidden;
+}
+.ask .ask-head .ask-title.is-clamped {
+  -webkit-mask-image: linear-gradient(180deg, #000 80%, rgb(0 0 0 / 0.25));
+  mask-image: linear-gradient(180deg, #000 80%, rgb(0 0 0 / 0.25));
+}
+.ask .ask-head .ask-title-toggle {
+  align-self: flex-start;
+  min-height: 36px;
+  margin-top: -4px;
+  padding: 0;
+}
+
+/* 担当が動いている間、ヘッダーの下を流れる細い帯（色は琥珀＝動いている、の約束のまま）。reduced-motion では止まった帯 */
+.live-bar {
+  position: fixed;
+  top: calc(env(safe-area-inset-top, 0px) + 56px);
+  left: 0;
+  right: 0;
+  z-index: 11;
+  height: 2px;
+  overflow: hidden;
+  background: color-mix(in srgb, var(--amber) 22%, transparent);
+  pointer-events: none;
+}
+.live-bar::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  width: 38%;
+  border-radius: 999px;
+  background: var(--amber);
+  animation: live-bar 1.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+@keyframes live-bar {
+  from {
+    transform: translateX(-110%);
+  }
+  to {
+    transform: translateX(290%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-bar::after {
+    animation: none;
+    width: 100%;
+    opacity: 0.6;
+  }
+}
+/* 補足行（trigger のラベル・notes・用意の注記）は 14px の muted。check.css の .ask-head .muted（20px）より明示的に勝たせる */
+.ask .ask-head .muted {
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1.5;
+}
+.ask .ask-head .gemini-line {
+  font-size: 14px;
+}
+/* 見出し直下のリハーサルの状態の札。押すと下のリハーサルの区画へ。未実施は muted、合格・切れた・走行中は色つきの面 */
+.rehearsal-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  max-width: 100%;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.rehearsal-pill.is-valid {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.rehearsal-pill.is-revoked,
+.rehearsal-pill.is-running {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+/* 失敗した依頼（回答の代わり）：面は --surface、赤は点だけ */
+.ask-failed {
+  background: var(--surface);
+}
+.ask-failed-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+.ask-failed-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--red);
+}
+.ask-failed-message {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  line-height: 1.5;
+  color: var(--text);
+}
+.ask-failed > .btn {
+  align-self: flex-start;
+}
+.block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.block > * {
+  max-width: 100%;
+}
+/* 行の一覧は本文カラムいっぱいに広げる（flex-start のままだと行が内容幅に縮み、丸ボタンが中ほどに出る） */
+.rows.block {
+  align-items: stretch;
+}
+.rows.block > * {
+  max-width: none;
+}
+.block-title {
+  font-size: 17px;
+}
+.answer-head {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  gap: 12px;
+}
+/* 回答の本文。見出し（md の h2 は 17px）より大きくならない 16px */
+.answer-text {
+  font-size: 16px;
+}
+.failed {
+  color: var(--red);
+  font-weight: 700;
+}
+/* 送る前の確認で「送らない」にしたもの（回答の結論は担当の報告のままなので、送っていないことを太字で添える：D-108） */
+.declined {
+  font-weight: 700;
+}
+.needs-you {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  font-weight: 700;
+}
+.stages-note {
+  margin: 0;
+  font-size: 13px;
+}
+.stage-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+}
+.handoff,
+.exchange {
+  padding-left: 12px;
+  margin: 4px 0 0;
+}
+.exchange li {
+  margin-top: 4px;
+}
+.reply {
+  padding-left: 16px;
+}
+.kv {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 2px 12px;
+  font-size: 14px;
+}
+.kv dt {
+  color: var(--muted);
+}
+.kv dd {
+  margin: 0;
+}
+.kv div {
+  display: contents;
+}
+.plain-toggle {
+  min-height: 44px;
+  font-size: 15px;
+}
+.mark {
+  font-size: 12px;
+  color: var(--muted);
+}
+.interp {
+  font-size: 15px;
+}
+.own-answer input {
+  min-width: 0;
+}
+.inline-form,
+.block form {
+  width: 100%;
+}
+.row-toggle,
+.running-toggle,
+.plain-toggle {
+  white-space: normal;
+}
+/* ブラウザ既定の灰色ボタンをやめ、面（--surface）と文字色をトークンで指定する（ダークで読める） */
+.row-toggle,
+.plain-toggle {
+  background: var(--surface);
+  color: var(--text);
+  border: 0;
+}
+.row-toggle:disabled,
+.plain-toggle:disabled {
+  color: var(--text);
+}
+.row-toggle .muted,
+.plain-toggle .muted,
+.row-toggle .small,
+.plain-toggle .small {
+  color: var(--muted);
+}
+/* 試しの実行の表示：斜線をやめ、面（--surface）に置き換える。文言で「送っていません」と示す */
+.dryrun {
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 14px;
+  background: var(--surface);
+  color: var(--text);
+}
+.breakdown {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0 8px 12px;
+}
+
+/* D-100：回答・段・リハーサルは card（--elevated + --shadow）か --surface の面で分ける */
+.card {
+  background: var(--elevated);
+  border-radius: var(--radius);
+  padding: 16px 18px;
+  box-shadow: var(--shadow);
+  min-width: 0;
+}
+.block.card {
+  align-items: stretch;
+}
+.card-stopped {
+  box-shadow: 0 0 0 1.5px var(--red), var(--shadow);
+}
+/* 止まった担当の [やり直す][ここまでで終える] は左寄せ（入口の .choices は中央寄せ） */
+.choices.left {
+  justify-content: flex-start;
+}
+.card-inset {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+.card .row-toggle {
+  border-radius: 14px;
+}
+/* 担当の段は回答カードと同じ高さに並ぶ面なので、角丸も --radius に揃える */
+.stage-list > li {
+  background: var(--surface);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+}
+/* 担当の段：順番の丸数字・名前・状態・要約を左に揃えて縦に積む（面は li が持つので、ボタンは透明） */
+.stage-toggle {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0;
+  text-align: left;
+  background: transparent;
+  align-content: center;
+}
+.stage-toggle:disabled {
+  cursor: default;
+}
+.stage-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.stage-no {
+  width: 22px;
+  height: 22px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1;
+}
+.stage-name {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+.stage-failed .stage-name {
+  color: var(--red);
+}
+/* 状態は文で示し、色は添えるだけ（済み＝緑、動いている＝琥珀、失敗・止めた＝赤、待ち＝灰） */
+.stage-state {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 600;
+  background: var(--surface-2);
+  color: var(--muted);
+}
+.stage-state.is-done {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.stage-state.is-running {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.stage-state.is-failed,
+.stage-state.is-stopped {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.stage-chevron {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 13px;
+}
+.stage .row-sub {
+  font-size: 15px;
+  line-height: 1.45;
+}
+.stage .row-detail {
+  margin-top: 8px;
+  grid-column: 1 / -1;
+}
+/* 担当の段：左にアイコン、右に名前・状態・やったこと */
+.stage {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr);
+  column-gap: 12px;
+  align-items: start;
+}
+.stage-avatar {
+  margin-top: 2px;
+}
+.stage-main {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+/* 動いている段は面をうっすら琥珀に（色は添えるだけ。状態は文字で出す） */
+.stage-list > li:has(.stage.is-running) {
+  background: linear-gradient(135deg, var(--amber-bg), var(--surface) 70%);
+}
+.stage-list > li:has(.stage.is-awaiting_approval) {
+  box-shadow: inset 0 0 0 1.5px var(--amber);
+}
+.stage-progress {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+}
+.activity {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.activity-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 9px 3px 4px;
+  border-radius: 999px;
+  background: var(--bg);
+  font-size: 12.5px;
+  line-height: 1.3;
+  animation: chip-in 0.3s ease both;
+}
+.activity-mark {
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  font-size: 10.5px;
+  font-weight: 800;
+  background: var(--green-bg);
+  color: var(--green);
+}
+.activity-note {
+  font-weight: 700;
+}
+.activity-chip.is-approval .activity-mark,
+.activity-chip.is-approval .activity-note {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.activity-chip.is-approval .activity-note,
+.activity-chip.is-denied .activity-note,
+.activity-chip.is-halted .activity-note {
+  background: none;
+}
+.activity-chip.is-denied .activity-mark,
+.activity-chip.is-halted .activity-mark {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.activity-chip.is-denied .activity-note,
+.activity-chip.is-halted .activity-note {
+  color: var(--red);
+}
+.activity-chip.is-thinking {
+  padding-left: 10px;
+  color: var(--amber);
+  background: var(--amber-bg);
+  font-weight: 600;
+}
+.thinking-dots {
+  display: inline-flex;
+  gap: 2px;
+}
+.thinking-dots i {
+  width: 4px;
+  height: 4px;
+  border-radius: 999px;
+  background: currentColor;
+  animation: think-dot 1.2s ease-in-out infinite;
+}
+.thinking-dots i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.thinking-dots i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+.stage-clock {
+  font-size: 12.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.answer-pending,
+.answer-by {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+@keyframes chip-in {
+  from {
+    opacity: 0;
+    transform: translateX(-4px);
+  }
+}
+@keyframes think-dot {
+  0%,
+  100% {
+    opacity: 0.25;
+    transform: translateY(0);
+  }
+  40% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-chip,
+  .thinking-dots i {
+    animation: none;
+  }
+}
+.running-toggle {
+  align-self: flex-start;
+  color: var(--muted);
+  white-space: normal;
+  text-align: left;
+}
+/* 数値の見せ方：損害 ¥・止めた件数・すり抜けた件数 */
+.meters {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  width: 100%;
+}
+.meter {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 10px 14px;
+  min-width: 0;
+}
+.meter-main {
+  grid-column: 1 / -1;
+}
+.meter dt {
+  font-size: 13px;
+  color: var(--muted);
+}
+.meter dd {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  overflow-wrap: anywhere;
+}
+.meter-bad dd {
+  color: var(--red);
+}
+.loss-toggle {
+  align-self: flex-start;
+}
+.scenarios {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.own-answer .btn {
+  flex: none;
+}
+.glossary {
+  font-size: 14px;
+}
+.glossary summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  color: var(--muted);
+}
+.term {
+  text-decoration: underline dotted;
+  text-underline-offset: 3px;
+  cursor: help;
+}
+.gemini-line {
+  font-size: 14px;
+  margin: 2px 0 0;
+}
+.link-small {
+  min-height: 44px;
+  padding: 0;
+  font-size: 14px;
+  color: var(--muted);
+  background: none;
+  border: 0;
+  text-decoration: underline;
+  cursor: pointer;
+}
+/* 頼んだこと → 回答 の履歴（Conversation）。あなたの文は右寄せの塗りつぶし、担当の回答は左のカード。前の回答は面（--surface）に畳む */
+.thread {
+  gap: 12px;
+}
+.thread > * {
+  max-width: none;
+}
+.turn {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.turn-ask {
+  align-self: flex-end;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
+  max-width: min(85%, 560px);
+}
+.turn-ask-meta {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.turn-ask-who {
+  font-weight: 600;
+}
+.turn-ask-text {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 18px 18px 4px 18px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 15px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.turn-none {
+  margin: 0;
+  font-size: 14px;
+}
+/* 畳んだ前の回答：押すと全文のカードに開く */
+.turn-folded {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 56px;
+  padding: 10px 14px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+.turn-folded-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex: 1;
+  min-width: 0;
+}
+.turn-folded-meta {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.turn-folded-lead {
+  font-size: 14.5px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.report-card.is-past {
+  background: var(--surface);
+  box-shadow: none;
+}
+.report-head-text {
+  min-width: 0;
+}
+.turn-fold {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 0;
+}
+/* 回答カードの下の行：コピー・たたむ（小さく、本文の邪魔をしない） */
+.report-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 16px;
+  margin-top: -4px;
+}
+.report-copy {
+  padding: 0;
+}
+.report-copy.is-copied,
+.report-copy.is-copied:hover {
+  color: var(--green);
+}
+.report-copy.is-failed,
+.report-copy.is-failed:hover {
+  color: var(--red);
+}
+/* 誰が何をしたか（回答の中の、担当ごとの1行） */
+.answer-members {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+.answer-members li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+.answer-members li.failed {
+  color: var(--red);
+  font-weight: 600;
+}
+.reply-box {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+/* 追加で頼む：入力欄が横いっぱいに伸び、送るボタンは右に並ぶ */
+.reply-box .own-answer {
+  width: 100%;
+}
+.reply-box .own-answer input {
+  flex: 1;
+}
+/* 回答＝担当からの報告（届いた知らせと同じ見出し） */
+.report-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.report-headline {
+  margin: 0;
+  font-size: 19px;
+}
+
+/* 依頼の画面の「Google カレンダーをつなぐ」の案内（未接続のカレンダーの依頼だけ。小さく、目立たせない） */
+.gcal-hint {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.gcal-hint .gcal-link {
+  display: inline-block;
+  padding: 0;
+  color: var(--text);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+
+/* 窓口の「次の手の提案」。押すとそのまま返事として頼む（長い文も折り返す） */
+.next-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+.next-actions-title {
+  margin: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.next-actions .choices {
+  flex-wrap: wrap;
+}
+.next-action {
+  white-space: normal;
+  text-align: left;
+}
+/* 見張り：前回から変化なしの回答は1行の札で静かに出す */
+.unchanged-badge {
+  align-self: flex-start;
+  margin: 0;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: var(--gray-bg);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+/* 担当から利用者への質問（ask_user）。答えるまで担当は待っている */
+.agent-question {
+  box-shadow: 0 0 0 1.5px var(--amber), var(--shadow);
+}
+.agent-question-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.agent-question-text {
+  margin: 0;
+  font-weight: 600;
+}
+.agent-question .own-answer {
+  width: 100%;
+}
+.agent-question .own-answer input {
+  flex: 1;
+}

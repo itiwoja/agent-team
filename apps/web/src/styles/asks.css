@@ -1,0 +1,209 @@
+/* 依頼の一覧（screens/Asks.tsx）。行は check.css の .row（カード）、状態の札は ask.css の .stage-state、絞り込みの札は packs.css の .packs-cat を使う */
+.asks-page {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.asks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.asks-page .ask-head {
+  display: block;
+  margin: 0;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+.asks-page .ask-head .ask-count {
+  margin-left: 6px;
+  font-weight: 400;
+  color: var(--muted);
+}
+.asks-new {
+  flex: none;
+}
+.asks-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.asks-filter .packs-cats {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* 札の影・フォーカスの輪が切れないよう上下に余白（左右は画面の端まで流す） */
+  padding: 2px var(--gutter);
+  margin: -2px calc(var(--gutter) * -1);
+}
+.asks-filter .packs-cats::-webkit-scrollbar {
+  display: none;
+}
+.asks-filter .packs-cat {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.asks-filter .packs-cat:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.asks-cat-n {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+.asks-list {
+  gap: 10px;
+}
+/* 1件：行全体が依頼のページへのリンク */
+.ask-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text);
+  text-decoration: none;
+}
+.ask-item-main {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+.ask-item-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.ask-item-trigger {
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 600;
+}
+.ask-item-time {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-variant-numeric: tabular-nums;
+}
+.ask-item-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.ask-item-sub {
+  margin-top: 0;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+.ask-item.is-failed .ask-item-sub {
+  color: var(--red);
+}
+/* 手が要る依頼は、行の縁を琥珀にして一覧の中で見つけやすくする */
+.ask-item.is-waiting_input {
+  border-color: color-mix(in srgb, var(--amber) 55%, var(--line));
+}
+.stage-state.is-muted {
+  background: var(--surface-2);
+  color: var(--muted);
+}
+@media (hover: hover) {
+  .ask-item:hover {
+    border-color: color-mix(in srgb, var(--text) 18%, var(--line));
+  }
+  .ask-item:hover .chev-right {
+    transform: translateX(2px);
+  }
+}
+.ask-item:active {
+  transform: scale(0.99);
+}
+.asks-empty {
+  padding-top: 32px;
+}
+.asks-limit {
+  margin: 0;
+  text-align: center;
+}
+
+/* メニューの「最近の依頼」（AppHeader の Menu）：1行ずつ、動いている・手が要るものは小さな点 */
+.drawer-recent {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  min-width: 0;
+  margin-top: 12px;
+}
+.drawer-recent-head {
+  margin: 0;
+  padding: 0 12px 4px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+}
+.drawer-recent-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 40px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 14px;
+  text-decoration: none;
+}
+.drawer-recent-item.is-current {
+  background: var(--surface);
+  font-weight: 600;
+}
+.drawer-recent-text {
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.drawer-recent-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--amber);
+}
+.drawer-recent-dot.is-failed {
+  background: var(--red);
+}
+.drawer-recent-all {
+  justify-self: start;
+  padding: 0 12px;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 13px;
+  text-decoration: none;
+}
+@media (hover: hover) {
+  .drawer-recent-item:hover {
+    background: var(--surface);
+  }
+  .drawer-recent-all:hover {
+    color: var(--text);
+  }
+}
+.drawer-recent-item:active {
+  background: var(--surface);
+}

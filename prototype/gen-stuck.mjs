@@ -1,0 +1,13 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ channel: "chrome" });
+const p = await b.newPage({ viewport: { width: 390, height: 844 } });
+await p.goto("http://localhost:5177/");
+await p.waitForSelector(".entrance", { timeout: 60000 });
+await p.fill("#ask-input", process.argv[2] ?? "毎朝7時にニュースをまとめて");
+await p.click('button[aria-label="頼む"]');
+await p.waitForSelector(".gen-members", { timeout: 60000 });
+console.log("shown; active =", await p.evaluate(() => document.activeElement?.tagName + "." + document.activeElement?.className));
+if (process.argv[3] === "focus") await p.focus(".gen-link");
+await p.waitForTimeout(7000);
+console.log("after 7s still shown =", await p.locator(".gen-members").count() > 0, "; composer =", await p.locator("#ask-input").count());
+await b.close();

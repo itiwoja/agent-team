@@ -1,0 +1,149 @@
+/* パック（/packs。D-116）：エージェント・スキル・スクリプトの詰め合わせの棚。作業場（/packs/:packId）は pack-workspace.css */
+.packs-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+.packs-lead {
+  margin: 0;
+}
+.pack-audience {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+.pack-installed {
+  flex-shrink: 0;
+  padding: 4px 12px;
+  border-radius: 999px;
+  background: var(--green-bg);
+  color: var(--green);
+  font-size: 13px;
+  font-weight: 600;
+}
+/* 担当の型の札（作業場の机でも使う） */
+.pack-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--gray-bg);
+  color: var(--muted);
+  font-size: 12px;
+}
+/* 作業場なしの注記 */
+.pack-note {
+  margin: 0;
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+/* 段の「作ったファイル」（作業場の成果のダウンロード） */
+.stage-files {
+  display: inline-block;
+  margin-top: 6px;
+  font-size: 13px;
+}
+/* 棚の絞り込み（言葉の検索と分類の札） */
+.packs-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.packs-cats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.packs-cat {
+  min-height: 36px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+}
+.packs-cat[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.packs-empty {
+  gap: 12px;
+  align-items: flex-start;
+}
+.packs-empty p {
+  margin: 0;
+}
+/* 棚に並ぶ小さな札（広い画面では2列） */
+.packs-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+@media (min-width: 720px) {
+  .packs-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+.packs-grid > li {
+  display: flex;
+  min-width: 0;
+}
+.pack-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: 100%;
+  color: var(--text);
+  text-decoration: none;
+}
+.pack-tile:hover {
+  background: var(--surface);
+}
+.pack-tile-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.pack-tile-name {
+  font-size: 17px;
+  font-weight: 700;
+}
+.pack-tile-tagline {
+  margin-top: 4px;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.pack-tile-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  margin-top: auto;
+  padding-top: 10px;
+}
+.pack-tile-foot .row-meta {
+  white-space: nowrap;
+}
+.pack-tile-avatars {
+  display: flex;
+}
+.pack-tile-avatars > * + * {
+  margin-left: -8px;
+}
+/* 入れてあるパックの札：作業場へ入れることを示す小さな印 */
+.pack-tile-enter {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: auto;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.pack-tile-enter .chev {
+  color: currentColor;
+}

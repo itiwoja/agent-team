@@ -1,0 +1,150 @@
+/* 回答・報告の本文（components/Markdown.tsx）。文字の大きさは置かれた場所（.answer-text・.row-detail）を引き継ぐ */
+/* 並びは block の流れで取る（子の間の余白は margin で決める）。grid の gap は置かれた場所の指定に左右されるため使わない */
+.md {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+.md-p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+/* 段落・箇条書き・表の間は 0.7em。見出しの前後は下の .md .md-h で別に決める */
+.md > :not(:first-child) {
+  margin-top: 0.7em;
+}
+/* 見出し：縦の棒は付けず、字の大きさと太さだけで段を分ける */
+.md .md-h {
+  margin: 1.2em 0 0.4em;
+  padding: 0;
+  border: 0;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+.md h2 {
+  font-size: 17px;
+}
+.md h3 {
+  font-size: 16px;
+}
+.md h4 {
+  font-size: 15px;
+}
+.md > .md-h + * {
+  margin-top: 0.4em;
+}
+.md-list {
+  margin: 0;
+  padding-left: 1.4em;
+  line-height: 1.7;
+}
+.md-list > li + li {
+  margin-top: 4px;
+}
+.md-list li::marker {
+  color: var(--muted);
+}
+.md-li-1 {
+  margin-left: 1.2em;
+}
+.md-li-2 {
+  margin-left: 2.4em;
+}
+.md-li-3 {
+  margin-left: 3.6em;
+}
+/*
+ * 表はスマホ幅で横に溢れる。溢れている側の端にだけ影を出して続きがあることを示す
+ * （背景の層を local と scroll で重ねる：端まで来ると面の色の層が影を隠す。JS なし）
+ */
+.md-table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 12px;
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(90deg, var(--surface) 40%, transparent),
+    linear-gradient(270deg, var(--surface) 40%, transparent),
+    linear-gradient(90deg, var(--line), transparent),
+    linear-gradient(270deg, var(--line), transparent);
+  background-position:
+    left center,
+    right center,
+    left center,
+    right center;
+  background-size:
+    40px 100%,
+    40px 100%,
+    16px 100%,
+    16px 100%;
+  background-repeat: no-repeat;
+  background-attachment: local, local, scroll, scroll;
+  scrollbar-width: thin;
+}
+.md-table {
+  border-collapse: collapse;
+  min-width: 100%;
+  font-size: 14px;
+  line-height: 1.5;
+}
+/* セルは1行に収める（列が潰れて1文字ずつ折れないよう、箱の中で横に流す）。最初の列だけは折り返す */
+.md-table th,
+.md-table td {
+  padding: 10px 12px;
+  text-align: left;
+  white-space: nowrap;
+  vertical-align: top;
+}
+.md-table th:first-child,
+.md-table td:first-child {
+  white-space: normal;
+  min-width: 7em;
+  /* 商品名などは文節で折る（「ハウスブレ／ンド」と切らない） */
+  word-break: auto-phrase;
+  overflow-wrap: anywhere;
+}
+.md-table th {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  border-bottom: 1px solid var(--line);
+}
+.md-table tr + tr td {
+  border-top: 1px solid var(--line);
+}
+.md-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.88em;
+  padding: 0.1em 0.35em;
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+/* 表の中は表の地（--surface）と同じ色になるので一段濃くして見分けを残す */
+.md-table .md-code {
+  background: var(--surface-2);
+}
+.md-rule {
+  width: 100%;
+  height: 1px;
+  margin: 2px 0;
+  border: 0;
+  background: var(--line);
+}
+/* 先頭の要素は上の余白を持たない（見出しで始まる本文の頭を詰める） */
+.md > :first-child {
+  margin-top: 0;
+}
+/* リンク（出典）：URL は見せず題名だけ。押すと新しいタブで開く */
+.md-link {
+  color: inherit;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}

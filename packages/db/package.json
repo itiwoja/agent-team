@@ -1,0 +1,37 @@
+{
+  "name": "@open-team/db",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./sim": "./src/sim/index.ts",
+    "./gateway": "./src/repo/gateway.ts",
+    "./edge": "./src/repo/edge.ts",
+    "./app": "./src/repo/app.ts",
+    "./check": "./src/repo/check.ts",
+    "./seed": "./src/repo/seed.ts",
+    "./asks": "./src/repo/asks.ts",
+    "./agents": "./src/repo/agents.ts",
+    "./sandbox": "./src/repo/sandbox.ts",
+    "./rehearsal": "./src/repo/rehearsal.ts",
+    "./rehearsal-tighten": "./src/repo/rehearsal-tighten.ts",
+    "./testing": "./src/testing.ts"
+  },
+  "scripts": {
+    "migrate": "node --env-file-if-exists=../../.env src/migrate.ts",
+    "typecheck": "tsc -p .",
+    "test": "vitest run --passWithNoTests",
+    "test:db:stop": "docker rm -f ot-db-test"
+  },
+  "dependencies": {
+    "@open-team/kernel": "workspace:*",
+    "postgres": "^3.4.9",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "fast-check": "^4.10.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}

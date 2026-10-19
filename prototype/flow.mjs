@@ -1,0 +1,11 @@
+import { chromium } from "playwright";
+const b = await chromium.launch({ channel: "chrome" });
+const p = await b.newPage({ viewport: { width: 390, height: 844 } });
+await p.goto("http://localhost:5173/"); await p.waitForSelector(".entrance", { timeout: 60000 });
+await p.goto("http://localhost:5173/asks/d5df9446-ddb4-4b61-99fd-c73993482984"); await p.waitForTimeout(2000);
+await p.click("text=言い方を変えて頼む"); await p.waitForTimeout(1200);
+console.log(p.url(), JSON.stringify(await p.inputValue("#ask-input")), await p.evaluate(() => document.activeElement?.id));
+await p.click('button[aria-label="メニュー"]'); await p.waitForTimeout(1000);
+await p.click(".drawer-ask >> nth=0"); await p.waitForTimeout(1500);
+console.log(p.url(), await p.$(".drawer") === null ? "drawer closed" : "drawer open");
+await b.close();

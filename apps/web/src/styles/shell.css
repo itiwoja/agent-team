@@ -1,0 +1,352 @@
+/* 画面の外枠（D-100）：AppHeader・メニュー（左ドロワー）・確認シート・バナー・入口トークン画面 */
+/* 入口（トークン）・準備中 */
+.center {
+  min-height: 100dvh;
+  max-width: 360px;
+  margin: 0 auto;
+  padding: 0 var(--gutter);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 12px;
+}
+.entry {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* 画面を移ったとき main にフォーカスを移す（見える輪は出さない） */
+.screen:focus {
+  outline: none;
+}
+
+/* 見つからないページ */
+.notfound {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding-top: 24px;
+}
+
+/* AppHeader：線なし・半透明 */
+.appheader {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: calc(env(safe-area-inset-top) + 6px) 8px 6px;
+  min-height: 56px;
+  background: color-mix(in srgb, var(--bg) 82%, transparent);
+  backdrop-filter: saturate(1.8) blur(16px);
+}
+.appheader-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  justify-content: center;
+}
+.appheader-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.appheader-back:active {
+  background: var(--surface);
+}
+.icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  border-radius: 999px;
+}
+.icon-btn:active {
+  background: var(--surface);
+}
+/* 右上のチェックへの入口（見てほしいものがあるときだけ）。件数は右上の小さな印。送る前の確認があれば琥珀 */
+.appheader-check {
+  position: relative;
+  flex: none;
+  width: 44px;
+  color: var(--text);
+}
+.appheader-badge {
+  position: absolute;
+  top: 4px;
+  right: 2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  box-shadow: 0 0 0 2px var(--bg);
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.appheader-badge.is-gate {
+  background: var(--amber);
+  color: var(--bg);
+}
+/* 右側の空き。左のメニューボタンと同じ幅にして、タイトルを中央に保つ */
+.appheader-spacer {
+  flex: none;
+  width: 44px;
+}
+.banner {
+  margin: 0 12px;
+  padding: 10px 14px;
+  border-radius: 14px;
+  font-size: 13px;
+  font-weight: 600;
+}
+.banner-danger {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.banner-muted {
+  margin-top: 8px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 400;
+}
+
+/* 左から出るメニュー（prototype の .drawer に合わせる） */
+.drawer-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  background: rgb(0 0 0 / 0.35);
+  animation: fade 0.18s ease-out;
+}
+.drawer {
+  position: fixed;
+  z-index: 41;
+  inset: 0 auto 0 0;
+  width: min(84vw, 320px);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: calc(env(safe-area-inset-top) + 12px) 10px calc(env(safe-area-inset-bottom) + 12px);
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+  animation: slide 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.drawer-head .drawer-new {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 0;
+}
+.drawer-new,
+.drawer-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  font-size: 15px;
+  text-decoration: none;
+  color: var(--text);
+}
+.drawer-new {
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+.drawer-new > span:nth-child(2),
+.drawer-item > span:not(.count) {
+  flex: 1;
+  min-width: 0;
+}
+.drawer-note {
+  margin: 0;
+  padding: 0 12px 8px;
+}
+.drawer-restart {
+  margin: 0 12px 8px;
+  justify-self: start;
+}
+.drawer-nav {
+  flex: 1;
+  overflow-y: auto;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 2px;
+  /* フォーカスの輪（outline-offset 2px）が overflow で切れないよう左右に余白 */
+  padding: 0 4px;
+  margin: 0 -4px;
+}
+.logo {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 15px;
+}
+.drawer-new:active,
+.drawer-item:active {
+  background: var(--surface);
+}
+.drawer-item.is-current {
+  background: var(--surface);
+  font-weight: 600;
+}
+.drawer-item svg {
+  color: var(--muted);
+}
+/* 未読の件数。赤は停止・失敗の意味に取っておく */
+.count {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 12px;
+  font-weight: 700;
+  display: grid;
+  place-items: center;
+}
+.drawer-foot {
+  border-top: 1px solid var(--line);
+  padding-top: 12px;
+  display: flex;
+}
+@keyframes slide {
+  from {
+    transform: translateX(-100%);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+/* 確認シート（prototype の .sheet-backdrop / .sheet。web はバックドロップとシートが兄弟要素） */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgb(0 0 0 / 0.4);
+  animation: fade 0.18s ease-out;
+}
+.sheet {
+  position: fixed;
+  z-index: 51;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 8px 20px calc(env(safe-area-inset-bottom) + 20px);
+  border-radius: 24px 24px 0 0;
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  animation: sheet-up 0.2s ease-out;
+}
+/* 下からスライドして上がる（reduced-motion では下の全体の停止で出ない） */
+@keyframes sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+}
+.sheet-grip {
+  width: 36px;
+  height: 5px;
+  border-radius: 5px;
+  background: var(--surface-2);
+  margin: 4px auto 4px;
+}
+.sheet-title {
+  font-size: 20px;
+  letter-spacing: -0.015em;
+  margin: 4px 0 0;
+}
+.sheet-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 8px;
+}
+/* 手元で押し間違えないよう、スマホでは縦に積む（上が主のボタン、下がキャンセル） */
+.sheet-actions-stack {
+  grid-template-columns: 1fr;
+}
+.sheet-actions-stack .btn {
+  width: 100%;
+}
+.sheet-body {
+  margin: 0;
+}
+@media (min-width: 768px) {
+  /* 横並び・右寄せ。DOM では主のボタンを先に置いているので、見た目だけ後ろへ回す */
+  .sheet-actions-stack {
+    grid-template-columns: auto auto;
+    justify-content: end;
+  }
+  .sheet-actions-stack .btn {
+    width: auto;
+    min-width: 120px;
+  }
+  .sheet-actions-stack .btn-danger {
+    order: 2;
+  }
+}
+
+/* メニューの Google カレンダーの行（切断は一度だけ押せる小さな操作） */
+.drawer-gcal {
+  display: grid;
+  gap: 4px;
+  justify-items: start;
+  padding-bottom: 8px;
+}
+.drawer-gcal .drawer-restart {
+  margin: 0 12px;
+}
+.drawer-gcal p {
+  margin: 0 12px;
+}
+.drawer-gcal > a,
+.drawer-toggle {
+  margin: 0 12px;
+}
+.drawer-toggle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  cursor: pointer;
+}

@@ -1,0 +1,495 @@
+/* パックの作業場（/packs/:packId。screens/PackWorkspace.tsx）：部屋（床）に担当の机が並び、吹き出しで話す。
+   色は土台のトークン（モノクロ・面3段）だけを使う。動きは控えめにし、動きを減らす設定では止める */
+.pw {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* 見出し：誰向け・パック名・売り文句。右に [入れる] か「入っています」 */
+.pw-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+/* [入れる] は1行のまま（styles.css の .btn の text-wrap: balance が white-space: nowrap を打ち消すので、ここで折り返しを止める） */
+.pw-head .btn {
+  flex: none;
+  text-wrap: nowrap;
+}
+.pw-head-main {
+  min-width: 0;
+}
+.pw-kicker {
+  font-size: 13px;
+  color: var(--muted);
+}
+.pw-name {
+  margin-top: 2px;
+}
+.pw-tagline {
+  margin-top: 4px;
+  font-weight: 600;
+}
+.pw-description {
+  font-size: 14px;
+}
+.pw-done {
+  color: var(--green);
+  font-size: 14px;
+}
+.pw-section {
+  font-size: 15px;
+  font-weight: 700;
+}
+
+/* 部屋：くぼんだ面（--surface）に点の床。入っていないときは灯りが落ちて机が薄い */
+.pw-room {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: var(--radius);
+  background-color: var(--surface);
+  background-image: radial-gradient(color-mix(in srgb, var(--muted) 22%, transparent) 1px, transparent 1.2px);
+  background-size: 18px 18px;
+}
+.pw-room-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 4px;
+}
+.pw-room-title {
+  font-size: 15px;
+}
+.pw-room-title:focus {
+  outline: none;
+}
+.pw-room-title:focus-visible {
+  outline: 2px solid var(--accent);
+}
+.pw-room-meta {
+  font-size: 13px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.pw-room-note {
+  padding: 0 4px;
+}
+
+/* 机の並び：狭い画面は 1 列、幅があれば 2〜3 列 */
+.pw-desks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 12px;
+}
+
+/* 机：上に吹き出し、左にアイコンと机の上のノート、右に名前・すること・持ち物 */
+.pw-desk {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr);
+  grid-template-areas:
+    "bubble bubble"
+    "seat body";
+  gap: 6px 12px;
+  padding: 12px 14px 14px;
+  border-radius: var(--radius);
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+  min-width: 0;
+  transition:
+    opacity 0.3s ease,
+    box-shadow 0.3s ease;
+}
+.pw-room.is-vacant .pw-desk {
+  /* 薄くするのは面だけ（文字まで薄めると読めない：コントラスト 2.5:1 になっていた） */
+  box-shadow: none;
+  background: color-mix(in srgb, var(--elevated) 55%, transparent);
+}
+.pw-room.is-vacant .pw-desk-summary,
+.pw-room.is-vacant .pw-kit-item {
+  color: var(--muted);
+}
+.pw-room.is-vacant .pw-seat .avatar {
+  filter: grayscale(0.7);
+}
+
+/* 吹き出しの置き場（高さを取っておき、話す・黙るで机が跳ねないようにする） */
+.pw-bubble-slot {
+  grid-area: bubble;
+  min-height: 44px;
+  display: flex;
+  align-items: flex-end;
+}
+.pw-bubble {
+  position: relative;
+  max-width: 100%;
+  padding: 6px 12px;
+  border-radius: 14px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.45;
+  margin-bottom: 6px;
+  transform-origin: 20px 100%;
+  animation: pw-bubble-in 0.32s cubic-bezier(0.34, 1.4, 0.64, 1) both;
+}
+.pw-bubble-text {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+/* しっぽ（下のアイコンへ向ける。色は吹き出しの地と同じ） */
+.pw-bubble::after {
+  content: "";
+  position: absolute;
+  left: 20px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  background: inherit;
+  transform: rotate(45deg);
+  border-radius: 0 0 2px 0;
+}
+/* 案内（入れていないとき）は線だけの静かな吹き出しにして、しっぽは付けない */
+.pw-bubble.is-guide::after {
+  content: none;
+}
+.pw-bubble.is-ambient {
+  color: var(--muted);
+}
+.pw-bubble.is-guide {
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 0 0 1px var(--line);
+  animation: none;
+}
+/* 頼まれた瞬間の反応：塗りでぱっと返す */
+.pw-bubble.is-reaction {
+  background: var(--accent);
+  color: var(--accent-text);
+  font-weight: 600;
+  animation-delay: calc(var(--i, 0) * 0.07s);
+}
+.pw-bubble.is-status {
+  background: var(--amber-bg);
+  color: var(--amber);
+  font-weight: 600;
+}
+.pw-bubble.is-joined {
+  background: var(--green-bg);
+  color: var(--green);
+  font-weight: 600;
+}
+@keyframes pw-bubble-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px) scale(0.92);
+  }
+}
+
+/* 席：アイコンと、机の上のノート（画面が光って、担当が手を動かしている） */
+.pw-seat {
+  grid-area: seat;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.pw-laptop {
+  position: relative;
+  width: 34px;
+  height: 12px;
+  border-radius: 3px 3px 1px 1px;
+  background: var(--surface-2);
+  box-shadow: inset 0 0 0 1px var(--line);
+  overflow: hidden;
+}
+.pw-laptop::after {
+  /* 机の天板 */
+  content: "";
+  position: absolute;
+  left: -6px;
+  right: -6px;
+  bottom: 0;
+  height: 2px;
+  background: var(--muted);
+  opacity: 0.4;
+}
+.pw-laptop-lines {
+  position: absolute;
+  left: 5px;
+  top: 3px;
+  height: 2px;
+  width: 0;
+  border-radius: 1px;
+  background: var(--muted);
+  opacity: 0.6;
+}
+/* 待機中も手は止めない（ゆっくり書いては消す）。動いているときは速く */
+.pw-desk.is-ambient .pw-laptop-lines,
+.pw-desk.is-none .pw-laptop-lines {
+  animation: pw-type 3.6s steps(6, end) infinite;
+  animation-delay: calc(var(--i, 0) * -1.1s);
+}
+.pw-desk.is-reaction .pw-laptop-lines,
+.pw-desk.is-status .pw-laptop-lines,
+.pw-desk.is-joined .pw-laptop-lines {
+  background: var(--amber);
+  opacity: 1;
+  animation: pw-type 0.9s steps(6, end) infinite;
+}
+.pw-room.is-vacant .pw-laptop-lines {
+  animation: none;
+}
+@keyframes pw-type {
+  0% {
+    width: 0;
+  }
+  80%,
+  100% {
+    width: 24px;
+  }
+}
+
+.pw-desk-body {
+  grid-area: body;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+.pw-desk-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+}
+.pw-desk-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.pw-desk-summary {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+/* 持ち物の札（スキル＝手順書、ファイル＝等幅） */
+.pw-kit {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 2px;
+}
+.pw-kit-item {
+  max-width: 100%;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: var(--surface);
+  font-size: 12px;
+  line-height: 1.6;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pw-kit-item.is-file {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+/* 関わった依頼の最新 1 件（机の下に小さく） */
+.pw-desk-ask {
+  display: block;
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px solid var(--line);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pw-desk-ask:hover .pw-desk-ask-text {
+  text-decoration: underline;
+}
+
+/* この依頼に入った机：縁が光る（数回脈打ってから灯ったまま） */
+.pw-desk.is-glow {
+  box-shadow:
+    0 0 0 2px var(--green),
+    var(--shadow);
+  animation: pw-glow 1.2s ease-in-out 3;
+}
+@keyframes pw-glow {
+  50% {
+    box-shadow:
+      0 0 0 2px var(--green),
+      0 0 0 8px color-mix(in srgb, var(--green) 18%, transparent),
+      var(--shadow);
+  }
+}
+/* 応援：作業場の端にぽんと現れる */
+.pw-desk.is-helper {
+  animation:
+    pw-helper-in 0.45s ease both,
+    pw-glow 1.2s ease-in-out 0.45s 3;
+  animation-delay: calc(var(--i, 0) * 0.25s), calc(var(--i, 0) * 0.25s + 0.45s);
+}
+@keyframes pw-helper-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* 頼む欄 */
+.pw-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pw-composer textarea:disabled {
+  cursor: default;
+}
+.pw-examples {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.pw-example {
+  height: auto;
+  min-height: 36px;
+  padding: 6px 14px;
+  text-align: left;
+  line-height: 1.4;
+  white-space: normal;
+  background: var(--surface);
+  border: 0;
+  color: var(--text);
+  /* styles.css の .chip は flex: none。長い例は折り返して、ページを横にはみ出させない */
+  flex: 0 1 auto;
+  max-width: 100%;
+}
+.pw-example:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.pw-examples-static {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.pw-examples-static li {
+  padding: 8px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+
+/* 依頼の生成の進み（読み上げは polite） */
+.pw-live:empty {
+  display: none;
+}
+.pw-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: var(--surface);
+  animation: pw-bubble-in 0.3s ease both;
+}
+.pw-progress-line {
+  font-weight: 600;
+}
+.pw-progress-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
+.pw-question {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+  border-radius: 16px;
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+}
+.pw-question-text {
+  margin: 0;
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+/* スキル（手順書）の棚：折りたたみ */
+.pw-shelf {
+  border-radius: 16px;
+  background: var(--surface);
+}
+.pw-shelf > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 14px;
+  cursor: pointer;
+  list-style: none;
+}
+.pw-shelf > summary::-webkit-details-marker {
+  display: none;
+}
+.pw-shelf > summary::after {
+  content: "";
+  margin-left: auto;
+  align-self: center;
+  width: 7px;
+  height: 7px;
+  border-right: 1.5px solid var(--muted);
+  border-bottom: 1.5px solid var(--muted);
+  transform: rotate(45deg) translateY(-2px);
+  transition: transform 0.2s ease;
+}
+.pw-shelf[open] > summary::after {
+  transform: rotate(-135deg) translateY(-2px);
+}
+.pw-shelf-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 14px 14px;
+}
+.pw-shelf-list li {
+  display: flex;
+  flex-direction: column;
+}
+.pw-skill-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+.pw-shelf-list .row-meta {
+  margin-top: 0;
+}
+
+/* 動きを減らす設定：吹き出しの出入り・手元・光の脈打ちを止める（文は JS 側で交代しない） */
+@media (prefers-reduced-motion: reduce) {
+  .pw-bubble,
+  .pw-progress,
+  .pw-desk,
+  .pw-desk.is-glow,
+  .pw-desk.is-helper,
+  .pw-laptop-lines {
+    animation: none !important;
+    transition: none !important;
+  }
+  .pw-laptop-lines {
+    width: 16px;
+  }
+}

@@ -1,0 +1,495 @@
+/*
+ * 土台（D-100・T0）：prototype/src/styles.css（ChatGPT / Grok 風・モノクロアクセント・面3段・角丸大・ダークモード）に揃えたトークンと共通部品。
+ * 画面別のルールは styles/shell.css・entrance.css・check.css・ask.css に置く。
+ *
+ * 旧 web の変数名 → 新（prototype）の対応表
+ *   --fg        → --text
+ *   --accent-fg → --accent-text
+ *   --danger    → --red
+ *   --warn-bg   → --surface（面の1段目）
+ *   --bg        → --bg（同名。白／黒）
+ *   --line      → --line（同名。値のみ変更）
+ *   --muted     → --muted（同名。値のみ変更）
+ *   --accent    → --accent（青 → 黒／白のモノクロ）
+ *   --gap / --gutter / --app-h は web 独自のため残す
+ * 面の3段： --bg（地） / --surface（一段上のくぼみ・入力・チップ） / --elevated（シート・カード。影つき）
+ * クラス名の対応（名前の衝突の解消）
+ *   .check（ラッパー div）→ .check-page   ※ .check は prototype の ○ ボタンの名前として空ける
+ *   .scrim（メニュー）     → .drawer-backdrop,  .menu → .drawer
+ *   .scrim（確認シート）   → .sheet-backdrop,   .sheet は同名のまま（prototype の意味に寄せた）
+ */
+:root {
+  --bg: #ffffff;
+  --surface: #f4f4f4;
+  --surface-2: #ececec;
+  --elevated: #ffffff;
+  --text: #0d0d0d;
+  --muted: #6b6b6b;
+  --line: #e6e6e6;
+  --accent: #0d0d0d;
+  --accent-text: #ffffff;
+  --amber: #a15c00;
+  --amber-bg: #fff3df;
+  --green: #0f6f40;
+  --green-bg: #e3f6ea;
+  --red: #c4271d;
+  --red-bg: #fde9e7;
+  /* 赤い塗りの上の文字（ライトは白、ダークは黒。白のままだと約 2.8:1） */
+  --on-red: #ffffff;
+  --gray-bg: #efefef;
+  --shadow: 0 0 0 1px rgb(0 0 0 / 0.04), 0 8px 28px rgb(0 0 0 / 0.08);
+  --radius: 20px;
+  --gap: 24px;
+  --gutter: 20px;
+  --app-h: 100dvh;
+  color-scheme: light dark;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --surface: #161616;
+    --surface-2: #222222;
+    --elevated: #1c1c1c;
+    --text: #f2f2f2;
+    --muted: #9b9b9b;
+    --line: #2a2a2a;
+    --accent: #f2f2f2;
+    --accent-text: #000000;
+    --amber: #f2b24c;
+    --amber-bg: #33260f;
+    --green: #5fd18a;
+    --green-bg: #11291a;
+    --red: #ff6b5e;
+    --red-bg: #3a1512;
+    --on-red: #000000;
+    --gray-bg: #262626;
+    --shadow: 0 0 0 1px rgb(255 255 255 / 0.06);
+  }
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+html {
+  -webkit-text-size-adjust: 100%;
+}
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+}
+body {
+  font-family: "Inter", system-ui, -apple-system, "SF Pro Text", "Hiragino Sans", "Noto Sans JP", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  letter-spacing: 0.005em;
+  overflow-wrap: anywhere;
+}
+h1,
+h2,
+p {
+  margin: 0;
+}
+h1 {
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+h2 {
+  font-size: 17px;
+  font-weight: 700;
+}
+button,
+input,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+button {
+  cursor: pointer;
+}
+a {
+  color: inherit;
+  text-decoration: none;
+}
+code,
+pre,
+.mono {
+  font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+}
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 6px;
+}
+
+.muted {
+  color: var(--muted);
+}
+/* index.html の #root の骨（JS が読まれる前の「読み込んでいます…」） */
+.boot {
+  position: fixed;
+  inset: 0;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+}
+.small {
+  font-size: 13px;
+}
+.error {
+  color: var(--red);
+  font-size: 14px;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* 外枠。.app は main.tsx で全体を包む */
+.app {
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  max-width: 640px;
+  margin: 0 auto;
+}
+.screen {
+  flex: 1;
+  padding: 8px var(--gutter) 64px;
+}
+
+/* 入力：線でなく面（--surface）で示す */
+label {
+  font-size: 14px;
+  color: var(--muted);
+}
+input,
+textarea {
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 14px;
+  border: 0;
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 16px; /* iOS の自動ズームを避ける */
+}
+input::placeholder,
+textarea::placeholder {
+  color: var(--muted);
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline-offset: 0;
+  border-radius: 16px;
+}
+
+/* ボタン：ピル型。塗り（.btn-primary）は主要な操作だけ */
+.btn {
+  min-height: 44px;
+  padding: 0 18px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 15px;
+  white-space: nowrap;
+}
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+.btn-primary {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.btn-danger {
+  background: var(--red);
+  color: var(--on-red);
+}
+/* Link をボタンの見た目にしたとき（a は inline なので高さがつかない） */
+a.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.btn-ghost {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px var(--line);
+}
+.round-btn {
+  width: 44px;
+  height: 44px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  border: 0;
+  padding: 0;
+}
+.round-btn.ghost {
+  background: transparent;
+  color: var(--text);
+}
+.round-btn.solid {
+  background: var(--accent);
+  color: var(--accent-text);
+}
+.icon-btn {
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: transparent;
+  border-radius: 999px;
+}
+.icon-btn:active {
+  background: var(--surface);
+}
+.chip {
+  flex: none;
+  min-height: 38px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--bg);
+  font-size: 14px;
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* 読み込み中の骨（components/Skeleton.tsx）。地は --surface、光の帯は --elevated が左→右に流れる */
+.skel {
+  display: grid;
+  gap: 12px;
+  padding-top: 8px;
+}
+.skel-rows {
+  gap: 14px;
+  padding: 8px 0;
+}
+.skel-card {
+  display: grid;
+  gap: 10px;
+  padding: 18px;
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.skel-card.is-lg {
+  min-height: 176px;
+}
+.skel-card.is-sm {
+  min-height: 96px;
+}
+.skel-line {
+  position: relative;
+  display: block;
+  width: 100%;
+  height: 14px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.skel-line.skel-title {
+  width: 42%;
+  height: 18px;
+}
+.skel-line.skel-head {
+  width: 50%;
+  height: 24px;
+  margin-bottom: 4px;
+}
+.skel-line.skel-short {
+  width: 58%;
+}
+.skel-line::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, var(--elevated), transparent);
+  animation: skel-shimmer 1.4s ease-in-out infinite;
+}
+@keyframes skel-shimmer {
+  to {
+    transform: translateX(100%);
+  }
+}
+
+/* 読み込めなかったとき（components/LoadError.tsx）：理由と「もう一度」を左に揃えて縦に */
+.load-error {
+  display: grid;
+  justify-items: start;
+  gap: 10px;
+  padding-top: 8px;
+}
+.load-error .error {
+  margin: 0;
+}
+
+/* 画面が変わったとき、中身をふわっと出す（main.tsx の Screens。reduced-motion では下の全体の停止で消える） */
+.screen-enter {
+  animation: screen-enter 160ms ease-out backwards;
+}
+@keyframes screen-enter {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skel-line::after {
+    display: none;
+  }
+}
+
+/* 日本語の短い文（見出し・題・ボタン・札）は文節で折り返す（「てくださ／い」のように語の途中で切らない）。
+   対応していないブラウザでは今までどおりの折り返しになる */
+h1,
+h2,
+h3,
+h4,
+.hero,
+.row-title,
+.ask-title,
+.btn,
+.chip,
+.error,
+.ask-failed-message {
+  word-break: auto-phrase;
+  text-wrap: balance;
+}
+
+/* 開閉・移動の印（ui/icons.tsx の Chevron）。開ける印は開くと上を向く。文字の ＞ ∧ ▾ をやめて線で揃える */
+.chev {
+  flex: none;
+  vertical-align: middle;
+  color: var(--muted);
+  transition: transform 0.2s ease;
+}
+.chev-down.is-open {
+  transform: rotate(180deg);
+}
+.stage-chevron,
+.agent-chevron,
+.cert-chevron,
+.scenario-chevron,
+.done-chev {
+  display: inline-flex;
+  align-items: center;
+}
+/* 押すと移る印は、押せる面の上で少し右へ寄る */
+@media (hover: hover) {
+  a:hover > .chev-right,
+  button:hover > .chev-right,
+  a:hover > .stage-chevron > .chev-right,
+  button:hover > .stage-chevron > .chev-right,
+  a:hover > .done-chev > .chev-right {
+    transform: translateX(2px);
+  }
+}
+
+/* 押せるものの手ごたえ：マウスがあるときだけホバーで面を少し濃くし、押している間は少し縮む（タッチでは :active だけ） */
+.btn,
+.chip,
+.icon-btn,
+.round-btn,
+.undo-btn,
+.packs-cat,
+.drawer-item,
+.drawer-new,
+.link.quiet,
+.running-toggle,
+.turn-folded,
+.agent-ask,
+.pack-tile,
+.done-card.is-link,
+.rehearsal-pill,
+.row-foot .clamp-toggle,
+.row-foot .row-link {
+  transition:
+    background-color 0.15s ease,
+    color 0.15s ease,
+    box-shadow 0.15s ease,
+    transform 0.12s ease,
+    opacity 0.15s ease;
+}
+@media (hover: hover) {
+  .btn:not(:disabled):hover {
+    background: var(--surface-2);
+  }
+  .btn-primary:not(:disabled):hover,
+  .round-btn.solid:not(:disabled):hover {
+    background: color-mix(in srgb, var(--accent) 84%, var(--bg));
+  }
+  .btn-ghost:not(:disabled):hover {
+    background: var(--surface);
+  }
+  .btn-danger:not(:disabled):hover {
+    background: color-mix(in srgb, var(--red) 86%, var(--bg));
+  }
+  .chip:not(:disabled):hover,
+  .icon-btn:not(:disabled):hover,
+  .round-btn.ghost:not(:disabled):hover,
+  .drawer-item:hover,
+  .drawer-new:hover,
+  .packs-cat:not([aria-pressed="true"]):hover,
+  .appheader-back:hover {
+    background: var(--surface);
+  }
+  .undo-btn:hover,
+  .turn-folded:hover,
+  .rehearsal-pill:hover,
+  .row-foot .clamp-toggle:hover,
+  .row-foot .row-link:hover {
+    background: var(--surface-2);
+  }
+  .link.quiet:not(:disabled):hover,
+  .running-toggle:hover {
+    color: var(--text);
+  }
+  /* 面を持つ li の中の開閉ボタン：面ごと少し濃くする（ボタン自体は透明） */
+  .stage-list > li:has(> .stage > .stage-main > .stage-toggle:not(:disabled):hover),
+  .row.agent:has(> .agent-toggle:hover) {
+    background-color: var(--surface-2);
+  }
+  .row:has(> .row-top > .row-main:hover) {
+    border-color: color-mix(in srgb, var(--text) 18%, var(--line));
+  }
+  .done-card.is-link:hover {
+    background: var(--surface);
+  }
+}
+.btn:not(:disabled):active,
+.chip:not(:disabled):active,
+.round-btn:not(:disabled):active,
+.undo-btn:active,
+.packs-cat:active,
+.rehearsal-pill:active,
+.row-foot .clamp-toggle:active,
+.row-foot .row-link:active {
+  transform: scale(0.97);
+}
+.turn-folded:active,
+.agent-ask:active,
+.pack-tile:active,
+.done-card.is-link:active {
+  transform: scale(0.99);
+}

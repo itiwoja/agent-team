@@ -1,0 +1,50 @@
+# ローカルの開発・計測用（フェーズ0、G-11）。Cloud Run（フェーズ0-H）では使わない。
+# - db：PostgreSQL 16（Cloud SQL と同じ大きい版）。次の段階（packages/db・マイグレーション）の DB。データはボリューム ot-pgdata に残る
+#   つなぎ先の例：DATABASE_URL=postgres://postgres:<POSTGRES_PASSWORD>@localhost:5432/open_team
+# - sim-world：模擬の世界（DEPLOYMENT_MODE=local）。計測（scripts/measure）・ローカルの app は http://localhost:8081 を呼ぶ
+# 起動：docker compose up -d --build ／ 止める：docker compose down（DB のデータも消すなら down -v）
+# ポートは 127.0.0.1 だけに開く（同じネットワークのほかの機械から届かない）。変えるときは .env に OT_DB_PORT・OT_SIM_WORLD_PORT
+name: open-team
+
+services:
+  db:
+    # digest で固定（15 §サプライチェーン）。更新：docker buildx imagetools inspect postgres:16-bookworm
+    image: postgres:16.15-bookworm@sha256:efedf3595f1d6f415c08568ba171029bf54052e754cc9f030e3f2412b21f3d67
+    environment:
+      POSTGRES_DB: open_team
+      POSTGRES_USER: postgres
+      # ローカル専用。変えるなら .env に POSTGRES_PASSWORD（ボリュームを作ったあとに変えても効かない：down -v で作り直す）
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "127.0.0.1:${OT_DB_PORT:-5432}:5432"
+    volumes:
+      - ot-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d open_team"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  sim-world:
+    build:
+      context: .
+      dockerfile: apps/sim-world/Dockerfile
+    environment:
+      # ローカルは Cloud Run の ID トークンがないので、呼び出し元を共有トークンで確かめる（mcp-taint D-12、G-11）
+      DEPLOYMENT_MODE: local
+      PORT: "8080"
+      # 呼ぶ側（計測・ローカルの app）と同じ値を .env に入れる。32文字以上（例：openssl rand -base64 32）
+      SIM_WORLD_SHARED_TOKEN: ${SIM_WORLD_SHARED_TOKEN:?.env に SIM_WORLD_SHARED_TOKEN（32文字以上）を入れる}
+      # sim-world の env.ts は呼び出し元のトークンを INTERNAL_SHARED_TOKEN で読む。呼ぶ側の SIM_WORLD_SHARED_TOKEN と同じ値にする
+      INTERNAL_SHARED_TOKEN: ${SIM_WORLD_SHARED_TOKEN}
+    ports:
+      - "127.0.0.1:${OT_SIM_WORLD_PORT:-8081}:8080"
+    healthcheck:
+      # slim のイメージに curl はないので node で /api/health を見る（/healthz は Cloud Run の予約パス）
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8080/api/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+
+volumes:
+  ot-pgdata:

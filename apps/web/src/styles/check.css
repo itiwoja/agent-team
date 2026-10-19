@@ -1,0 +1,565 @@
+/* SCR-019 チェック・済んだもの・CheckRow（prototype/src/styles.css に揃える。D-100） */
+.check-page .ask-head {
+  display: block;
+  font-size: 24px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 20px;
+}
+.check-page .ask-head .ask-count {
+  font-weight: 400;
+  color: var(--muted);
+  margin-left: 4px;
+}
+.check-page .ask-head .muted {
+  font-weight: 500;
+  font-size: 20px;
+}
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+/* 行は1枚ずつのカードにして、題・本文が次の行と続いて見えないようにする */
+.row {
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  scroll-margin-top: 72px;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--elevated);
+  min-width: 0;
+}
+.row.is-open {
+  box-shadow: var(--shadow);
+}
+/* 種類の札（報告・失敗・質問・送る前の確認） */
+.row-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 4px;
+}
+.row-kind {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--gray-bg);
+  color: var(--muted);
+}
+.row-kind.failed {
+  background: var(--red-bg);
+  color: var(--red);
+}
+.row-kind.gate,
+.row-kind.ask {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.row-kind.wait {
+  background: var(--surface);
+}
+.row-top {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.row-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  text-align: left;
+  white-space: normal;
+  display: grid;
+  align-content: start;
+  gap: 2px;
+  font-weight: 400;
+}
+.row-title {
+  font-size: 16px;
+  font-weight: 650;
+  line-height: 1.45;
+  letter-spacing: -0.01em;
+}
+/* 閉じている行の題は2行まで（全文は開くと出る） */
+.row:not(.is-open) .row-main .row-title {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+}
+/* 失敗の赤は札（「失敗」）だけ。題は通常の色のまま */
+.row-title.failed {
+  color: var(--text);
+}
+.row-dest {
+  font-size: 16px;
+  font-weight: 500;
+}
+.row-meta {
+  font-size: 13px;
+  color: var(--muted);
+  margin-top: 4px;
+}
+/* 回答の行：どの頼みごとへの回答か（1行に切る） */
+.row-request {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+.row-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.row.done .row-title {
+  font-weight: 500;
+}
+.reason {
+  margin: 0 0 4px;
+  font-size: 15px;
+}
+.reason strong {
+  font-weight: 700;
+}
+
+/* 予定の登録の確認（16 §3.7）：題名・日時・場所を小さな札に。招待する人は琥珀で強調 */
+.gcal-card {
+  margin-top: 10px;
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  font-size: 14px;
+}
+.gcal-card p {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.gcal-title {
+  font-size: 15px;
+  font-weight: 700;
+}
+.gcal-when {
+  font-weight: 500;
+}
+.gcal-where {
+  color: var(--muted);
+}
+.gcal-people {
+  margin-top: 2px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-weight: 650;
+  color: var(--amber);
+}
+.gcal-people-label {
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--amber-bg);
+  font-size: 12px;
+  line-height: 20px;
+  letter-spacing: 0.04em;
+}
+.gcal-invite-note {
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+/* ○：48px のタップ領域。送る前の確認は下に「送る」「許可」 */
+.check {
+  width: 48px;
+  min-height: 48px;
+  flex: none;
+  border: 0;
+  background: none;
+  color: var(--text);
+  padding: 0;
+  display: grid;
+  justify-items: center;
+  align-content: start;
+  gap: 2px;
+}
+/* 輪は細く・薄く（画面で一番強い要素にしない）。hover / focus で --text に濃くなる */
+.check-ring {
+  position: relative;
+  width: 28px;
+  height: 28px;
+  margin-top: 2px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 35%, transparent);
+  transition: background 0.2s ease, box-shadow 0.2s ease;
+}
+/* 押している間、中に印がふわっと出る（押した行はすぐ消えるか、5秒の取り消しに変わる） */
+.check-ring::after {
+  content: "";
+  position: absolute;
+  left: 9px;
+  top: 5px;
+  box-sizing: border-box;
+  width: 8px;
+  height: 14px;
+  border: solid var(--accent-text);
+  border-width: 0 2px 2px 0;
+  transform: rotate(45deg) scale(0.6);
+  opacity: 0;
+  transition: opacity 0.2s ease, transform 0.2s ease;
+}
+.check:not(:disabled):hover .check-ring,
+.check:not(:disabled):focus-visible .check-ring {
+  box-shadow: inset 0 0 0 2px var(--text);
+}
+.check:active .check-ring {
+  background: var(--accent);
+  box-shadow: inset 0 0 0 2px var(--accent);
+}
+.check:active .check-ring::after {
+  opacity: 1;
+  transform: rotate(45deg) scale(1);
+}
+/* 送る前の確認（○＋「送る」「許可」）は意味が重いので、輪を少し濃く残す */
+.check.gate .check-ring {
+  box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--text) 60%, transparent);
+}
+.check-label {
+  font-size: 12px;
+  font-weight: 700;
+}
+.check:disabled {
+  opacity: 0.3;
+}
+
+/* 5秒の取り消し猶予 */
+.undo {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 15px;
+}
+.undo-btn {
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-weight: 600;
+  font-size: 15px;
+}
+.undo-sec {
+  display: inline-block;
+  min-width: 1.2em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 質問の選択肢・自由記述（入口の .choices は中央寄せなので、こちらは左寄せで上書き） */
+.row .choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-start;
+  margin-top: 10px;
+}
+.row .choice {
+  min-height: 44px;
+  padding: 0 18px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-text);
+  font-size: 15px;
+  font-weight: 600;
+}
+.row .choice:disabled {
+  opacity: 0.4;
+}
+.free {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+.free input {
+  flex: 1;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 0;
+  background: var(--surface);
+}
+
+.link {
+  border: 0;
+  background: none;
+  color: var(--text);
+  padding: 4px 0;
+  font-size: 13px;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.link.quiet {
+  color: var(--muted);
+  font-weight: 500;
+  text-decoration: none;
+  min-height: 44px;
+  padding: 0 4px;
+  font-size: 14px;
+  display: inline-flex;
+  align-items: center;
+}
+.link:disabled {
+  opacity: 0.4;
+}
+/* 済んだもの：リンクの左の padding（4px）ぶんだけ戻し、題の左端に揃える（min-height 44px は保つ） */
+.row.done .link.quiet {
+  margin-left: -4px;
+}
+
+/* 開いた中身：題との間に線を引き、本文の段落・見出しの間をあける */
+.row-detail {
+  margin-top: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 14px;
+  font-size: 14.5px;
+  line-height: 1.7;
+  min-width: 0;
+}
+.row-detail p {
+  margin: 0;
+}
+.detail-block {
+  display: grid;
+  gap: 6px;
+}
+.detail-head {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+/* 宛先・中身：項目名と値を左右に並べる */
+.detail-kv {
+  margin: 0;
+  display: grid;
+  gap: 0;
+  border-radius: 12px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.detail-kv > div {
+  display: grid;
+  grid-template-columns: minmax(4.5em, auto) 1fr;
+  gap: 12px;
+  padding: 10px 12px;
+}
+.detail-kv > div + div {
+  border-top: 1px solid var(--line);
+}
+.detail-kv dt {
+  color: var(--muted);
+  font-size: 13px;
+}
+.detail-kv dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.detail-lines {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 13.5px;
+  display: grid;
+  gap: 4px;
+}
+/* 長い本文は畳む（下端をぼかして続きがあることを示す） */
+.clamp.is-clamped {
+  max-height: 260px;
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(180deg, #000 70%, transparent);
+  mask-image: linear-gradient(180deg, #000 70%, transparent);
+}
+.clamp.is-short {
+  max-height: 260px;
+}
+/* フェードの下の行：「全文を見る」「この依頼のページを開く」を並べる（狭いときは折り返す） */
+.row-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.row-foot .clamp-toggle,
+.row-foot .row-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 40px;
+  min-height: 40px;
+  margin: 0;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.pre {
+  white-space: pre-wrap;
+}
+.plain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.detail-actions {
+  display: flex;
+  gap: 16px;
+  align-items: center;
+}
+.inline-form {
+  display: grid;
+  gap: 8px;
+}
+.inline-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+/* やっていること・済んだもの */
+.running {
+  margin-top: 36px;
+}
+.running-toggle {
+  border: 0;
+  background: none;
+  padding: 0;
+  min-height: 44px;
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: var(--muted);
+  font-size: 15px;
+  font-weight: 400;
+}
+.running-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 14.5px;
+}
+.running-list li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  align-items: center;
+  gap: 4px 8px;
+  min-height: 44px;
+}
+.running-list .who {
+  color: var(--text);
+}
+.running-list .link,
+.running-list .btn {
+  flex: none;
+  white-space: nowrap;
+}
+/* 済んだもの：一覧の下の押せる帯（行と同じ高さ・面・角丸）。右に ＞ */
+.done-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 48px;
+  margin-top: 24px;
+  padding: 0 16px;
+  border-radius: 16px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 600;
+  text-decoration: none;
+}
+.done-link .chev {
+  color: var(--muted);
+}
+.done-link:hover {
+  background: var(--gray-bg);
+}
+
+/* 見てほしいものが0件：中央寄せで、やさしく（rows が空のとき。文言は Check.tsx の見出し） */
+.check-page:has(> .rows:empty) {
+  text-align: center;
+}
+.check-page:has(> .rows:empty) .ask-head {
+  margin: 56px 0 0;
+}
+.check-page:has(> .rows:empty) .ask-head::before {
+  content: "";
+  display: block;
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 16px;
+  border-radius: 999px;
+  background: var(--surface);
+}
+.check-page:has(> .rows:empty) .ask-head .muted {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 600;
+}
+
+/* 失敗の行の「やり直す」：見た目は高さ 40px の pill。タップ領域は ::before で上下 2px ずつ広げて 44px 以上にする */
+.row-retry {
+  display: flex;
+  margin-top: 12px;
+}
+.btn-retry {
+  position: relative;
+  height: 40px;
+  min-height: 40px;
+  padding: 0 16px;
+  border: 1px solid var(--text);
+  background: transparent;
+  color: var(--text);
+  font-size: 14px;
+}
+.btn-retry::before {
+  content: "";
+  position: absolute;
+  inset: -2px 0;
+}

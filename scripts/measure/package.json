@@ -1,0 +1,26 @@
+{
+  "name": "@open-team/measure",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "measure": "node src/cli.ts",
+    "typecheck": "tsc -p .",
+    "test": "vitest run --passWithNoTests"
+  },
+  "dependencies": {
+    "@open-team/kernel": "workspace:*",
+    "@open-team/llm": "workspace:*",
+    "@open-team/oracles": "workspace:*",
+    "@open-team/runner": "workspace:*",
+    "@open-team/sim-core": "workspace:*",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.0",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.2"
+  }
+}

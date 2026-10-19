@@ -1,0 +1,103 @@
+# CI（15 §提出物「CI」・§公開時のセキュリティ・§サプライチェーン、D-50・D-51・D-52、SO §4.7）
+# 型の検査・単体テスト・依存の境界（dependency-cruiser）・ワークフローの検査（zizmor）・秘密情報の検査（gitleaks）。
+# main への push は deploy.yml がこのワークフローを呼んでからデプロイする（同じコミットで2回走らせない）。
+# アクションはコミット SHA で固定し、版はコメントに書く。pull_request_target は使わない。
+name: ci
+
+on:
+  push:
+    branches-ignore: [main]
+  pull_request:
+  workflow_call:
+
+# ジョブごとに必要な権限だけを付ける
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  # 古い PR の実行だけ止める（main のデプロイの前の CI は止めない）
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  checks:
+    name: 型・テスト・依存の境界
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read # コードを読むだけ
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # package.json の packageManager（pnpm@10.27.0）を入れる
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.3 # Dockerfile のベースイメージと同じ版
+          cache: pnpm
+
+      # lockfile のまま入れる。3日待ち・install スクリプトなしは pnpm-workspace.yaml の設定（D-50）
+      - name: 依存を入れる
+        id: install
+        run: pnpm install --frozen-lockfile
+
+      # ここから下は1つが落ちても残りを流し、まとめて結果を見られるようにする
+      - name: 型の検査
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm typecheck
+
+      - name: 単体テスト（Kernel・オラクルほか）
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm test
+
+      - name: 依存の境界（runner から DB・Gemini・gateway に届かない。D-52）
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: pnpm lint:deps
+
+      - name: 依存の境界の検査が違反を見つけること（SO-RB-01）
+        if: ${{ !cancelled() && steps.install.outcome == 'success' }}
+        run: node .github/depcruise-selftest/run.mjs
+
+      - name: ベースイメージが digest で固定されていること（SO-SC-02）
+        if: ${{ !cancelled() }}
+        run: node .github/scripts/check-image-digests.mjs
+
+  zizmor:
+    name: ワークフローの検査（zizmor）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read # ワークフローを読むだけ（オンラインの検査も公開の情報だけ読む）
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # 結果はジョブの注釈に出す（Advanced Security への送信は security-events: write が要るので使わない）
+      - uses: zizmorcore/zizmor-action@cc914d7f3750a2d13d75c7f184a1060aa0e9d482 # v0.6.4
+        with:
+          version: 1.30.1
+          advanced-security: false
+          annotations: true
+
+  gitleaks:
+    name: 秘密情報の検査（gitleaks）
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read # PR のコミットの一覧を API で読む（コメントは書かない）
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0 # push・PR で増えたコミットを全部見る
+          persist-credentials: false
+
+      # gitleaks 本体の版はこのアクションの版に固定されている（v3.0.0 は 8.24.3）。
+      # 組織のリポジトリでは GITLEAKS_LICENSE が要る（個人のリポジトリでは要らない）
+      - uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITLEAKS_ENABLE_COMMENTS: "false"

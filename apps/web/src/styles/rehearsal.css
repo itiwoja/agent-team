@@ -1,0 +1,359 @@
+/* SCR-021 リハーサルの区画（Rehearsal.tsx から読み込む）。
+   main.tsx の読み込み順では ask.css より先に入るので、ask.css の同じ部品の規則（.cert-state・.scenario など）より
+   詳細度を上げて（.block.rehearsal …）上書きする。見た目の決まりは D-100（モノクロ基調・面で分ける・色だけに頼らず文字でも示す）。
+   視線の順：①見出し行（左に見出し・右に合格証）②防いだ損害（主役）③止めた／すり抜けた（小さな2列）④説明文 ⑤内訳・状況の一覧 */
+
+/* 区画の中の縦の間隔 */
+.block.rehearsal {
+  gap: 14px;
+}
+
+/* ① 見出しと合格証の1行：同じ行の右。入らなければ直下に折り返す */
+.block.rehearsal .rehearsal-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+  width: 100%;
+}
+.block.rehearsal .rehearsal-head .block-title {
+  margin: 0;
+}
+
+/* 合格証の1行：状態ごとに面を変える（文でも分かる）。なし＝灰のチップ、合格＝緑の面、切れた・走行中＝琥珀 */
+.block.rehearsal .cert-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.35;
+  text-align: left;
+  white-space: normal;
+  justify-content: flex-start;
+}
+/* 押せる合格証（button）は、タップ領域を 44px にそろえる */
+.block.rehearsal button.cert-state {
+  min-height: 44px;
+}
+.block.rehearsal .cert-state.is-valid {
+  background: var(--green-bg);
+  color: var(--green);
+}
+.block.rehearsal .cert-state.is-revoked,
+.block.rehearsal .cert-state.is-running {
+  background: var(--amber-bg);
+  color: var(--amber);
+}
+.block.rehearsal .cert-state.is-none {
+  background: var(--surface-2);
+  color: var(--muted);
+  cursor: default;
+}
+.block.rehearsal .cert-state[aria-expanded="true"] {
+  border-radius: 999px;
+}
+.block.rehearsal .cert-chevron {
+  flex: none;
+  font-size: 13px;
+}
+/* 開いた中身（ポリシー・モデル・ハッシュ）：見出しの行の下に面で */
+.block.rehearsal .cert-kv {
+  background: var(--surface);
+  border-radius: 14px;
+  padding: 10px 14px;
+  margin: 0;
+}
+
+/* 説明文（生成の一言・待ちの1行・案内）は 13px の muted */
+.block.rehearsal .gemini-line,
+.block.rehearsal .wait-line,
+.block.rehearsal .rerun-note {
+  font-size: 13px;
+  line-height: 1.55;
+}
+/* 待ちの1行（経過秒は aria-hidden）：数字が動いても幅が揺れない */
+.block.rehearsal .wait-line {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 走っている間の進み：--surface-2 の地に --accent の細い線。「3 / 8 件」を下に添える */
+.block.rehearsal .run-progress {
+  display: grid;
+  gap: 6px;
+  width: 100%;
+}
+.block.rehearsal .run-progress-track {
+  height: 6px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.block.rehearsal .run-progress-fill {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.4s ease;
+}
+.block.rehearsal .run-progress-text {
+  margin: 0;
+  font-variant-numeric: tabular-nums;
+}
+@media (prefers-reduced-motion: reduce) {
+  .block.rehearsal .run-progress-fill {
+    transition: none;
+  }
+}
+
+/* ② ③ 面の数字。防いだ損害は主役（緑の控えめな面に大きな数字）、止めた・すり抜けたは小さな2列 */
+.block.rehearsal .meters {
+  gap: 10px;
+}
+.block.rehearsal .meter {
+  padding: 12px 14px;
+}
+.block.rehearsal .meter dt {
+  font-size: 13px;
+}
+.block.rehearsal .meter dd {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: var(--text);
+}
+.block.rehearsal .meter-main {
+  background: var(--green-bg);
+  padding: 14px 16px;
+}
+.block.rehearsal .meter-main dd {
+  font-size: 32px;
+  font-weight: 800;
+  line-height: 1.15;
+  color: var(--green);
+}
+/* すり抜けた：0 は薄く、1件以上は --red（文の「件」も残すので色だけには頼らない） */
+.block.rehearsal .meter-bad dd {
+  color: var(--red);
+}
+.block.rehearsal .meter.is-zero dd {
+  color: var(--muted);
+}
+
+/* 締める提案：文を上に、[適用]（デモの主役の操作なので塗り）を右下に。狭い幅では全幅 */
+.block.rehearsal .proposal.card-inset {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 10px;
+  border-radius: 14px;
+}
+.block.rehearsal .proposal-lines {
+  display: grid;
+  gap: 4px;
+}
+.block.rehearsal .proposal-lines p {
+  margin: 0;
+}
+.block.rehearsal .proposal-apply {
+  align-self: flex-end;
+}
+@media (max-width: 480px) {
+  .block.rehearsal .proposal-apply {
+    align-self: stretch;
+  }
+}
+
+/* ⑤ 状況の一覧：一つの面にまとめ、行の間の線だけで区切る（行ごとに面を重ねない） */
+.block.rehearsal .scenarios {
+  gap: 0;
+  padding: 2px 14px;
+  background: var(--surface);
+  border-radius: 14px;
+}
+/* 状況の行：左寄せ・全幅。開ける行だけ右端に ＞／∧、開けない行は通常の要素（button にしない） */
+.block.rehearsal .scenario {
+  display: flex;
+  flex-direction: column;
+  background: transparent;
+  border-radius: 0;
+  padding: 0;
+  box-shadow: none;
+}
+.block.rehearsal .scenario + .scenario {
+  border-top: 1px solid var(--line);
+}
+.block.rehearsal .scenario-line {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.45;
+  text-align: left;
+  white-space: normal;
+  font-variant-numeric: tabular-nums;
+}
+.block.rehearsal .scenario-line > span:first-child {
+  flex: 1;
+  min-width: 0;
+}
+.block.rehearsal .scenario-chevron {
+  flex: none;
+  color: var(--muted);
+  font-size: 13px;
+}
+/* すり抜けた行：--red-bg の面で一つだけ際立たせる（文の「すり抜けた」は赤の太字：.failed）。区切り線は引かない */
+.block.rehearsal .scenario-fail {
+  background: var(--red-bg);
+  border-radius: 10px;
+  margin: 4px 0;
+  padding: 0 10px;
+  box-shadow: none;
+}
+.block.rehearsal .scenario + .scenario.scenario-fail,
+.block.rehearsal .scenario-fail + .scenario {
+  border-top: 0;
+}
+.block.rehearsal .scenario .mark {
+  display: block;
+  padding-top: 6px;
+}
+/* 却下した書き込みの試験の注記（D-110）：合否は変えないので赤にせず、行の下に左の線つきで添える */
+.block.rehearsal .scenario-note {
+  margin: 0 0 10px;
+  padding-left: 10px;
+  border-left: 2px solid var(--line);
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+/* 防いだ損害の内訳の行 */
+.block.rehearsal .loss-lines {
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+  display: grid;
+  gap: 6px;
+}
+
+/* 止めた規則の貢献：防いだ額の順の上位3件。数字は tabular で揃える（面は増やさず、文字の一覧だけ） */
+.block.rehearsal .attrib {
+  display: grid;
+  gap: 4px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+.block.rehearsal .attrib-title,
+.block.rehearsal .attrib-unfired {
+  margin: 0;
+}
+.block.rehearsal .attrib-lines {
+  display: grid;
+  gap: 4px;
+}
+
+/* ボタンの階層：塗り（.btn-primary）は主要な1つだけ、ほかは .btn-ghost。スマホでは主要ボタンだけ全幅 */
+.block.rehearsal .rehearsal-main {
+  width: 100%;
+}
+@media (min-width: 768px) {
+  .block.rehearsal .rehearsal-main {
+    width: auto;
+    align-self: flex-start;
+  }
+}
+
+/* 空の状態の1文（まだリハーサルしていません＋何のためか） */
+.block.rehearsal .rehearsal-lede {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.55;
+}
+
+/* [もう一度リハーサルする] と、その下の案内（何が起きるか・目安） */
+.block.rehearsal .rerun {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.block.rehearsal .rerun > .btn {
+  justify-self: start;
+}
+.block.rehearsal .rerun > .btn-primary {
+  justify-self: stretch;
+}
+@media (min-width: 768px) {
+  .block.rehearsal .rerun > .btn-primary {
+    justify-self: start;
+  }
+}
+.block.rehearsal .rerun-note {
+  margin: 0;
+}
+
+/* 台本で再現した結果の印：費用 0 を見出しで示し、本物の Gemini で走らせるボタンを添える（狭い幅では全幅） */
+.block.rehearsal .scripted-mark {
+  display: grid;
+  gap: 6px;
+  justify-items: start;
+}
+.block.rehearsal .scripted-mark > p {
+  margin: 0;
+}
+.block.rehearsal .scripted-title {
+  font-size: 13px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-2);
+}
+.block.rehearsal .scripted-run {
+  width: 100%;
+  margin-top: 4px;
+}
+@media (min-width: 768px) {
+  .block.rehearsal .scripted-run {
+    width: auto;
+  }
+}
+
+/* 前の走行の行（再試験の間）：薄く残す */
+.block.rehearsal .scenario-stale {
+  opacity: 0.6;
+}
+
+/* 面の数字：再試験の間は前の値を薄く出し（終わると新しい値に変わる）、「再試験中 n / N 件」を添える。最後に置いて上の色より優先する */
+.block.rehearsal .meter.is-stale dd,
+.block.rehearsal .meter.is-stale.meter-bad dd {
+  color: var(--muted);
+}
+
+/* 区画の最上部の3行（走っている間は何が起きているか、終わったら何が分かったか） */
+.block.rehearsal .plain-summary {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.block.rehearsal .plain-summary p {
+  margin: 0;
+  font-size: 15px;
+  line-height: 1.6;
+}

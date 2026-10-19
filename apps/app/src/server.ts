@@ -1,0 +1,77 @@
+// app を起動する（Cloud Run・ローカル）。足りない環境変数があっても起動し「準備中」を返す（D-47）。
+// 準備ができていれば：Kill Switch の見張り（LISTEN ot_kill_switch＋2秒の見回り）・SSE の LISTEN を張り、
+// オーナーの初期投入（G-08。冪等）を後ろで試す（gateway・sim-world がまだ起きていなければ少し待ってやり直す。
+// Cloud Run は要求の外で CPU が絞られるので、確実なのは POST /internal/setup/owner-workspace：SO §4.1）
+
+import { serve } from "@hono/node-server";
+import { describeMissing } from "@open-team/platform";
+import { createApp } from "./app.ts";
+import { createAppDeps, type AppDeps } from "./deps.ts";
+import { readAppEnv } from "./env.ts";
+import { ensureOwnerWorkspace, OwnerSetupError } from "./owner-setup.ts";
+import { settleDrivingRuns, stopStartingAskTasks } from "./asks/run.ts";
+import { startKillWatch, type KillWatch } from "./registry.ts";
+
+const OWNER_SETUP_RETRY_DELAYS_MS = [5_000, 15_000, 60_000];
+/** 止めるときに、中断したタスクの後始末（failed にする）を待つ上限（Cloud Run の猶予 10 秒の内に収める） */
+const SHUTDOWN_SETTLE_MS = 5_000;
+
+async function setupOwnerInBackground(deps: AppDeps): Promise<void> {
+  if (!deps.env.gatewayUrl || !deps.env.simWorldUrl) {
+    deps.log.warn("owner_setup.skipped", "GATEWAY_URL・SIM_WORLD_URL がないのでオーナーの初期投入を飛ばした");
+    return;
+  }
+  for (let attempt = 0; ; attempt++) {
+    try {
+      await ensureOwnerWorkspace(deps);
+      return;
+    } catch (e) {
+      const delay = OWNER_SETUP_RETRY_DELAYS_MS[attempt];
+      deps.log.warn("owner_setup.retry", "オーナーの初期投入に失敗した", {
+        step: e instanceof OwnerSetupError ? e.step : null,
+        error: e,
+        retryInMs: delay ?? null,
+      });
+      if (delay === undefined) return;
+      await deps.sleep(delay);
+    }
+  }
+}
+
+const { env, missing } = readAppEnv();
+const deps = createAppDeps(env, missing);
+if (missing.length > 0) deps.log.warn("app.setup_required", `準備中：${describeMissing(missing)}`, { missing });
+
+const app = createApp(deps);
+const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
+  deps.log.info("app.listening", `app listening on :${info.port}`, { port: info.port });
+});
+
+let killWatch: KillWatch | null = null;
+if (missing.length === 0) {
+  try {
+    killWatch = await startKillWatch({ db: deps.db, registry: deps.registry, log: deps.log });
+    await deps.eventHub.start();
+  } catch (error) {
+    deps.log.error("app.listen_failed", "LISTEN を張れなかった（Kill Switch は見回りと判定の手順1で止まる）", { error });
+  }
+  void setupOwnerInBackground(deps);
+}
+
+// Cloud Run は止める前に SIGTERM を送る（10秒の猶予）。動いているものを止め、接続を閉じる
+let stopping = false;
+async function shutdown(signal: string): Promise<void> {
+  if (stopping) return;
+  stopping = true;
+  deps.log.info("app.stopping", `${signal} を受けたので止める`, { running: deps.registry.size });
+  // 新しく取らせない（queued のまま残す：次のインスタンスの tick が拾う）。動いているものは止め、後始末が済むのを待つ
+  stopStartingAskTasks();
+  for (const e of deps.registry.list()) deps.registry.abortTask(e.id, "shutdown");
+  await settleDrivingRuns(SHUTDOWN_SETTLE_MS).catch(() => {});
+  await killWatch?.stop().catch(() => {});
+  await deps.eventHub.stop().catch(() => {});
+  server.close();
+  await deps.db.close({ timeoutSec: 5 }).catch(() => {});
+}
+process.once("SIGTERM", () => void shutdown("SIGTERM"));
+process.once("SIGINT", () => void shutdown("SIGINT"));
