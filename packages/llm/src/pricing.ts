@@ -104,7 +104,7 @@ export function estimateMicroUsd(
   return computeMicroUsd(priceFor(model), e.inputTokens, e.maxOutputTokens, e.thinkingBudget ?? 0);
 }
 
-function computeMicroUsd(price: PriceEntry, input: number, output: number, thinking: number): number {
+export function computeMicroUsd(price: PriceEntry, input: number, output: number, thinking: number): number {
   assertTokens("inputTokens", input);
   assertTokens("outputTokens", output);
   assertTokens("thinkingTokens", thinking);
@@ -114,7 +114,9 @@ function computeMicroUsd(price: PriceEntry, input: number, output: number, think
     BigInt(input) * BigInt(p.inputPerMTokMicroUsd) +
     BigInt(output) * BigInt(p.outputPerMTokMicroUsd) +
     BigInt(thinking) * BigInt(p.thinkingPerMTokMicroUsd);
-  return Number((total + 999_999n) / 1_000_000n);
+  const result = Number((total + 999_999n) / 1_000_000n);
+  if (!Number.isSafeInteger(result)) throw new RangeError("LLM の料金が安全な整数範囲を超えました");
+  return result;
 }
 
 function assertTokens(name: string, n: number): void {

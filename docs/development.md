@@ -35,6 +35,10 @@ pnpm dev
 - 環境変数が足りなくても `app` は起動し「準備中」を返す（足りない名前だけログに出る）。`gateway`・`sim-world` は足りないと起動しない。
 - 止めるとき：`docker compose down`（DB のデータも消すなら `down -v`）。
 
+## LLMを切り替える
+
+Gemini以外を使う場合は `LLM_PROVIDER`、各社のAPIキー、`LLM_MODEL_AGENT`、`LLM_MODELS_JSON` を設定します。[プロバイダー設定](llm-providers.md) にClaude・OpenAI・OpenAI互換APIの例、能力チェック、料金と検証範囲を記載しています。既存のGemini設定はそのまま使えます。
+
 ## テスト
 
 ```bash

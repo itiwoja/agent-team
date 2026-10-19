@@ -14,6 +14,7 @@ import { insertSeedRows } from "@open-team/db/seed";
 import { grantedToolHashes } from "@open-team/edge";
 import type { JsonObject } from "@open-team/kernel";
 import type { AppDeps } from "../deps.ts";
+import { agentModelIdentity } from "../env.ts";
 import { OwnerSetupError } from "../owner-setup.ts";
 import { decisionInputsHashOfRow, intentHashOfRow, type FixtureRow, type GuestRehearsalFixture } from "./fixture.ts";
 
@@ -135,7 +136,7 @@ export async function seedPreparedRehearsal(
       else if (v === "@runStart") out[k] = runStart.toISOString();
       else if (v === "@runEnd") out[k] = runEnd.toISOString();
       else if (v === "@user") out[k] = ctx.userId;
-      else if (v === "@agentModel") out[k] = deps.env.gemini.agentModel;
+      else if (v === "@agentModel") out[k] = agentModelIdentity(deps.env);
       else if (v === "@toolHashes") out[k] = toolHashes;
       else out[k] = v;
     }

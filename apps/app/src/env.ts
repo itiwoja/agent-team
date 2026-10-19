@@ -5,7 +5,7 @@
 // - GATEWAY_URL・SIM_WORLD_URL・INTERNAL_SHARED_TOKEN・GEMINI_API_KEY は任意（なければオーナーの初期投入・内部の呼び出し・LLM が止まるだけ）
 // - PLATFORM_CEILINGS_VERSION は必須にしない（M-59：Hard Ceiling の版はコードの定数）
 
-import { readGeminiEnv, type GeminiEnv } from "@open-team/llm";
+import { readLlmEnv, providerModelIdentity, type GeminiEnv, type LlmConfig } from "@open-team/llm";
 import { EnvReader, readServiceAuthEnv, type EnvCheck, type EnvSource, type ServiceAuthConfig } from "@open-team/platform";
 
 /** Google カレンダーの連携（16 §3.6）。どれか欠けるか不正なら undefined（「つなぐ」を出さない）。準備中の名前には積まない（画面全体は止めない） */
@@ -61,6 +61,8 @@ export interface AppEnv {
   /** サービス間の認証（INTERNAL_SHARED_TOKEN） */
   serviceAuth: ServiceAuthConfig;
   gemini: GeminiEnv;
+  /** Active provider. gemini retains model routing fields for legacy callers/tests. */
+  llm?: LlmConfig;
   /** GUEST_RETEST_MODE：用意した依頼の再試験を台本で再現する（replay。既定）か、本物の Gemini で走らせる（gemini）か（D-101・D-104） */
   guestRetestMode: "replay" | "gemini";
   commitSha: string | undefined;
@@ -70,6 +72,10 @@ export interface AppEnv {
   githubConnect: GithubConnectEnv | undefined;
   /** 作業場（サンドボックス。D-116）。provider が none なら作業場の道具を渡さない */
   sandbox: SandboxEnv;
+}
+
+export function agentModelIdentity(env: Pick<AppEnv, "gemini" | "llm">): string {
+  return providerModelIdentity(env.llm, env.gemini.agentModel);
 }
 
 /**
@@ -112,7 +118,8 @@ export function readAppEnv(source: EnvSource = process.env): EnvCheck<AppEnv> {
   const serviceAuth: ServiceAuthConfig = r.has(LOCAL_SHARED_TOKEN) ? readServiceAuthEnv(r) : { sharedToken: undefined };
   const gatewayUrl = r.url("GATEWAY_URL");
   const simWorldUrl = r.url("SIM_WORLD_URL");
-  const gemini = readGeminiEnv(source as NodeJS.ProcessEnv);
+  const llm = readLlmEnv(source as NodeJS.ProcessEnv);
+  const gemini: GeminiEnv = { apiKey: llm.apiKey, agentModel: llm.agentModel, plannerModel: llm.plannerModel, compareModels: llm.compareModels };
   const commitSha = r.string("COMMIT_SHA", { pattern: /^[0-9a-f]{7,40}$/ });
 
   return r.done({
@@ -130,6 +137,7 @@ export function readAppEnv(source: EnvSource = process.env): EnvCheck<AppEnv> {
     simWorldUrl,
     serviceAuth,
     gemini,
+    llm,
     guestRetestMode: source.GUEST_RETEST_MODE?.trim() === "gemini" ? "gemini" : "replay",
     commitSha,
     googleConnect: readGoogleConnectEnv(source, appBaseUrl),

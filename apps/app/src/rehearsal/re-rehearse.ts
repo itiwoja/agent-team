@@ -12,6 +12,7 @@ import type { RehearsalCertificateRow, SessionCtx, Uuid, WsCtx } from "@open-tea
 import { getWorkspace, system, wsCtxOf } from "@open-team/db";
 import { findActiveRehearsalRun, listActiveRehearsalCases, revokeJobCertificate } from "@open-team/db/rehearsal";
 import type { AppDeps, TickStep } from "../deps.ts";
+import { agentModelIdentity } from "../env.ts";
 import { buildJobMaterials } from "./launch.ts";
 import { KillSwitchBeforeStart, runRehearsalSuite } from "./suite.ts";
 
@@ -71,7 +72,7 @@ export async function reRehearseJob(
       cases,
       // 同じ試験を同じシードで。モデルは今のもの（モデルの変更で切れたときの確かめ）
       seed: hit.seed ?? 0,
-      modelId: deps.env.gemini.agentModel,
+      modelId: agentModelIdentity(deps.env),
       effectivePolicies: materials.effectivePolicies,
       policyHash: materials.policyHash,
       toolHashes: materials.toolHashes,
@@ -108,7 +109,7 @@ export const reRehearsalStep: TickStep = {
   name: "rehearsal.re-rehearse",
   async run(deps, now) {
     // モデルの変更：有効な合格証のモデルが今のエージェントのモデルと違えば切る
-    for (const d of await system.scanModelDriftedCertificates(deps.db, deps.env.gemini.agentModel)) {
+    for (const d of await system.scanModelDriftedCertificates(deps.db, agentModelIdentity(deps.env))) {
       await deps.db.transaction((tx) => revokeJobCertificate(tx, wsCtxOf({ id: d.workspaceId, kind: d.workspaceKind }), d.jobId, "model", now));
     }
     let started = 0;

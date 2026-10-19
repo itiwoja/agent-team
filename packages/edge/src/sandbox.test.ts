@@ -9,7 +9,7 @@ import { describe, expect, it } from "vitest";
 import { EMPTY_TAINT, wrapUntrusted, type AgentDefinitionInput, type TaintSource } from "@open-team/kernel";
 import type { Db, Uuid } from "@open-team/db";
 import { useTestDb } from "@open-team/db/testing";
-import { insertAgentSkill, insertWorkspaceSnapshot } from "@open-team/db/sandbox";
+import { getInitialSandboxSnapshot, getInitialSandboxSnapshotTaint, insertAgentSkill, insertWorkspaceSnapshot } from "@open-team/db/sandbox";
 import type { ScriptedStep } from "@open-team/llm";
 import { createTarGz, readTarGz, runExecutor, type SandboxTransport } from "@open-team/sandbox";
 import { buildEdge, call, llmRequest, USAGE } from "./__fixtures__/env.ts";
@@ -102,6 +102,39 @@ async function haltAndDrain(db: Db, taskId: Uuid, provider: ReturnType<typeof in
 }
 
 describe("作業場の道具（D-116）", () => {
+  it("順番の依頼は直前担当のHTMLを次の作業場で読める。汚染は事前判定にも引き継ぐ", async () => {
+    const { db } = T();
+    const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+    const writer = await seedAgent(db, ws, coderDefinition());
+    const reader = await seedAgent(db, ws, { ...coderDefinition(), name: "確認係", jobs: [{ ...coderDefinition().jobs![0]!, id: "review" }] });
+    const ask = await seedChainAsk(db, ws, [
+      { agent: writer, jobSlug: "build", position: 1, spokesperson: false },
+      { agent: reader, jobSlug: "review", position: 2, spokesperson: true },
+    ]);
+    const from = await seedTask(db, ws, writer, "build", { ask, memberName: "コード職人" });
+    await db.query("UPDATE tasks SET status = 'completed', finished_at = $2 WHERE id = $1", [from, T0]);
+    const to = await seedTask(db, ws, reader, "review", { ask, memberName: "確認係", inputTaskIds: [from] });
+    const taint = { tainted: true, sources: [{ kind: "web_fetch" as const, url: "https://example.com/x", at: T0.toISOString() }] };
+    const snap = await insertWorkspaceSnapshot(db, ws.ctx, { agentId: writer.agentId, taskId: from, source: "task", archive: createTarGz([{ path: "index.html", content: Buffer.from("<h1>actual upstream HTML</h1>") }]), files: 1, bytes: 29, taint, now: T0 });
+    expect((await getInitialSandboxSnapshotTaint(db, ws.ctx, to))?.id).toBe(snap.id);
+    // 複数入力・別実行・未完了の成果を自動で取り込まない。
+    await db.query("UPDATE tasks SET input_task_ids = $2::uuid[] WHERE id = $1", [to, [from, from]]);
+    expect(await getInitialSandboxSnapshot(db, ws.ctx, to)).toBeNull();
+    await db.query("UPDATE tasks SET input_task_ids = $2::uuid[], ask_run_id = NULL WHERE id = $1", [to, [from]]);
+    expect(await getInitialSandboxSnapshot(db, ws.ctx, to)).toBeNull();
+    await db.query("UPDATE tasks SET ask_run_id = $2 WHERE id = $1", [to, ask.askRunId]);
+    await db.query("UPDATE tasks SET status = 'queued', finished_at = NULL WHERE id = $1", [from]);
+    expect(await getInitialSandboxSnapshot(db, ws.ctx, to)).toBeNull();
+    await db.query("UPDATE tasks SET status = 'completed', finished_at = $2 WHERE id = $1", [from, T0]);
+    const provider = inProcessProvider(db);
+    const env = started(db, [step("read", "read_file", { path: "index.html" })], provider);
+    const token = await tokenFor(db, ws, to);
+    const ctx = await env.edge.getTaskContext(token);
+    const result = await runStep(env, token, ctx.tools, "read");
+    expect(result.text).toContain("actual upstream HTML");
+    expect((await taintOf(db, to)).taint_sources).toEqual([expect.objectContaining({ kind: "workspace_snapshot", fromTaskId: from })]);
+    await haltAndDrain(db, to, provider);
+  });
   it("オーナーの本番の依頼の実装係には作業場の道具が渡る。プロバイダーがない・ゲストなら渡らない", async () => {
     const { db } = T();
     const w = await setup(db);

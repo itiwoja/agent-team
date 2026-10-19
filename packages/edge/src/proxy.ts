@@ -68,7 +68,8 @@ export function enforcementOf(r: Pick<Judged, "decision" | "reasonCode">, shadow
 }
 
 function agentModelOf(rt: EdgeRuntime): string {
-  return modelForRole(rt.models, "agent");
+  const model = modelForRole(rt.models, "agent");
+  return rt.llm.modelIdentity?.(model) ?? model;
 }
 
 /** 判定の記録（policy_decisions）と、allow 以外・Intent への判定の監査ログ decision.made（API-037 の副作用・platform.md:128） */
@@ -500,15 +501,16 @@ export async function llmMessages(rt: EdgeRuntime, token: string, rawReq: unknow
         throw new EdgeError("TASK_HALTED", { haltReason: "kill_switch" });
       case "budget":
         throw new EdgeError("TASK_HALTED", { haltReason: "budget_exceeded", scope: e.spend?.scope ?? null });
+      case "incompatible_model":
       case "unpriced_model": {
         // 価格表にないモデルは呼ばない（決定 (d)）。費用を数えられないので、このタスクは続けられない
         const ended = await rt.db.transaction(async (tx) => {
           await lockWorkspace(tx, ctx);
           const t = await lockTask(tx, ctx, task.id);
-          return t === null || t.status !== "running" ? null : failTask(tx, ctx, t, "llm_unavailable", rt.clock.now(), { reason: "unpriced_model", model });
+          return t === null || t.status !== "running" ? null : failTask(tx, ctx, t, "llm_unavailable", rt.clock.now(), { reason: e.kind, model, message: e.message });
         });
         if (ended !== null) await notifyTerminal(rt, ctx, task.id, ended.status);
-        throw new EdgeError("LLM_UPSTREAM_ERROR", { reason: "unpriced_model" });
+        throw new EdgeError("LLM_UPSTREAM_ERROR", { reason: e.kind, message: e.message });
       }
       case "aborted":
         throw new EdgeError("TASK_HALTED", { haltReason: "aborted" });

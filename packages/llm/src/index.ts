@@ -6,3 +6,6 @@ export * from "./retry.ts";
 export * from "./pricing.ts";
 export * from "./models.ts";
 export * from "./scripted.ts";
+export * from "./provider-config.ts";
+export * from "./http-provider.ts";
+export * from "./session-budget.ts";

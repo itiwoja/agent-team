@@ -64,7 +64,7 @@ export interface GeminiUsage {
 /** 呼ばなかった・止まった理由 */
 export type GeminiStop = { kind: "kill_switch" } | { kind: "budget"; spend: SpendDenied };
 
-export type GeminiCallErrorKind = "kill_switch" | "budget" | "unpriced_model" | "aborted" | "llm" | "stopped";
+export type GeminiCallErrorKind = "kill_switch" | "budget" | "unpriced_model" | "incompatible_model" | "aborted" | "llm" | "stopped";
 
 /** callGemini の失敗（kind で見分ける。toAppError でタスクの外の API のエラーにする） */
 export class GeminiCallError extends Error {
@@ -91,6 +91,8 @@ export class GeminiCallError extends Error {
         return spendDeniedAppError(this.spend ?? { scope: "global" }, now);
       case "unpriced_model":
         return new AppError("LLM_UPSTREAM_ERROR", "価格表にないモデルは呼びません");
+      case "incompatible_model":
+        return new AppError("LLM_UPSTREAM_ERROR", this.message);
       default:
         return new AppError("LLM_UPSTREAM_ERROR");
     }
@@ -171,8 +173,16 @@ export async function callGemini(
     throw new TypeError("callGemini: 費用の持ち主（taskId・agentId・askId・rehearsalRunId）がない");
   }
   if (ctx.signal?.aborted) throw new GeminiCallError("aborted", "LLM の呼び出しを中断しました");
-  if (findPrice(req.model) === null) throw new GeminiCallError("unpriced_model", `価格表にないモデルは呼びません：${req.model.slice(0, 100)}`);
-  const est = estimateCallMicroUsd(req);
+  const price = deps.llm.priceFor ? deps.llm.priceFor(req.model) : findPrice(req.model);
+  if (price === null) throw new GeminiCallError("unpriced_model", "価格表にないモデルは呼びません");
+  try { deps.llm.preflight?.(req); } catch (e) {
+    throw new GeminiCallError("incompatible_model", e instanceof LlmError ? e.message : "モデルの能力・設定を確認してください");
+  }
+  const est = deps.llm.estimateMicroUsd ? deps.llm.estimateMicroUsd(req) : estimateCallMicroUsd(req);
+  // HTTP adapters may have sent a request even when usage is unknown. Check all
+  // permitted attempts upfront; actual attempts are charged below, never at zero.
+  const budgetEstimate = deps.llm.estimateMicroUsd ? est * ((deps.retry?.delaysMs ?? LLM_RETRY_DELAYS_MS).length + 1) : est;
+  if (!Number.isSafeInteger(budgetEstimate)) throw new GeminiCallError("incompatible_model", "再試行を含む料金見積もりが大きすぎます");
   const limits = deps.spendLimits ?? SPEND_LIMITS;
   const target = { workspaceId: ctx.workspaceId, workspaceKind: ctx.workspaceKind, rehearsalRunId: ctx.rehearsalRunId };
   const wsCtx = { workspaceId: ctx.workspaceId, kind: ctx.workspaceKind, userId: null };
@@ -187,12 +197,12 @@ export async function callGemini(
         await hooks.onStopped?.(tx, { kind: "kill_switch" }, now);
         return { ok: false, error: new GeminiCallError("kill_switch", "Kill Switch が発動中です") };
       }
-      const spend = await checkSpend(tx, target, est, now, limits);
+      const spend = await checkSpend(tx, target, budgetEstimate, now, limits);
       if (!spend.ok) {
         await hooks.onStopped?.(tx, { kind: "budget", spend }, now);
         return { ok: false, error: new GeminiCallError("budget", `費用の上限を超えます（${spend.scope}）`, { spend }) };
       }
-      const before = (await hooks.beforeCall?.(tx, est, now)) ?? { ok: true as const };
+      const before = (await hooks.beforeCall?.(tx, budgetEstimate, now)) ?? { ok: true as const };
       if (!before.ok) return { ok: false, error: new GeminiCallError("stopped", "呼ぶ前の判定で止めました", { stopError: before.error }) };
       return { ok: true };
     },

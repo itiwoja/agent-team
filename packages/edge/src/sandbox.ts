@@ -20,7 +20,7 @@ import {
   completeSandboxCommand,
   enqueueSandboxCommand,
   expireSandboxCommand,
-  getLatestAgentSnapshot,
+  getInitialSandboxSnapshot,
   getOpenSandboxSession,
   getSandboxCommand,
   insertWorkspaceSnapshot,
@@ -294,7 +294,7 @@ export async function resolveSandbox(rt: EdgeRuntime, rawToken: unknown, o: { al
 export async function sandboxClaim(rt: EdgeRuntime, rawToken: unknown): Promise<{ taskId: string; archiveBase64: string | null }> {
   const { ctx, session } = await resolveSandbox(rt, rawToken);
   await touchSandboxSession(rt.db, ctx, session.id, rt.clock.now());
-  const snap = await getLatestAgentSnapshot(rt.db, ctx, session.agent_id);
+  const snap = await getInitialSandboxSnapshot(rt.db, ctx, session.task_id);
   if (snap === null) return { taskId: session.task_id, archiveBase64: null };
   const snapTaint: TaintState = { tainted: snap.tainted, sources: Array.isArray(snap.taint_sources) ? snap.taint_sources : [] };
   if (snapTaint.tainted || snapTaint.sources.length > 0) {

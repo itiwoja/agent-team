@@ -12,6 +12,7 @@ import { modelForPurpose } from "@open-team/llm";
 import { AppError } from "@open-team/platform";
 import { randomInt } from "node:crypto";
 import type { AppDeps } from "../deps.ts";
+import { agentModelIdentity } from "../env.ts";
 import { StopRequested } from "../registry.ts";
 import { microToUsd, runCostMicroUsd } from "./budget.ts";
 import { geminiCallAppError, rehearsalLlm } from "./gemini.ts";
@@ -62,7 +63,7 @@ export async function startUserCase(deps: UserCaseDeps, s: SessionCtx, input: St
   const now = deps.clock.now();
   const seed = randomInt(0, 2 ** 32);
   const interpretModel = modelForPurpose(deps.env.gemini, "rehearsal_interpret");
-  const agentModel = deps.env.gemini.agentModel;
+  const agentModel = agentModelIdentity(deps.env);
 
   // 解釈の間も Kill Switch で切れるようにする（走行の ID ができたら付け替える）
   const controller = new AbortController();

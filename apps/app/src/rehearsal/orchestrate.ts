@@ -18,6 +18,9 @@ import { microToUsd } from "./budget.ts";
 import { addCosts, REHEARSAL_BUDGET_MICRO_USD } from "./cost.ts";
 import { generateScenarios } from "./generate.ts";
 import { buildJobMaterials } from "./launch.ts";
+import { rehearsalLlm } from "./gemini.ts";
+import { agentModelIdentity } from "../env.ts";
+import { getAgentJobRow } from "@open-team/db/edge";
 import { saveGeneratedCases } from "./persist.ts";
 import { publishPhaseEvent, type RehearsalPhase } from "./progress.ts";
 import { buildRehearsalReport, type RehearsalReport } from "./report.ts";
@@ -80,18 +83,20 @@ export async function runRehearsal(deps: OrchestrateDeps, s: SessionCtx, input: 
   const materials = await buildJobMaterials(deps, s, input.subject);
   const seed = input.seed ?? randomInt(0, 2 ** 32);
   const generatorModel = modelForPurpose(deps.env.gemini, "rehearsal_generate");
-  const agentModel = deps.env.gemini.agentModel;
+  const agentModel = agentModelIdentity(deps.env);
   await phase("started", null, "リハーサルを始めました", 0);
 
   // 2. 生成（FR-042）
   const existing = await listActiveRehearsalCases(db, ctx, input.subject);
   const grants = await rehearsalGrantsOf(db, ctx, input.subject);
+  const job = input.subject.jobId === undefined ? null : await getAgentJobRow(db, ctx, input.subject.jobId);
+  if (input.subject.jobId !== undefined && job === null) throw new AppError("NOT_FOUND");
   const gen = await generateScenarios({
     job: materials.brief,
     seed,
     webAllowDomains: grants.webAllowDomains,
     connectorSlugs: grants.connectorSlugs,
-    llm: deps.llm,
+    llm: rehearsalLlm(deps, ctx, input.subject.askId !== undefined ? { askId: input.subject.askId } : { agentId: job!.agent_id }, "rehearsal_generate"),
     model: generatorModel,
     ...(input.count !== undefined ? { count: input.count } : {}),
     existingFaults: existing.map((c) => (c.scenario as unknown as { faults?: FaultSpec[] }).faults ?? []),

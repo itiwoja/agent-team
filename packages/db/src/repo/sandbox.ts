@@ -186,6 +186,38 @@ export async function getLatestAgentSnapshot(q: Queryable, ctx: WsCtx, agentId: 
   return r.rows[0] ?? null;
 }
 
+// 順番の依頼では、同じ実行の完了した直前タスクの成果を渡す。
+// 複数入力のマージはしない。自タスクの控えがあれば再開を優先し、従来の担当の控えは最後の候補。
+// claim とコマンド事前判定は必ず同じ候補・順序を使う（SG-05/07）。
+async function initialSandboxSnapshot<T extends object>(q: Queryable, ctx: WsCtx, taskId: Uuid, projection: string): Promise<T | null> {
+  const r = await q.query<T>(
+    `SELECT ${projection} FROM tasks t
+     JOIN agent_workspace_snapshots s ON s.workspace_id = t.workspace_id
+     WHERE t.workspace_id = $1 AND t.id = $2 AND (
+       s.agent_id = t.agent_id OR EXISTS (
+         SELECT 1 FROM tasks upstream JOIN asks a ON a.id = t.ask_id AND a.workspace_id = t.workspace_id
+         WHERE a.shape = 'chain' AND cardinality(t.input_task_ids) = 1
+           AND upstream.id = t.input_task_ids[1] AND s.task_id = upstream.id
+           AND s.agent_id = upstream.agent_id AND upstream.workspace_id = t.workspace_id
+           AND upstream.ask_id = t.ask_id AND upstream.ask_run_id = t.ask_run_id
+           AND upstream.status = 'completed'
+       )
+     ) ORDER BY CASE WHEN s.task_id = t.id THEN 0
+                     WHEN s.task_id = ANY(t.input_task_ids) AND s.agent_id <> t.agent_id THEN 1
+                     ELSE 2 END, s.created_at DESC, s.id DESC LIMIT 1`,
+    [ctx.workspaceId, taskId],
+  );
+  return r.rows[0] ?? null;
+}
+
+export function getInitialSandboxSnapshot(q: Queryable, ctx: WsCtx, taskId: Uuid): Promise<AgentWorkspaceSnapshotRow | null> {
+  return initialSandboxSnapshot(q, ctx, taskId, "s.*");
+}
+
+export function getInitialSandboxSnapshotTaint(q: Queryable, ctx: WsCtx, taskId: Uuid): Promise<Pick<AgentWorkspaceSnapshotRow, "id" | "task_id" | "tainted" | "taint_sources" | "created_at"> | null> {
+  return initialSandboxSnapshot(q, ctx, taskId, "s.id, s.task_id, s.tainted, s.taint_sources, s.created_at");
+}
+
 /**
  * 担当の最新の控えの汚染だけ（中身の tar.gz は読まない）。次に作業場を起こしたときに受け取る控えと同じ行（getLatestAgentSnapshot と同じ並び）。
  * SG-07：作業場がまだ控えを受け取っていない（claim の前）うちに判定する run_command に、受け取る控えの汚染を先に効かせる

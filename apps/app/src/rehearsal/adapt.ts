@@ -20,6 +20,8 @@ import type { RehearsalRunDeps } from "./run.ts";
 import { rehearsalGrantsOf } from "./web-grant.ts";
 import { KillSwitchBeforeStart, runRehearsalSuite, type SuiteOutcome } from "./suite.ts";
 import { microToUsd } from "./budget.ts";
+import { rehearsalLlm } from "./gemini.ts";
+import { GeminiCallError } from "@open-team/edge";
 
 /** 適応の最大回数（15:5。run の adapt_round の上限 3 と同じ） */
 export const MAX_ADAPT_ROUNDS = 3;
@@ -164,7 +166,7 @@ export async function adaptScenarios(deps: RehearsalRunDeps, input: AdaptInput):
         seed: adaptSeed(input.seed, round),
         webAllowDomains: grants.webAllowDomains,
         connectorSlugs: grants.connectorSlugs,
-        llm: deps.llm,
+        llm: rehearsalLlm(deps, input.ctx, { rehearsalRunId: latestRun.id }, "rehearsal_generate"),
         model: input.generatorModel,
         count: input.count ?? DEFAULT_ADAPT_COUNT,
         existingFaults: existing.map((c) => (c.scenario as unknown as { faults?: FaultSpec[] }).faults ?? []),
@@ -180,6 +182,7 @@ export async function adaptScenarios(deps: RehearsalRunDeps, input: AdaptInput):
           : finish("generation_failed", `状況を作れなかったので、適応を打ち切った（${e.reasons.slice(0, 3).join("／")}）`);
       }
       if (e instanceof LlmError) return finish("generation_failed", "状況を作る呼び出しが失敗したので、適応を打ち切った");
+      if (e instanceof GeminiCallError) return finish(e.kind === "budget" ? "budget" : "generation_failed", "共通のLLM費用・能力チェックで適応を停止しました");
       throw e;
     }
     cumulative = addCosts(cumulative, gen.costMicroUsd);

@@ -24,6 +24,9 @@ export const SECRET_ENV_NAMES = [
   "VAPID_PRIVATE_KEY",
   "SEARCH_API_KEY",
   "GEMINI_API_KEY",
+  "ANTHROPIC_API_KEY",
+  "OPENAI_API_KEY",
+  "OPENAI_COMPATIBLE_API_KEY",
   "GOOGLE_API_KEY",
   "OAUTH_TOKEN_KEY",
   "GOOGLE_OAUTH_CLIENT_SECRET",
@@ -49,7 +52,7 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----[\s\S]*?(?:-----END [A-Z0-9 ]*PRIVATE KEY[A-Z0-9 ]*-----|$)/g, REDACTED],
   // ヘッダーの形（Authorization: … ／ Cookie: … ／ "x-task-token":"…"）。値は行の終わりか引用符まで
   [
-    /\b(authorization|proxy-authorization|x-serverless-authorization|set-cookie|cookie|x-task-token|x-csrf-token)(["']?\s*[:=]\s*["']?)[^"'\r\n]+/gi,
+    /\b(authorization|proxy-authorization|x-serverless-authorization|set-cookie|cookie|x-task-token|x-csrf-token|x-api-key)(["']?\s*[:=]\s*["']?)[^"'\r\n]+/gi,
     `$1$2${REDACTED}`,
   ],
   // Bearer のトークン（RFC 6750 の token68）

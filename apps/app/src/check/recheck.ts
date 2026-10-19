@@ -11,6 +11,7 @@ import { completeIntent, getIntent, lockIntent, lockTask, recomputeTaskStatus } 
 import { isCertificateValid, resolveMcpSubject } from "@open-team/edge";
 import { recheckIntent } from "@open-team/kernel";
 import type { AppDeps } from "../deps.ts";
+import { agentModelIdentity } from "../env.ts";
 import { splitAction } from "./reasons.ts";
 
 export type RecheckResult = { ok: true; rechecked: boolean } | { ok: false; reasonCode: string };
@@ -37,7 +38,7 @@ export async function recheckBeforeExecute(deps: Deps, ctx: WsCtx, intentId: Uui
   const { subject, mcp } = await resolveMcpSubject(q, ctx, { connector: action.slug, tool: action.tool, arguments: intent.payload.arguments });
   if (mcp === null) return expire(deps, ctx, intent.id, task.id, "unknown_action");
   const unknownOutcomeKeys = await listUnknownOutcomeKeys(q, ctx, task.job_id, execContextOf(task));
-  const certificateValid = await isCertificateValid(q, ctx, job.id, current.policy, deps.env.gemini.agentModel);
+  const certificateValid = await isCertificateValid(q, ctx, job.id, current.policy, agentModelIdentity(deps.env));
   const r = recheckIntent(current.policy, subject, { unknownOutcomeKeys, certificateValid });
   if (r.decision === "approve" || r.decision === "allow") return { ok: true, rechecked: true };
   return expire(deps, ctx, intent.id, task.id, r.reasonCode);

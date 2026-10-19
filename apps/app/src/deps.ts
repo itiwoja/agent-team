@@ -8,7 +8,7 @@ import type { HaltedTask } from "@open-team/db/app";
 import { createGatewayClient, GatewayClientError, type GatewayClient } from "@open-team/gateway-client";
 import { createEdgeGeminiClient, createRuntime, sandboxEdgeOf, type SandboxEdge, type SandboxProvider } from "@open-team/edge";
 import { createSandboxProvider } from "./sandbox/providers.ts";
-import { LlmError, type LlmClient } from "@open-team/llm";
+import { LlmError, createLlmClient, PROVIDER_KEY_NAMES, findPrice, profilePrice, type LlmClient, type LlmConfig } from "@open-team/llm";
 import { createLogger, createServiceAuth, systemClock, type Clock, type Logger, type ServiceAuth } from "@open-team/platform";
 import { createSimClient, unavailableSimClient, type SimClient } from "@open-team/sim-client";
 import type { GoogleFetch } from "./connectors/google.ts";
@@ -117,10 +117,15 @@ export function unavailableGatewayClient(): GatewayClient {
 }
 
 /** GEMINI_API_KEY がないとき。呼ぶ前に断る（status null・やり直さない） */
-export function unavailableLlm(): LlmClient {
+export function unavailableLlm(keyName = "GEMINI_API_KEY", config?: LlmConfig): LlmClient {
+  const unavailable = (): never => { throw new LlmError(`${keyName} が設定されていないので LLM を呼べない`, null, false); };
   return {
+    ...(config ? {
+      priceFor: (model: string) => config.provider === "gemini" ? findPrice(model) : (Object.hasOwn(config.profiles, model) ? profilePrice(model, config.profiles[model]!) : null),
+      preflight: unavailable,
+    } : {}),
     async generate() {
-      throw new LlmError("GEMINI_API_KEY が設定されていないので Gemini を呼べない", null, false);
+      return unavailable();
     },
   };
 }
@@ -140,7 +145,9 @@ export function createAppDeps(env: AppEnv, missing: readonly string[], overrides
   const llm =
     overrides.llm ??
     // 1回だけ呼ぶクライアント。やり直しは edge の callGemini の1か所でする（中でもやり直すと二重になり、504 の待ちが最大 約8分に伸びて見えない）
-    (env.gemini.apiKey ? createEdgeGeminiClient({ apiKey: env.gemini.apiKey }) : unavailableLlm());
+    (env.llm
+      ? (env.llm.apiKey ? createLlmClient(env.llm) : unavailableLlm(PROVIDER_KEY_NAMES[env.llm.provider], env.llm))
+      : (env.gemini.apiKey ? createEdgeGeminiClient({ apiKey: env.gemini.apiKey }) : unavailableLlm()));
   const clock = overrides.clock ?? systemClock;
   // sandbox-edge は作業場からのトークンで動く（LLM・gateway は使わない）
   const sandboxEdge = overrides.sandboxEdge ?? sandboxEdgeOf(createRuntime({ db, llm, gateway: gatewayClient, clock, log }));

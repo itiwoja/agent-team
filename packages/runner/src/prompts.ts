@@ -79,6 +79,7 @@ function formationSection(ctx: TaskContext): string | null {
         const next = workers.find((w) => w.position === f.position + 1);
         lines.push(
           `あなたの報告は、次の段${next ? `の${next.name}` : ""}に受け渡されます。依頼した人への回答は、最後の段の担当が書きます。`,
+          "自分の担当分が完成したら、その内容を報告して次の担当へ渡してください。後続担当が作る成果物がまだ存在しないことは、あなたの未完了ではありません。後続担当の作業まで代行しないでください。",
         );
       }
       break;

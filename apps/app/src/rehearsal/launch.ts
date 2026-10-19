@@ -12,6 +12,7 @@ import { LlmError, modelForPurpose } from "@open-team/llm";
 import { AppError } from "@open-team/platform";
 import { randomInt } from "node:crypto";
 import type { AppDeps } from "../deps.ts";
+import { agentModelIdentity } from "../env.ts";
 import { StopRequested } from "../registry.ts";
 import { microToUsd, runCostMicroUsd } from "./budget.ts";
 import { generateScenarios, RehearsalGenerateError } from "./generate.ts";
@@ -78,7 +79,7 @@ export async function startRehearsal(deps: LaunchDeps, s: SessionCtx, input: Sta
   const materials = await buildJobMaterials(deps, s, input.subject);
   const seed = input.seed ?? randomInt(0, 2 ** 32);
   const generatorModel = modelForPurpose(deps.env.gemini, "rehearsal_generate");
-  const agentModel = deps.env.gemini.agentModel;
+  const agentModel = agentModelIdentity(deps.env);
 
   // 生成の前に走行の行を generating で予約する：同じ対象の二重 POST は一意制約（rehearsal_runs_one_active_uq）で
   // Gemini を呼ぶ前に 409 になる（生成費用・試験の二重保存を防ぐ）

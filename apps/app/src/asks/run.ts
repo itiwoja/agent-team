@@ -320,6 +320,8 @@ function liveEdge(deps: AskRunDeps) {
     clock: deps.clock,
     log: deps.log,
     models: { agentModel: deps.env.gemini.agentModel, plannerModel: deps.env.gemini.plannerModel },
+    // Haiku 5.5 uses more tokens for the same text; file-producing calls need room.
+    ...(deps.env.llm?.provider === "anthropic" && deps.env.gemini.agentModel === "claude-haiku-5-5" ? { limits: { maxTokensDefault: 8192 }, retry: { delaysMs: [] } } : {}),
     signalFor: (taskId) => deps.registry.get(taskId)?.controller.signal,
     hooks: teamHooks(deps, productionEdgeHooks(deps)),
     // 作業場（D-116）：本番の依頼のタスクだけ（edge が sandboxAllowed で絞る）

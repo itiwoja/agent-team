@@ -3,6 +3,7 @@
 // 使えるのは edge（app）と scripts だけ。runner はこのパッケージを import しない（D-52）。
 
 import type { AssistantPart, ChatMessage, McpToolSpec, ToolSpec } from "@open-team/runner";
+import type { PriceEntry } from "./pricing.ts";
 
 export interface LlmRequest {
   model: string;
@@ -50,6 +51,13 @@ export interface LlmResponse {
 }
 
 export interface LlmClient {
+  /** Stable policy/certificate identity, distinct from the model ID sent to an API. */
+  modelIdentity?(model: string): string;
+  /** Provider-scoped pricing; no fallback to another provider's model names. */
+  priceFor?(model: string): PriceEntry | null;
+  /** Check capabilities and estimate before budget checks and any network I/O. */
+  preflight?(req: LlmRequest): void;
+  estimateMicroUsd?(req: LlmRequest): number;
   generate(req: LlmRequest, opts?: { signal?: AbortSignal }): Promise<LlmResponse>;
 }
 

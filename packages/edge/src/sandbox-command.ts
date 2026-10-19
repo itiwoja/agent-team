@@ -6,7 +6,7 @@
 
 import { isAllowedCommandShape, operationOfCommand, taintOnWorkspaceSnapshot, taintedByOutsideContent, type JsonObject, type TaintState } from "@open-team/kernel";
 import type { Queryable, TaskRow, WsCtx } from "@open-team/db";
-import { getLatestAgentSnapshotTaint } from "@open-team/db/sandbox";
+import { getInitialSandboxSnapshotTaint } from "@open-team/db/sandbox";
 
 export interface CommandJudgement {
   operation: "run_tests" | "run_shell";
@@ -25,7 +25,7 @@ export interface CommandJudgement {
  * 担当の別のタスクがあとから残した控えも足す（厳しい側）。判定に使うだけで、タスクの汚染は変えない（記録は sandboxClaim）
  */
 export async function commandTaintOf(q: Queryable, ctx: WsCtx, task: Pick<TaskRow, "id" | "agent_id">, taint: TaintState, now: Date): Promise<TaintState> {
-  const snap = await getLatestAgentSnapshotTaint(q, ctx, task.agent_id);
+  const snap = await getInitialSandboxSnapshotTaint(q, ctx, task.id);
   if (snap === null) return taint;
   const snapTaint: TaintState = { tainted: snap.tainted, sources: Array.isArray(snap.taint_sources) ? snap.taint_sources : [] };
   return taintOnWorkspaceSnapshot(taint, { snapshotId: snap.id, fromTaskId: snap.task_id, taint: snapTaint }, task.id, now.toISOString());

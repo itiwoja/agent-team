@@ -9,7 +9,10 @@ import { BIG_ORDER, addCase, orderScript, scenarioOf, startRehearsalWorld, withO
 import { MAX_ADAPT_ROUNDS, adaptScenarios, adaptSeed, focusOf } from "./adapt.ts";
 import { REHEARSAL_BUDGET_MICRO_USD } from "./cost.ts";
 import { runRehearsalSuite } from "./suite.ts";
-import { JOB, MODEL, draft, f05, jsonReply, textReply } from "./test-helpers.ts";
+import { JOB, draft, f05, jsonReply, textReply } from "./test-helpers.ts";
+
+// Generation now goes through the shared priced-model gate; replies remain fully scripted.
+const MODEL = "gemini-2.5-flash";
 
 const T = useTestDb();
 let world: RehearsalWorld | null = null;
