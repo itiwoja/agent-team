@@ -44,7 +44,6 @@ export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
 export const OAUTH_PROVIDERS = ["google", "github"] as const;
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
 export type ConnectorAuth =
-  | { type: "gcp_id_token"; audience: string }
   | { type: "none" }
   /** 0-H は Won't（BR-66） */
   | { type: "api_key"; ciphertext: string }

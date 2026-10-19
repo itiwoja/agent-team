@@ -49,13 +49,12 @@ pnpm measure -- --llm scripted --runs 1
 # 偽物が引っかからない場合
 pnpm measure -- --llm scripted --runs 1 --scripted-behavior safe
 
-# 本番の計測（Gemini。Vertex AI）
-gcloud auth application-default login
-GOOGLE_CLOUD_PROJECT=<プロジェクト> GOOGLE_CLOUD_LOCATION=global \
+# 本番の計測（Gemini API）
+GEMINI_API_KEY=<API キー> \
   pnpm measure -- --llm gemini --runs 10 --faults F-01,F-02,F-03,F-04,F-05,F-06,F-07 --out results
 ```
 
-- Gemini は開発者の ADC で呼ぶ。`GEMINI_API_KEY`・`GOOGLE_API_KEY` が置かれていたら走らせない（ADR-032）。
+- Gemini は `GEMINI_API_KEY` で呼ぶ。未設定なら走らせない（値は出さない）。
 - 進み具合は標準エラーに1走行1行で出る（`[12/70] F-05 #2 seed=… 失敗（O-05） ¥31,200 $0.0123`）。
 - Ctrl+C を1回押すと今の走行を止め、途中までの結果を書いて終わる（終了コード 130）。2回目で即終了。
 

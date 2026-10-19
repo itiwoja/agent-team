@@ -96,7 +96,7 @@ export function renderTrapRateMarkdown(report: TrapRateReport): string {
   lines.push("", "### 条件", "");
   lines.push(
     `- 日付：${c.date}（JST。${c.startedAt} 〜 ${c.finishedAt}）`,
-    `- LLM：${c.llm === "gemini" ? "Gemini（Vertex AI）" : `scripted（決定論の偽物・${c.scriptedBehavior ?? "-"}）`}／モデル：${c.model === "" ? "-" : c.model}`,
+    `- LLM：${c.llm === "gemini" ? "Gemini" : `scripted（決定論の偽物・${c.scriptedBehavior ?? "-"}）`}／モデル：${c.model === "" ? "-" : c.model}`,
     "- 統制：なし（付与の外・承認・ルール・ガード・汚染の追跡・Breaker・Intent の数を判定しない）。費用の守り（タスクごとの上限・ステップ数・計測全体の上限）だけ効かせる",
     "- 書き込み：その場で模擬の世界に実行し、エージェントには受け付けた（accepted）とだけ返す（本番と同じく結果は返さない）",
     `- プロンプト：本番と同じ組み立て（runner のテンプレート・プロンプト、用意した編成の担当の定義）。ハッシュ ${c.promptHash.slice(0, 16)}`,

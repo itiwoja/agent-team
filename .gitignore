@@ -3,7 +3,7 @@ dist
 coverage
 *.tsbuildinfo
 
-# 秘密情報（値は Secret Manager か手元の .env だけ。例は .env.example）
+# 秘密情報（値は手元の .env だけ。例は .env.example）
 .env
 .env.*
 !.env.example

@@ -158,7 +158,7 @@ describe("PostgresSimStore だけの振る舞い（外部キー・ロック・�
     });
   });
 
-  it("Cloud Run の複数のインスタンス（別の接続・別のストア）からの同時の更新も、行ロックで直列になる（version・番号が飛ばない）", async () => {
+  it("複数のインスタンス（別の接続・別のストア）からの同時の更新も、行ロックで直列になる（version・番号が飛ばない）", async () => {
     await withSim(async (sim, { fx }) => {
       const { url } = T();
       const sim2 = await openSimDb(url, 2);

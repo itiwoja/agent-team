@@ -104,54 +104,18 @@ async function waitFor<T>(fn: () => T | undefined, ms: number): Promise<T> {
 
 describe("server.ts（SO §3.1.3：足りなければ起動しない）", () => {
   it("共有トークン INTERNAL_SHARED_TOKEN がない・短ければ exit 1。足りない変数の名前だけを出す", async () => {
-    const s = startServer({ DEPLOYMENT_MODE: "local", INTERNAL_SHARED_TOKEN: "short-secret" });
+    const s = startServer({ INTERNAL_SHARED_TOKEN: "short-secret" });
     expect(await s.exited).toBe(1);
     const refused = s.lines().find((l) => l.event === "sim.startup_refused");
     expect(refused).toMatchObject({ severity: "CRITICAL", missing: ["INTERNAL_SHARED_TOKEN"], service: "sim-world" });
     expect(JSON.stringify(s.lines())).not.toContain("short-secret");
   }, 30_000);
 
-  it("SO-ENV-16 cloud で DATABASE_URL・GATEWAY_SA_EMAIL がなければ起動しない（メモリの保存に落とさない）", async () => {
-    const s = startServer({
-      DEPLOYMENT_MODE: "cloud",
-      SIM_WORLD_URL: "https://sim-world-123.asia-northeast1.run.app",
-      APP_SA_EMAIL: "sa-app@proj.iam.gserviceaccount.com",
-    });
-    expect(await s.exited).toBe(1);
-    expect(s.lines().find((l) => l.event === "sim.startup_refused")).toMatchObject({ missing: ["DATABASE_URL", "GATEWAY_SA_EMAIL"] });
-  }, 30_000);
-
-  it("cloud は DATABASE_URL と ID トークンの設定がそろえば Postgres の保存で起動する（接続は最初の問い合わせまで開かない）。SIGTERM で止まる", async () => {
-    const s = startServer({
-      DEPLOYMENT_MODE: "cloud",
-      PORT: "0",
-      DATABASE_URL: "postgres://ot_sim:pw@127.0.0.1:1/open_team",
-      SIM_WORLD_URL: "https://sim-world-123.asia-northeast1.run.app",
-      GATEWAY_SA_EMAIL: "sa-gateway@proj.iam.gserviceaccount.com",
-      APP_SA_EMAIL: "sa-app@proj.iam.gserviceaccount.com",
-      COMMIT_SHA: "cafe01",
-    });
+  it("DATABASE_URL がなければメモリの保存で起動し /healthz に答える（SIGTERM で止まる）", async () => {
+    const s = startServer({ INTERNAL_SHARED_TOKEN: "t".repeat(40), PORT: "0", COMMIT_SHA: "c0ffee" });
     try {
       const listening = await waitFor(() => s.lines().find((l) => l.event === "sim.listening"), 20_000);
-      expect(listening).toMatchObject({ store: "postgres", mode: "cloud", commit: "cafe01" });
-      const base = `http://127.0.0.1:${String(listening.port)}`;
-      expect(await (await fetch(`${base}/api/health`)).json()).toEqual({ status: "ok", service: "sim-world", commit: "cafe01" });
-      // ID トークンなしの管理 API は 403（DB に届く前に止まる）
-      expect((await fetch(`${base}/admin/v1/demo-store`, { method: "POST" })).status).toBe(403);
-      // DATABASE_URL の値（パスワード）はログに出ない
-      expect(JSON.stringify(s.lines())).not.toContain("ot_sim:pw");
-    } finally {
-      s.child.kill("SIGTERM");
-    }
-    expect(await s.exited).toBe(0);
-    expect(s.lines().some((l) => l.event === "sim.stopping")).toBe(true);
-  }, 30_000);
-
-  it("local で DATABASE_URL がなければメモリの保存で起動し /healthz に答える（SIGTERM で止まる）", async () => {
-    const s = startServer({ DEPLOYMENT_MODE: "local", INTERNAL_SHARED_TOKEN: "t".repeat(40), PORT: "0", COMMIT_SHA: "c0ffee" });
-    try {
-      const listening = await waitFor(() => s.lines().find((l) => l.event === "sim.listening"), 20_000);
-      expect(listening).toMatchObject({ store: "memory", mode: "local" });
+      expect(listening).toMatchObject({ store: "memory" });
       const res = await fetch(`http://127.0.0.1:${String(listening.port)}/healthz`);
       expect(await res.json()).toEqual({ status: "ok", service: "sim-world", commit: "c0ffee" });
     } finally {
@@ -160,20 +124,20 @@ describe("server.ts（SO §3.1.3：足りなければ起動しない）", () => 
     expect(await s.exited).toBe(0);
   }, 30_000);
 
-  describe("local で DATABASE_URL があれば Postgres の保存（docker compose の db）", () => {
+  describe("DATABASE_URL があれば Postgres の保存（docker compose の db）", () => {
     const T = useTestDb();
 
     it("止めて起動し直しても、デモ店舗と注文が残る（インスタンスをまたいで同じ状態）", async () => {
       const { db, url } = T();
       const ws = await fxWorkspace(db);
       const token = "p".repeat(40);
-      const auth = createServiceAuth({ mode: "local", sharedToken: token });
-      const env = { DEPLOYMENT_MODE: "local", INTERNAL_SHARED_TOKEN: token, PORT: "0", DATABASE_URL: url };
+      const auth = createServiceAuth({ sharedToken: token });
+      const env = { INTERNAL_SHARED_TOKEN: token, PORT: "0", DATABASE_URL: url };
       const run = async <R>(fn: (base: string) => Promise<R>): Promise<R> => {
         const s = startServer(env);
         try {
           const listening = await waitFor(() => s.lines().find((l) => l.event === "sim.listening"), 20_000);
-          expect(listening).toMatchObject({ store: "postgres", mode: "local" });
+          expect(listening).toMatchObject({ store: "postgres" });
           return await fn(`http://127.0.0.1:${String(listening.port)}`);
         } finally {
           s.child.kill("SIGTERM");

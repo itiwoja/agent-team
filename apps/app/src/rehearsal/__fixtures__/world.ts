@@ -170,14 +170,14 @@ export async function startRehearsalWorld(db: Db, url: string, o: StartWorldOpti
   // sim-world（本物の HTTP。保存は Postgres）
   const simDb = await openRoleDb(url, "ot_sim", { max: 3 });
   const simApp = createSimApp(
-    { deploymentMode: "local", port: 0, sharedToken: SIM_TOKEN, selfUrl: undefined, gatewaySaEmail: undefined, appSaEmail: undefined, databaseUrl: undefined, commitSha: "test" },
+    { port: 0, sharedToken: SIM_TOKEN, databaseUrl: undefined, commitSha: "test" },
     { store: new PostgresSimStore(simDb), now: () => clock.now() },
   );
   const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
     const s = serve({ fetch: simApp.fetch, port: 0, hostname: "127.0.0.1" }, () => resolve(s));
   });
   const simUrl = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
-  const simAuth = createServiceAuth({ mode: "local", sharedToken: SIM_TOKEN });
+  const simAuth = createServiceAuth({ sharedToken: SIM_TOKEN });
   const simClient = createSimClient({ baseUrl: simUrl, authHeaders: (aud) => simAuth.serviceAuthHeaders("sa-app", aud) });
 
   // gateway（app.request につなぐ。sim-world への MCP は本物の HTTP）
@@ -197,14 +197,13 @@ export async function startRehearsalWorld(db: Db, url: string, o: StartWorldOpti
     return fetch(input, init);
   }) as typeof fetch;
   const gwEnv: GatewayEnv = {
-    deploymentMode: "local",
     port: 0,
     databaseUrl: "postgres://unused",
     allowedConnectorUrls: [simUrl],
     simWorldUrl: simUrl,
     gcal: null,
     github: null,
-    serviceAuth: { mode: "local", sharedToken: GW_TOKEN },
+    serviceAuth: { sharedToken: GW_TOKEN },
     simWorldSharedToken: SIM_TOKEN,
     commitSha: "test",
     ...o.gatewayEnv,
@@ -223,7 +222,7 @@ export async function startRehearsalWorld(db: Db, url: string, o: StartWorldOpti
   );
   const agent = await seedAgent(db, ws, (o.agentDefinition ?? (() => supplierDefinition()))({ placeOrderHash: placeOrder.rows[0]!.tool_hash }));
 
-  const env = testEnv({ gemini: { project: undefined, location: "global", agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } });
+  const env = testEnv({ gemini: { apiKey: undefined, agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } });
   return {
     db,
     ws,

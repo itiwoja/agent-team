@@ -17,7 +17,7 @@ import type { WorkspaceEventHub } from "./events.ts";
 export interface SseOptions {
   /** 既定 15秒 */
   heartbeatMs: number;
-  /** 既定 55分（Cloud Run の60分の前：09_api/tasks.md:228） */
+  /** 既定 55分（接続を張り直す前の余裕：09_api/tasks.md:228） */
   maxDurationMs: number;
   /** 1回に読む行の数（既定 100） */
   batchSize: number;

@@ -94,7 +94,7 @@ function gcalGateway(db: Db, base: GatewayClient): GatewayClient {
 }
 
 /** オーナーの世界（owner-setup の投入のあと、オーナーで入る） */
-async function ownerApp(db: Db, google: FakeGoogle, env: Partial<AppEnv> = { googleConnect: GOOGLE }) {
+async function ownerApp(db: Db, google: FakeGoogle, env: Partial<AppEnv> = { googleConnect: GOOGLE, cookieSecure: false }) {
   const base = fakeGatewayClient(db);
   const sim = inProcessSimWorld();
   const t = makeTestApp(db, { env, deps: { gatewayClient: gcalGateway(db, base), simClient: sim.simClient, googleFetch: google.fetch } });
@@ -152,14 +152,14 @@ describe("start（16 §3.6）", () => {
     expect(setCookie).toMatch(/SameSite=Lax/i);
     expect(setCookie).toMatch(/Max-Age=600/);
     expect(setCookie).toMatch(/Path=\/api\/v1\/connect\/google(;|$)/);
-    expect(setCookie).not.toMatch(/Secure/i); // local は Secure を付けない
+    expect(setCookie).not.toMatch(/Secure/i); // COOKIE_SECURE=false は Secure を付けない
     expect(google.calls).toEqual([]); // start は Google を呼ばない
   });
 
-  it("本番（cloud）では Cookie に Secure", async () => {
+  it("cookieSecure のときは Cookie に Secure", async () => {
     const { db } = T();
     const google = fakeGoogle();
-    const { t, s } = await ownerApp(db, google, { googleConnect: GOOGLE, deploymentMode: "cloud" });
+    const { t, s } = await ownerApp(db, google, { googleConnect: GOOGLE, cookieSecure: true });
     const { setCookie } = await startFlow(t, s.cookie, "Asia/Tokyo");
     expect(setCookie).toMatch(/Secure/i);
   });

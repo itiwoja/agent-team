@@ -1,13 +1,13 @@
-// sim-world を起動する（Cloud Run・docker compose。apps/app の server.ts と同じ書き方）
+// sim-world を起動する（pnpm dev・docker compose。apps/app の server.ts と同じ書き方）
 // 足りない環境変数があれば起動しない（画面がないので「準備中」にしない：SO §3.1.3）。
-// 保存は DATABASE_URL があれば Postgres（cloud は必須・ot_sim）、なければメモリ（local だけ）。マイグレーションは流さない（CI・db の migrate）
+// 保存は DATABASE_URL があれば Postgres、なければメモリ。マイグレーションは流さない（CI・db の migrate）
 
 import { serve } from "@hono/node-server";
 import { describeMissing } from "@open-team/platform";
 import { createApp } from "./app.ts";
 import { readSimWorldEnv } from "./env.ts";
 import { simWorldLogger } from "./log.ts";
-import { SimStoreConfigError, openSimStore, type OpenedSimStore } from "./open-store.ts";
+import { openSimStore } from "./open-store.ts";
 
 const { env, missing } = readSimWorldEnv();
 const log = simWorldLogger(env.commitSha);
@@ -18,22 +18,15 @@ if (missing.length > 0) {
   process.exit(1);
 }
 
-let opened: OpenedSimStore;
-try {
-  opened = openSimStore(env);
-} catch (e) {
-  if (!(e instanceof SimStoreConfigError)) throw e;
-  log.log({ severity: "CRITICAL", event: "sim.startup_refused", message: e.message, missing: ["DATABASE_URL"] });
-  process.exit(1);
-}
+const opened = openSimStore(env);
 
 const app = createApp(env, { store: opened.store, log });
 
 const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
-  log.info("sim.listening", `sim-world listening on :${info.port}`, { port: info.port, store: opened.kind, mode: env.deploymentMode });
+  log.info("sim.listening", `sim-world listening on :${info.port}`, { port: info.port, store: opened.kind });
 });
 
-// Cloud Run は止める前に SIGTERM を送る：受け付けをやめ、DB の接続を閉じてから終わる
+// 止める前に SIGTERM が来る（docker compose stop など）：受け付けをやめ、DB の接続を閉じてから終わる
 let stopping = false;
 let exiting = false;
 const done = () => {

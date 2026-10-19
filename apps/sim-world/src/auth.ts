@@ -1,8 +1,7 @@
 // 呼び出し元の確認（security-ops-deploy.md §3.9・§3.11、M-44）。MCP は sa-gateway だけ、管理 API は sa-app だけ（15:484・521）。
 // 確かめ方は packages/platform の createServiceAuth（gateway・app と同じ）：
-//   local：共有トークン（INTERNAL_SHARED_TOKEN を Authorization: Bearer）＋呼び出し元の名前のヘッダー x-ot-caller（G-11）
-//   cloud：Google の ID トークン（aud = SIM_WORLD_URL、email = GATEWAY_SA_EMAIL か APP_SA_EMAIL。名前のヘッダーは信じない）
-// 呼ぶ側は platform の serviceAuthHeaders(caller, SIM_WORLD_URL) をそのまま使う。拒否は 403 FORBIDDEN（理由はログにだけ）
+//   共有トークン（INTERNAL_SHARED_TOKEN を Authorization: Bearer）＋呼び出し元の名前のヘッダー x-ot-caller（G-11）
+// 呼ぶ側は platform の serviceAuthHeaders(caller, url) をそのまま使う。拒否は 403 FORBIDDEN（理由はログにだけ）
 
 import { CALLER_HEADER, type ServiceAuthConfig, type ServiceCaller } from "@open-team/platform";
 import type { SimWorldEnv } from "./env.ts";
@@ -37,8 +36,7 @@ export function authorizeSimCaller(op: SimOperation, caller: SimCaller): boolean
   return allowedCallersOf(op).includes(caller);
 }
 
-/** env から platform のサービス間の認証の設定を作る（local：共有トークン、cloud：aud と2つのサービスアカウント） */
-export function serviceAuthConfigOf(env: Pick<SimWorldEnv, "deploymentMode" | "sharedToken" | "selfUrl" | "gatewaySaEmail" | "appSaEmail">): ServiceAuthConfig {
-  if (env.deploymentMode === "local") return { mode: "local", sharedToken: env.sharedToken };
-  return { mode: "cloud", audience: env.selfUrl, callerEmails: { "sa-app": env.appSaEmail, "sa-gateway": env.gatewaySaEmail } };
+/** env から platform のサービス間の認証の設定を作る（共有トークン） */
+export function serviceAuthConfigOf(env: Pick<SimWorldEnv, "sharedToken">): ServiceAuthConfig {
+  return { sharedToken: env.sharedToken };
 }

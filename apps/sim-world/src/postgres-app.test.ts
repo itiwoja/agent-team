@@ -260,7 +260,7 @@ describe("Postgres の保存で管理 API と MCP（M-40）", () => {
     expect(after.events.map((e) => e.seq)).toEqual(Array.from({ length: 10 }, (_, i) => i + 1));
   });
 
-  it("Cloud Run の別のインスタンス（別の接続のアプリ）からも同じ状態が見え、続きを書ける（メモリの保存ではできない）", async () => {
+  it("別のインスタンス（別の接続のアプリ）からも同じ状態が見え、続きを書ける（メモリの保存ではできない）", async () => {
     const { app, fx } = await pgSetup();
     const { url } = T();
     const sim2 = await openSimDb(url, 2);

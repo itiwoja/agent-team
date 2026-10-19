@@ -120,7 +120,7 @@ export function parseInline(text: string): Inline[] {
   return out;
 }
 
-/** 検索の転送の URL（Vertex AI の Grounding）。行き先のホストは分からない */
+/** 検索の転送の URL（Gemini の Google 検索 Grounding）。行き先のホストは分からない */
 const GROUNDING_REDIRECT = "vertexaisearch.cloud.google.com";
 
 /** リンクにする（http・https で URL として読めるものだけ）。題名がなければホスト名を見せる */

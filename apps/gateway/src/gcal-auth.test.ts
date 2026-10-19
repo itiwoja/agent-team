@@ -25,7 +25,7 @@ import type { FxWorkspace } from "@open-team/db/testing";
 
 const T = useTestDb();
 
-const GCAL_BASE = "https://gcal-123456789012.asia-northeast1.run.app";
+const GCAL_BASE = "http://localhost:8083";
 const GCAL_URL = `${GCAL_BASE}/mcp/gcal`;
 const SHARED = "gcal-shared-token-for-gateway-tests-0123456";
 const TOKEN_KEY = Buffer.alloc(32, 9).toString("base64");
@@ -119,7 +119,7 @@ async function seedGoogle(db: Db, ws: FxWorkspace, mode: Mode): Promise<Connecto
 }
 
 function providerEnv() {
-  return gatewayEnv(null, { deploymentMode: "local", allowedConnectorUrls: [GCAL_BASE], gcal: GCAL_CFG });
+  return gatewayEnv(null, { allowedConnectorUrls: [GCAL_BASE], gcal: GCAL_CFG });
 }
 
 /** 書き込みの試験の準備：Google のコネクタを同期し、create_event を確定する（seedShop と同じ手順） */
@@ -347,13 +347,13 @@ describe("gateway の流れ（gcal の MCP を差し込む）", () => {
 });
 
 describe("リハーサルの走行の本人の Google カレンダー（16 §6.1）：模擬へ向け直す", () => {
-  const SIM_BASE = "https://sim-world-123456789012.asia-northeast1.run.app";
+  const SIM_BASE = "http://localhost:8081";
 
   it("execute：リハーサルの create_event は模擬（SIM_WORLD_URL + SIM_GCAL_PATH）へ行き、token を取らず Google の頭も付けず、X-OT-* を付ける", async () => {
     const { db } = T();
     const ws = await workspace(db, "owner");
     const fake = okGoogle();
-    const gw = startGateway(db, gatewayEnv(SIM_BASE, { deploymentMode: "local", allowedConnectorUrls: [SIM_BASE, GCAL_BASE], gcal: GCAL_CFG }), {
+    const gw = startGateway(db, gatewayEnv(SIM_BASE, { allowedConnectorUrls: [SIM_BASE, GCAL_BASE], gcal: GCAL_CFG }), {
       hook: gcalHook(fake, [GCAL_BASE, SIM_BASE]),
     });
     const conn = await seedGoogle(db, ws, "ok");

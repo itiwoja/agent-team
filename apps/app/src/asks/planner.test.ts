@@ -239,7 +239,7 @@ describe("planFormation", () => {
 });
 
 describe("plannerJsonSchema", () => {
-  it("maxItems を含めない（入れ子の maxItems は Vertex が 400 で拒む）", () => {
+  it("maxItems を含めない（入れ子の maxItems は Gemini が 400 で拒む）", () => {
     expect(JSON.stringify(plannerJsonSchema())).not.toContain("maxItems");
   });
 });

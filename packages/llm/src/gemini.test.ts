@@ -3,7 +3,7 @@ import type { GenerateContentParameters, Part } from "@google/genai";
 import type { ChatMessage, McpToolSpec, ToolSpec } from "@open-team/runner";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  createVertexAi,
+  createGeminiAi,
   fromGeminiResponse,
   GeminiClient,
   inputTokensUpperBound,
@@ -897,55 +897,42 @@ describe("GeminiClient：再試行・タイムアウト・中断", () => {
   });
 });
 
-describe("Vertex AI のクライアント（ADR-032：API キーを使わず ADC で呼ぶ）", () => {
+describe("Gemini API のクライアント（API キーで呼ぶ）", () => {
   type Internals = {
     apiKey?: string;
     apiClient: {
       isVertexAI(): boolean;
-      getProject(): string | undefined;
-      getLocation(): string | undefined;
       getBaseUrl(): string;
       clientOptions: {
         apiKey?: string;
-        auth: { apiKey?: string; googleAuth?: unknown };
         httpOptions?: { timeout?: number; retryOptions?: unknown };
       };
     };
   };
 
-  it("generateContent を渡さず project もなければ作らない", () => {
-    expect(() => new GeminiClient({})).toThrow(/GOOGLE_CLOUD_PROJECT/);
-    expect(() => new GeminiClient({ project: "  " })).toThrow(/GOOGLE_CLOUD_PROJECT/);
+  it("generateContent を渡さず apiKey もなければ作らない", () => {
+    expect(() => new GeminiClient({})).toThrow(/GEMINI_API_KEY/);
+    expect(() => new GeminiClient({ apiKey: "  " })).toThrow(/GEMINI_API_KEY/);
   });
 
-  it("project があれば作れる（作るだけでは通信しない）", () => {
-    expect(() => new GeminiClient({ project: "open-team-hack" })).not.toThrow();
+  it("apiKey があれば作れる（作るだけでは通信しない）", () => {
+    expect(() => new GeminiClient({ apiKey: "test-key" })).not.toThrow();
   });
 
-  it("vertexai・project・location で作り、環境変数の GEMINI_API_KEY・GOOGLE_API_KEY を使わない（認証は ADC）", () => {
-    vi.stubEnv("GEMINI_API_KEY", "must-not-be-used-1");
-    vi.stubEnv("GOOGLE_API_KEY", "must-not-be-used-2");
-    const debug = vi.spyOn(console, "debug").mockImplementation(() => {});
-    const ai = createVertexAi({ project: "open-team-hack", location: "global", timeoutMs: LLM_TIMEOUT_MS });
-    debug.mockRestore();
+  it("apiKey で作り、Vertex ではなく Gemini API の URL を使う", () => {
+    const ai = createGeminiAi({ apiKey: "test-key", timeoutMs: LLM_TIMEOUT_MS });
     const internals = ai as unknown as Internals;
-    expect(ai.vertexai).toBe(true);
-    expect(internals.apiKey).toBeUndefined();
-    expect(internals.apiClient.clientOptions.apiKey).toBeUndefined();
-    expect(internals.apiClient.clientOptions.auth.apiKey).toBeUndefined();
-    expect(internals.apiClient.clientOptions.auth.googleAuth).toBeDefined();
-    expect(internals.apiClient.isVertexAI()).toBe(true);
-    expect(internals.apiClient.getProject()).toBe("open-team-hack");
-    expect(internals.apiClient.getLocation()).toBe("global");
-    expect(internals.apiClient.getBaseUrl()).toBe("https://aiplatform.googleapis.com/");
+    expect(ai.vertexai).toBe(false);
+    expect(internals.apiClient.isVertexAI()).toBe(false);
+    expect(internals.apiClient.clientOptions.apiKey).toBe("test-key");
+    expect(internals.apiClient.getBaseUrl()).toBe("https://generativelanguage.googleapis.com/");
   });
 
   it("SDK の再試行は使わず（やり直しは withRetry の1か所）、タイムアウトは120秒", () => {
-    const ai = createVertexAi({ project: "p", location: "asia-northeast1", timeoutMs: LLM_TIMEOUT_MS });
+    const ai = createGeminiAi({ apiKey: "test-key", timeoutMs: LLM_TIMEOUT_MS });
     const internals = ai as unknown as Internals;
     expect(internals.apiClient.clientOptions.httpOptions?.retryOptions).toBeUndefined();
     expect(internals.apiClient.clientOptions.httpOptions?.timeout).toBe(120_000);
-    expect(internals.apiClient.getBaseUrl()).toBe("https://asia-northeast1-aiplatform.googleapis.com/");
   });
 });
 

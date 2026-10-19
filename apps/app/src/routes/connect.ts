@@ -58,7 +58,7 @@ function parseStateCookie(raw: string | undefined): { state: string; tz: string;
 
 /** Google の接続の Cookie のオプション（Secure は本番だけ。ローカルは http のまま動く） */
 function stateCookieOptions(deps: Pick<AppDeps, "env">) {
-  return { httpOnly: true, secure: deps.env.deploymentMode === "cloud", sameSite: "Lax" as const, path: GCAL_STATE_COOKIE_PATH };
+  return { httpOnly: true, secure: deps.env.cookieSecure, sameSite: "Lax" as const, path: GCAL_STATE_COOKIE_PATH };
 }
 
 function backTo(c: Context<AppHonoEnv>, outcome: ConnectOutcome | null): Response {

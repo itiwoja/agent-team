@@ -1,4 +1,4 @@
-// SimStore の Postgres の実装（M-40、SW §3.6。Cloud SQL の sim スキーマを ot_sim のロールで使う：SO §4.6）。
+// SimStore の Postgres の実装（M-40、SW §3.6。DB の sim スキーマを使う：SO §4.6）。
 // 問い合わせは @open-team/db/sim（どれも workspace_id で絞る）。ここは行と記録の写し替え、トランザクションの範囲、制約の違反の読み替え。
 // 決まり：トランザクションの中で外部を呼ばない（G-14。updateExecution の fn は同期の純粋関数）、SQL のエラーを中で握りつぶさない
 
@@ -110,7 +110,7 @@ async function mapMissing<T>(fn: () => Promise<T>): Promise<T> {
 export class PostgresSimStore implements SimStore {
   readonly #db: Db;
 
-  /** db は ot_sim の接続（cloud）。ローカルは compose の DB の利用者でもよい（sim スキーマに届けばよい） */
+  /** db は compose の DB の接続（sim スキーマに届けばよい） */
   constructor(db: Db) {
     this.#db = db;
   }

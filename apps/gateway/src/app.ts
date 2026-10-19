@@ -1,5 +1,5 @@
 // gateway の Hono のアプリ（api-surface.md §1.2・§2.12.2・§3.17、security-ops-deploy.md §3.9）。書き込みの唯一の出口（15:445）。
-// /gw/v1/* は呼び出し元を sa-app だけに限る（cloud は Cloud Run の IAM の上に ID トークンのクレーム、local は共有トークン：15:483）。
+// /gw/v1/* は呼び出し元を sa-app だけに限る（共有トークン：15:483）。
 // 本文の workspaceId・rehearsal_run_id・shadow は読まない（EP-49 は z.object で知らないキーを捨てる：AS §2 の例外、T-155）。
 // 誤りは 09 の共通の形 { error: { code, message, details, requestId } }
 
@@ -52,7 +52,7 @@ export function createGateway(env: GatewayEnv, deps: GatewayDeps): GatewayApp {
   app.onError(errorHandler({ logger: g.log }));
   app.notFound(notFoundHandler());
 
-  // Cloud Run の予約パスを避けた /api/health も同じ（SO §4.1）。中身は版だけ
+  // /api/health も同じ（SO §4.1）。中身は版だけ
   const health = { status: "ok", service: "gateway", commit: env.commitSha ?? null } as const;
   app.get("/api/health", (c) => c.json(health));
   app.get("/healthz", (c) => c.json(health));

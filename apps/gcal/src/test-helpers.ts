@@ -16,11 +16,8 @@ export const INTENT = "01234567-89ab-cdef-0123-456789abcdef";
 export const EVENT_ID = `mk${INTENT.replace(/-/g, "")}`;
 
 export const LOCAL_ENV: GcalEnv = {
-  deploymentMode: "local",
   port: 0,
   sharedToken: LOCAL_TOKEN,
-  selfUrl: undefined,
-  gatewaySaEmail: undefined,
   googleCalendarApiBase: API_BASE,
   commitSha: "0123abc",
 };

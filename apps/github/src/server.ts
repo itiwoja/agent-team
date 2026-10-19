@@ -1,4 +1,4 @@
-// github を起動する（Cloud Run・ローカル。sim-world の server.ts と同じ書き方）
+// github を起動する（pnpm dev・docker compose。sim-world の server.ts と同じ書き方）
 // 足りない環境変数があれば起動しない（名前だけを出す：D-47）。DB は持たない（18 §2-4）
 
 import { serve } from "@hono/node-server";
@@ -18,10 +18,10 @@ if (missing.length > 0) {
 const app = createApp(env, { log });
 
 const server = serve({ fetch: app.fetch, port: env.port }, (info) => {
-  log.info("github.listening", `github listening on :${info.port}`, { port: info.port, mode: env.deploymentMode });
+  log.info("github.listening", `github listening on :${info.port}`, { port: info.port });
 });
 
-// Cloud Run は止める前に SIGTERM を送る：受け付けをやめてから終わる
+// 止める前に SIGTERM が来る（docker compose stop など）：受け付けをやめてから終わる
 let stopping = false;
 const stop = (signal: string) => {
   if (stopping) return;

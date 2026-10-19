@@ -25,7 +25,7 @@ const T = useTestDb();
 
 const { privateKey, publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
 const PRIVATE_PEM = privateKey.export({ type: "pkcs1", format: "pem" }).toString();
-const GH_BASE = "https://github-123456789012.asia-northeast1.run.app";
+const GH_BASE = "http://localhost:8084";
 const GH_URL = `${GH_BASE}/mcp/github`;
 const API = "https://api.github.test";
 const SHARED = "github-shared-token-for-gateway-tests-0123";
@@ -95,7 +95,7 @@ async function seedGithub(db: Db, ws: FxWorkspace, withCredential = true, instal
   });
 }
 
-const providerEnv = () => gatewayEnv(null, { deploymentMode: "local", allowedConnectorUrls: [GH_BASE], github: GH_CFG });
+const providerEnv = () => gatewayEnv(null, { allowedConnectorUrls: [GH_BASE], github: GH_CFG });
 
 function verifyJwt(jwt: string): Record<string, unknown> {
   const [h, b, sig] = jwt.split(".");
@@ -204,7 +204,7 @@ describe("境界（18 §3.5）", () => {
     expect(isOwnGithubConnector(conn, GH_BASE)).toBe(true);
     expect(isOwnGithubConnector({ ...conn, auth: { type: "oauth", provider: "google" } }, GH_BASE)).toBe(false);
     expect(isOwnConnector({ gcalOrigin: null, githubOrigin: GH_BASE }, conn)).toBe(true);
-    const base = { deploymentMode: "cloud" as const, allowedOrigins: [GH_BASE], simWorldOrigin: null, connectorUrl: GH_URL, ownOAuthConnector: true };
+    const base = { simWorldOrigin: null, connectorUrl: GH_URL, ownOAuthConnector: true };
     expect(connectorBoundary({ ...base, workspaceKind: "guest", rehearsalRunId: null, shadow: false })).toEqual({ ok: true });
     expect(connectorBoundary({ ...base, workspaceKind: "owner", rehearsalRunId: "r1", shadow: false })).toEqual({ ok: false, reasonCode: "rehearsal_real_connector" });
     expect(connectorBoundary({ ...base, workspaceKind: "owner", rehearsalRunId: null, shadow: true })).toEqual({ ok: false, reasonCode: "shadow_real_connector" });

@@ -122,8 +122,8 @@ export function jobBlock(job: JobBrief): string {
 // ---- 応答の読み取り ----
 
 /**
- * Gemini（Vertex）に送る JSON Schema から `maxItems` を全部外す。大きな要素の配列に `maxItems` を付けたり、`maxItems` を入れ子にしたりすると、
- * Vertex は「複雑すぎる」として 400 で拒む（実機で確かめた：状況の生成の scenarios 20件、設定プランナーの 6×8×20）。
+ * Gemini に送る JSON Schema から `maxItems` を全部外す。大きな要素の配列に `maxItems` を付けたり、`maxItems` を入れ子にしたりすると、
+ * Gemini は「複雑すぎる」として 400 で拒む（実機で確かめた：状況の生成の scenarios 20件、設定プランナーの 6×8×20）。
  * 個数の上限は受け取ったあとの Zod が守る
  */
 export function withoutMaxItems<T>(v: T): T {

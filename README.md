@@ -40,20 +40,20 @@ flowchart LR
 | 文書 | 内容 |
 |---|---|
 | [docs/overview.md](docs/overview.md) | 何ができるか・用語 |
-| [docs/architecture.md](docs/architecture.md) | サービス構成・信頼の境界・デプロイ |
+| [docs/architecture.md](docs/architecture.md) | サービス構成・信頼の境界 |
 | [docs/safety.md](docs/safety.md) | 統制（Kernel）・安全チェック（リハーサル）の仕組み |
 | [docs/development.md](docs/development.md) | ローカルでの起動・テスト・計測 |
 | [docs/measurements/](docs/measurements/) | 本物の Gemini で測った結果 |
 
 ## 技術
 
-TypeScript（pnpm のモノレポ）・Hono・React＋Vite（PWA）・PostgreSQL 16・MCP・Gemini（Vertex AI）・Google Cloud（Cloud Run・Cloud SQL・Secret Manager・Cloud Scheduler）・GitHub Actions。
+TypeScript（pnpm のモノレポ）・Hono・React＋Vite（PWA）・PostgreSQL 16（Docker）・MCP・Gemini API。手元の PC だけで動き、クラウドの環境は要りません。
 
 ## すぐ試す
 
 ```bash
 pnpm install --frozen-lockfile
-cp .env.example .env      # 値の埋め方は docs/development.md
+cp .env.example .env      # 値の埋め方は docs/development.md（Gemini を使うなら GEMINI_API_KEY）
 docker compose up -d db
 DATABASE_URL=postgres://postgres:postgres@localhost:5432/open_team pnpm --filter @open-team/db migrate
 pnpm dev                  # http://localhost:5173

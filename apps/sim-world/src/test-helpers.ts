@@ -12,12 +12,8 @@ import { MemorySimStore } from "./memory-store.ts";
 export const TOKEN = "local-shared-token-for-tests-0123456789";
 
 export const LOCAL_ENV: SimWorldEnv = {
-  deploymentMode: "local",
   port: 0,
   sharedToken: TOKEN,
-  selfUrl: undefined,
-  gatewaySaEmail: undefined,
-  appSaEmail: undefined,
   databaseUrl: undefined,
   commitSha: "0123abc",
 };

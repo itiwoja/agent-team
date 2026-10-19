@@ -7,8 +7,6 @@ export {
   readGatewayEnv,
   normalizeConnectorUrl,
   assertAllowedConnectorUrls,
-  readProjectNumber,
-  simWorldUrlNeedsProjectNumber,
   GatewayStartupError,
   type GatewayEnv,
   type GcalConfig,

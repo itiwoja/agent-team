@@ -53,8 +53,6 @@ export async function syncConnectorTools(g: GatewayContext, connectorId: string,
   if (!connector) throw new AppError("NOT_FOUND");
 
   const boundary = connectorBoundary({
-    deploymentMode: g.env.deploymentMode,
-    allowedOrigins: g.allowedOrigins,
     simWorldOrigin: g.simWorldOrigin,
     workspaceKind: ctx.kind,
     rehearsalRunId: null,

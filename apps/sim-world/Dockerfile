@@ -1,4 +1,4 @@
-# Cloud Run の sim-world サービスのイメージ（15 §構成・§模擬の世界、D-52）。形はルートの Dockerfile（app）と同じ：
+# docker compose の sim-world サービスのイメージ（15 §構成・§模擬の世界、D-52）。形はルートの Dockerfile（app）と同じ：
 # ビルドはせず、ワークスペースの形（apps/sim-world・packages/ と pnpm のシンボリックリンク）のまま入れる（G-12）。
 # ビルド：docker build -f apps/sim-world/Dockerfile -t sim-world .（リポジトリのルートで。コンテキストはルート）
 # 起動するファイルは apps/sim-world/src/server.ts（app の src/server.ts と同じ決まり。PORT を読む）

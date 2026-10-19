@@ -380,7 +380,7 @@ export async function startWhenRoom(deps: AskRunDeps, ctx: WsCtx, taskId: Uuid, 
 
 const TERMINAL = new Set(["succeeded", "completed", "rejected", "failed", "cancelled", "halted"]);
 
-// ---- 停止（プロセスの終了）。Cloud Run の SIGTERM で呼ぶ（server.ts） ----
+// ---- 停止（プロセスの終了）。SIGTERM・SIGINT で呼ぶ（server.ts） ----
 
 let stopping = false;
 

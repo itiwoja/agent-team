@@ -12,7 +12,7 @@ export const SESSION_COOKIE = "ot_session";
 /** これより短い既知の値は置き換えない（設定の誤りで短い文字列が全部消えないように。秘密は32文字以上：SO §2.1） */
 export const MIN_KNOWN_SECRET_LENGTH = 8;
 
-/** 値をマスクする環境変数（SO §2.2 の Secret Manager に置くもの・置いてはいけない鍵、ローカルの共有トークン） */
+/** 値をマスクする環境変数（秘密の値・鍵・共有トークン） */
 export const SECRET_ENV_NAMES = [
   "PHASE0_ACCESS_TOKEN",
   "GUEST_ENTRY_TOKEN",
@@ -58,7 +58,7 @@ const PATTERNS: ReadonlyArray<readonly [RegExp, string]> = [
   [/\b(ot_session=)[^;\s"',]+/g, `$1${REDACTED}`],
   // URL の中のパスワード（postgres://user:<password>@host など）
   [/\b([a-z][a-z0-9+.-]*:\/\/[^\s:@/]+:)[^\s@/]+@/gi, `$1${REDACTED}@`],
-  // JWT（Google の ID トークンなど。署名を外したもの（末尾が .）も）
+  // JWT（ID トークンなど。署名を外したもの（末尾が .）も）
   [/\beyJ[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]{4,}\.[A-Za-z0-9_-]*/g, REDACTED],
   // Google のアクセストークン
   [/\bya29\.[A-Za-z0-9_\-.]+/g, REDACTED],
@@ -107,7 +107,7 @@ export function isSensitiveKey(key: string): boolean {
   return SENSITIVE_KEY_SUFFIXES.some((s) => k.endsWith(s));
 }
 
-/** これより深い入れ子・長い文字列は切る（Cloud Logging の1件 256KB の内に収める） */
+/** これより深い入れ子・長い文字列は切る（ログ1件の大きさを抑える） */
 export const MAX_DEPTH = 8;
 export const MAX_STRING_LENGTH = 8192;
 

@@ -36,7 +36,7 @@ async function setup(llm: ScriptedLlmClient): Promise<Setup> {
   const w = (world = await startRehearsalWorld(db, url));
   const t = makeTestApp(db, {
     deps: { gatewayClient: w.gatewayClient, simClient: w.simClient, llm, clock: w.clock },
-    env: { gemini: { project: undefined, location: "global", agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
+    env: { gemini: { apiKey: undefined, agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
   });
   const issued = await issueSession(db, { workspaceId: w.ws.workspaceId, userId: w.ws.userId, ipHash: null, userAgent: null, now: T0 });
   return { w, t, cookie: issued.cookieValue, csrf: issued.csrfToken, base: `/api/v1/workspaces/${w.ws.workspaceId}/rehearsals` };

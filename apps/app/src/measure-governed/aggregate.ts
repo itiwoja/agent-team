@@ -278,7 +278,7 @@ export function renderGovernedMarkdown(c: GovernedConditions, records: readonly 
   lines.push("", "### 条件", "");
   lines.push(
     `- 日付：${c.date}（JST。${c.startedAt} 〜 ${c.finishedAt}）${c.commit === null ? "" : `／コミット ${c.commit}`}`,
-    `- LLM：${c.llm === "gemini" ? "Gemini（Vertex AI）" : "scripted（決定論の偽物）"}／モデル：${c.model}`,
+    `- LLM：${c.llm === "gemini" ? "Gemini" : "scripted（決定論の偽物）"}／モデル：${c.model}`,
     `- 状況：${c.faults.join("・")}（パラメータ・シードは統制なしの計測と同じ：scripts/measure の measureScenario・measureSeeds、基準のシード ${c.baseSeed}、状況の中は同じシード）`,
     `- 回数：設定ごと・状況ごとに${c.runsPerScenario}回。統制なし（影）は「ルールなし」の走行でだけ走らせる（影は設定に左右されない）`,
     "- 経路：本番と同じ（runner・edge・Kernel・gateway・sim-world・Postgres）。リハーサルの試験の世界（apps/app の startRehearsalWorld）で1回に状況1件の走行を作る",

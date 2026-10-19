@@ -929,7 +929,7 @@ const EVENT_TYPES = [
 
 /**
  * EventSource で購読する。事象の名前は event、本文は JSON。
- * ネットワークの切断はブラウザが Last-Event-ID つきでつなぎ直す。サーバーが非 200 で閉じた・Cloud Run が切ったとき（CLOSED）は
+ * ネットワークの切断はブラウザが Last-Event-ID つきでつなぎ直す。サーバーが非 200 で閉じた・プロキシなどが切ったとき（CLOSED）は
  * lib/sse.ts がバックオフして作り直す（直前に GET /session で入り直しが要るか確かめ、要るなら onUnauthorized の扱い）。
  * onDown は切れてから猶予（8 秒）の間につながらなかったとき。
  */

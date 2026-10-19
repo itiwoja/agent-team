@@ -192,8 +192,6 @@ async function prepare(tx: Tx, e: ExecCtx, drift: DriftResult | null, now: Date)
   // 2-4：境界（BR-63・64・66・67②。影でも必ず効かせる）。リハーサル・影の本人の Google カレンダーは模擬へ向ける（16 §6.1）
   const url = effectiveConnectorUrl(g, connector, { rehearsalRunId: task.rehearsal_run_id, shadow: task.shadow });
   const boundary = connectorBoundary({
-    deploymentMode: g.env.deploymentMode,
-    allowedOrigins: g.allowedOrigins,
     simWorldOrigin: g.simWorldOrigin,
     workspaceKind: ctx.kind,
     rehearsalRunId: task.rehearsal_run_id,
@@ -212,7 +210,6 @@ async function prepare(tx: Tx, e: ExecCtx, drift: DriftResult | null, now: Date)
         operation: "mcp_write",
         subject: { action: intent.action, connectorId: connector.id, tool: payloadOf(intent).tool },
         inputs: {
-          deploymentMode: g.env.deploymentMode,
           workspaceKind: ctx.kind,
           rehearsalRunId: task.rehearsal_run_id,
           shadow: task.shadow,

@@ -10,9 +10,9 @@ import {
 } from "./types.ts";
 
 export interface GatewayClientOptions {
-  /** 例 https://gateway-xxxx.a.run.app（末尾の / はなくてよい）。ID トークンの aud にも使う */
+  /** 例 http://localhost:8787（末尾の / はなくてよい） */
   baseUrl: string;
-  /** 呼び出し元の証明のヘッダー（cloud は Authorization: Bearer <ID トークン>、local は共有トークン＋X-OT-Caller） */
+  /** 呼び出し元の証明のヘッダー（共有トークン＋X-OT-Caller） */
   authHeaders: (audience: string) => Promise<Record<string, string>>;
   fetch?: typeof fetch;
   /** 既定 120秒（tools/call の60秒＋送信前の再試行の待ち 21秒より長く：G-02） */

@@ -4,7 +4,6 @@ import type { PlatformEnv, PlatformVariables } from "./context.ts";
 import { errorHandler, notFoundHandler } from "./errors.ts";
 import {
   REQUEST_ID_PATTERN,
-  TRACE_KEY,
   createLogger,
   loggerOf,
   memoryLogger,
@@ -13,7 +12,6 @@ import {
   requestIdOf,
   requestSecretsOf,
   silentLogger,
-  traceOf,
   type LogRecord,
 } from "./log.ts";
 import { REDACTED } from "./mask.ts";
@@ -135,16 +133,6 @@ describe("リクエスト ID（09_api/common.md:52、SO §3.3 の 2）", () => {
     expect(REQUEST_ID_PATTERN.test(a)).toBe(true);
   });
 
-  it("traceOf：X-Cloud-Trace-Context・traceparent から Cloud Logging の trace を作る。読めなければ null", () => {
-    const id = "105445aa7843bc8bf206b12000100000";
-    expect(traceOf(new Headers({ "x-cloud-trace-context": `${id}/1;o=1` }), "proj")).toBe(`projects/proj/traces/${id}`);
-    expect(traceOf(new Headers({ "x-cloud-trace-context": id.toUpperCase() }), "proj")).toBe(`projects/proj/traces/${id}`);
-    expect(traceOf(new Headers({ traceparent: `00-${id}-00f067aa0ba902b7-01` }), "proj")).toBe(`projects/proj/traces/${id}`);
-    expect(traceOf(new Headers({ "x-cloud-trace-context": "nothex/1" }), "proj")).toBeNull();
-    expect(traceOf(new Headers({ "x-cloud-trace-context": `${"0".repeat(32)}/1` }), "proj")).toBeNull();
-    expect(traceOf(new Headers(), "proj")).toBeNull();
-  });
-
   it("requestSecretsOf：Cookie の ot_session・X-Task-Token・X-CSRF-Token・Bearer を拾う", () => {
     const h = new Headers({
       cookie: "theme=dark; ot_session=sess-value-123; x=1",
@@ -219,12 +207,6 @@ describe("リクエスト ID（09_api/common.md:52、SO §3.3 の 2）", () => {
     expect(access[1]).toMatchObject({ severity: "WARNING", path: "/boom", status: 500 });
     expect(typeof access[0]!.latencyMs).toBe("number");
     expect(JSON.stringify(access)).not.toContain("secret-in-query");
-  });
-
-  it("traceProjectId があれば行に logging.googleapis.com/trace を付ける", async () => {
-    const { app, records } = appWith({ traceProjectId: "proj-1" });
-    await app.request("/ok", { headers: { "x-cloud-trace-context": "105445aa7843bc8bf206b12000100000/1;o=1" } });
-    expect(records.find((r) => r.event === "handler.called")?.[TRACE_KEY]).toBe("projects/proj-1/traces/105445aa7843bc8bf206b12000100000");
   });
 
   it("requestIdOf・loggerOf はミドルウェアがなくても動く（作る・fallback）", async () => {

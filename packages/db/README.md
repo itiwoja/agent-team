@@ -1,6 +1,6 @@
 # @open-team/db
 
-Cloud SQL（PostgreSQL 16）の接続・マイグレーション・行の型・監査ログ・ワークスペースとセッション・ワークスペースをまたぐ処理（`system`）。
+PostgreSQL 16 の接続・マイグレーション・行の型・監査ログ・ワークスペースとセッション・ワークスペースをまたぐ処理（`system`）。
 仕様は scratchpad の `spec/db-schema.md` を、`spec/cross-check.md` の結論（M-xx・G-xx）で直したもの。
 
 | ファイル | 中身 | 持ち主 |
@@ -118,8 +118,8 @@ export async function expireIntent(tx: Tx, ctx: WsCtx, intentId: Uuid, now: Date
 | `ot_sim` | sim-world | `sim` スキーマだけ（`sim.events` は UPDATE なし） |
 | `ot_retention` | app の掃除だけ（`DATABASE_URL_MAINT`。DB §2・SO の `ot_maint` と同じ役目） | `workspaces`・`users`・`sessions`・`entry_attempts`・`idempotency_keys`・`workspace_events` の DELETE と、止めるための UPDATE |
 
-- ロールは NOLOGIN で作る（流す利用者に CREATEROLE があるときだけ）。ログインはインフラで `ALTER ROLE ot_app LOGIN PASSWORD '…'` か、
-  ログイン用の利用者に `GRANT ot_app TO <利用者>`。Cloud SQL では `gcloud sql users create` で作った利用者は `cloudsqlsuperuser` に入るので、SQL で作る。
+- ロールは NOLOGIN で作る（流す利用者に CREATEROLE があるときだけ）。ログインは `ALTER ROLE ot_app LOGIN PASSWORD '…'` か、
+  ログイン用の利用者に `GRANT ot_app TO <利用者>`。
 - `OT_DB_SKIP_ROLES=1` で roles.sql を飛ばす。
 
 ## 5. マイグレーション

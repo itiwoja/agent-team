@@ -1,7 +1,7 @@
-# 作業場（サンドボックス）の実行役のイメージ（Cloud Run Jobs。D-116）。形はルートの Dockerfile と同じ（ビルドせず .ts をそのまま動かす：G-12）。
+# 作業場（サンドボックス）の実行役のイメージ（docker の作業場。D-116）。形はルートの Dockerfile と同じ（ビルドせず .ts をそのまま動かす：G-12）。
 # ビルド：docker build -f apps/sandbox/Dockerfile -t sandbox .（リポジトリのルートで）
 # 中身：Node.js（実行役と、作業場の node・npm）と Python 3（pip）。認証情報は入れない。
-# 実行役は root で動き、コマンドは権限のない利用者 sandbox（uid 10001）で動かす。通信の制限はジョブの網の側（infra/sandbox-setup.sh）
+# 実行役は root で動き、コマンドは権限のない利用者 sandbox（uid 10001）で動かす。通信の制限は docker の網の側
 
 # ベースイメージは digest で固定する（15 §サプライチェーン、D-50）。ルートの Dockerfile と同じ値にそろえる
 ARG NODE_IMAGE=node:22.23.3-slim@sha256:43ac6c60b8f89723f746e8a92ce91abd5017e627ce1ddfe4238355d3a30b772c

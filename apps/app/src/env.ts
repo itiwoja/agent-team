@@ -1,12 +1,12 @@
-// app の環境変数（security-ops-deploy.md §2.2・§3.1.1）。足りなくても起動は止めず「準備中」にする（D-47）。
+// app の環境変数（ローカル実行：pnpm dev・docker compose）。足りなくても起動は止めず「準備中」にする（D-47）。
 // 名前だけを missing に積み、値は応答にもログにも出さない。読み方の共通は @open-team/platform の EnvReader。
 // 決めたこと：
-// - DATABASE_URL は local でも必須（セッションを DB に置いたため。SO §3.1.1 の「いつも必須」に足した）
-// - local の GATEWAY_URL・SIM_WORLD_URL・INTERNAL_SHARED_TOKEN は任意（なければオーナーの初期投入と内部の呼び出しが止まるだけ）
+// - DATABASE_URL は必須（セッションを DB に置いたため）
+// - GATEWAY_URL・SIM_WORLD_URL・INTERNAL_SHARED_TOKEN・GEMINI_API_KEY は任意（なければオーナーの初期投入・内部の呼び出し・LLM が止まるだけ）
 // - PLATFORM_CEILINGS_VERSION は必須にしない（M-59：Hard Ceiling の版はコードの定数）
 
 import { readGeminiEnv, type GeminiEnv } from "@open-team/llm";
-import { EnvReader, readServiceAuthEnv, type DeploymentMode, type EnvCheck, type EnvSource, type ServiceAuthConfig } from "@open-team/platform";
+import { EnvReader, readServiceAuthEnv, type EnvCheck, type EnvSource, type ServiceAuthConfig } from "@open-team/platform";
 
 /** Google カレンダーの連携（16 §3.6）。どれか欠けるか不正なら undefined（「つなぐ」を出さない）。準備中の名前には積まない（画面全体は止めない） */
 export interface GoogleConnectEnv {
@@ -40,8 +40,6 @@ export interface GithubConnectEnv {
 }
 
 export interface AppEnv {
-  /** local＝ローカル（docker compose）、cloud＝Cloud Run（フェーズ0-H の公開デプロイ。SO の public と同じ） */
-  deploymentMode: DeploymentMode;
   /** ログのラベルだけ（SO C-21） */
   appEnv: string | undefined;
   port: number;
@@ -52,17 +50,15 @@ export interface AppEnv {
   guestToken: string | undefined;
   /** SESSION_COOKIE_SECRET（IP の HMAC の鍵にも使う：AS 8-33、SO I-11） */
   cookieSecret: string | undefined;
-  /** cloud では常に true（SO §3.1.1 の6） */
+  /** COOKIE_SECURE（既定 true。http の LAN などで使うときだけ "false"） */
   cookieSecure: boolean;
   databaseUrl: string | undefined;
   /** 掃除（ot_retention）の接続（EP-48。次の段階） */
   databaseUrlMaint: string | undefined;
   appBaseUrl: string | undefined;
-  /** 自分の /internal/* を呼ぶ先と ID トークンの aud（SO §2.2） */
-  appInternalUrl: string | undefined;
   gatewayUrl: string | undefined;
   simWorldUrl: string | undefined;
-  /** サービス間の認証（cloud：ID トークン、local：INTERNAL_SHARED_TOKEN） */
+  /** サービス間の認証（INTERNAL_SHARED_TOKEN） */
   serviceAuth: ServiceAuthConfig;
   gemini: GeminiEnv;
   /** GUEST_RETEST_MODE：用意した依頼の再試験を台本で再現する（replay。既定）か、本物の Gemini で走らせる（gemini）か（D-101・D-104） */
@@ -79,34 +75,28 @@ export interface AppEnv {
 /**
  * 作業場の起こし方（SANDBOX_PROVIDER）：
  * - none（既定）：作業場を使わない
- * - cloudrun：Cloud Run Jobs（SANDBOX_JOB＝projects/…/locations/…/jobs/…、SANDBOX_EDGE_URL＝作業場が呼ぶ app の URL）
  * - docker：手元の Docker（SANDBOX_DOCKER_IMAGE・SANDBOX_EDGE_URL。SANDBOX_DOCKER_NETWORK は任意）
- * - inprocess：app と同じプロセス・同じ権限で動かす（隔離がないので local だけ。cloud では準備中にする）
+ * - inprocess：app と同じプロセス・同じ権限で動かす（隔離がない）
  */
 export interface SandboxEnv {
-  provider: "none" | "cloudrun" | "docker" | "inprocess";
-  job: string | undefined;
+  provider: "none" | "docker" | "inprocess";
   edgeUrl: string | undefined;
   dockerImage: string | undefined;
   dockerNetwork: string | undefined;
 }
 
-export function readSandboxEnv(source: EnvSource, cloud: boolean, flag: (name: string) => void): SandboxEnv {
+export function readSandboxEnv(source: EnvSource, flag: (name: string) => void): SandboxEnv {
   const raw = source.SANDBOX_PROVIDER?.trim() ?? "";
-  const provider = raw === "cloudrun" || raw === "docker" || raw === "inprocess" ? raw : "none";
+  const provider = raw === "docker" || raw === "inprocess" ? raw : "none";
   if (raw !== "" && raw !== provider) flag("SANDBOX_PROVIDER");
-  // 隔離のない作業場を本番で使わない
-  if (cloud && provider === "inprocess") flag("SANDBOX_PROVIDER");
-  const job = optional(source.SANDBOX_JOB);
   const edgeUrl = normalizeHttpUrl(optional(source.SANDBOX_EDGE_URL));
-  if (provider === "cloudrun" && (job === undefined || !/^projects\/[^/]+\/locations\/[^/]+\/jobs\/[^/]+$/.test(job))) flag("SANDBOX_JOB");
-  if ((provider === "cloudrun" || provider === "docker") && edgeUrl === undefined) flag("SANDBOX_EDGE_URL");
+  if (provider === "docker" && edgeUrl === undefined) flag("SANDBOX_EDGE_URL");
   const dockerImage = optional(source.SANDBOX_DOCKER_IMAGE);
   if (provider === "docker" && dockerImage === undefined) flag("SANDBOX_DOCKER_IMAGE");
-  return { provider, job, edgeUrl, dockerImage, dockerNetwork: optional(source.SANDBOX_DOCKER_NETWORK) };
+  return { provider, edgeUrl, dockerImage, dockerNetwork: optional(source.SANDBOX_DOCKER_NETWORK) };
 }
 
-/** 必須でない local のサービス間の共有トークン（無いときは設定ごと空にして、内部の呼び出しを全部拒む） */
+/** 必須でないサービス間の共有トークン（無いときは設定ごと空にして、内部の呼び出しを全部拒む） */
 const LOCAL_SHARED_TOKEN = "INTERNAL_SHARED_TOKEN";
 
 export function readAppEnv(source: EnvSource = process.env): EnvCheck<AppEnv> {
@@ -114,56 +104,28 @@ export function readAppEnv(source: EnvSource = process.env): EnvCheck<AppEnv> {
   // いつも必須（並び順は既存の missingEnv のまま：SO-ENV-01）
   const ownerToken = r.secret("PHASE0_ACCESS_TOKEN", { required: true });
   const cookieSecret = r.secret("SESSION_COOKIE_SECRET", { required: true });
-  const mode = r.deploymentMode();
-  const cloud = mode === "cloud";
   const databaseUrl = r.string("DATABASE_URL", { required: true, pattern: /^postgres(ql)?:\/\// });
 
-  // cloud だけ追加で必須（SO §3.1.1 の3 の順）
-  const guestToken = r.secret("GUEST_ENTRY_TOKEN", { required: cloud });
-  const databaseUrlMaint = r.string("DATABASE_URL_MAINT", { required: cloud, pattern: /^postgres(ql)?:\/\// });
-  const appBaseUrl = r.url("APP_BASE_URL", { required: cloud, httpsOnly: cloud });
-  // APP_INTERNAL_URL・APP_SA_EMAIL は cloud のサービス間の認証として readServiceAuthEnv が読む（aud と呼び出し元）
-  let serviceAuth: ServiceAuthConfig;
-  let appInternalUrl: string | undefined;
-  if (cloud) {
-    serviceAuth = readServiceAuthEnv(r, mode, { audienceVar: "APP_INTERNAL_URL", callers: ["sa-app"] });
-    appInternalUrl = serviceAuth.mode === "cloud" ? serviceAuth.audience : undefined;
-  } else {
-    serviceAuth = r.has(LOCAL_SHARED_TOKEN) ? readServiceAuthEnv(r, mode) : { mode: "local", sharedToken: undefined };
-    appInternalUrl = r.url("APP_INTERNAL_URL");
-  }
-  const gatewayUrl = r.url("GATEWAY_URL", { required: cloud, httpsOnly: cloud });
-  const simWorldUrl = r.url("SIM_WORLD_URL", { required: cloud, httpsOnly: cloud });
+  const guestToken = r.secret("GUEST_ENTRY_TOKEN");
+  const databaseUrlMaint = r.string("DATABASE_URL_MAINT", { pattern: /^postgres(ql)?:\/\// });
+  const appBaseUrl = r.url("APP_BASE_URL");
+  const serviceAuth: ServiceAuthConfig = r.has(LOCAL_SHARED_TOKEN) ? readServiceAuthEnv(r) : { sharedToken: undefined };
+  const gatewayUrl = r.url("GATEWAY_URL");
+  const simWorldUrl = r.url("SIM_WORLD_URL");
   const gemini = readGeminiEnv(source as NodeJS.ProcessEnv);
-  if (cloud) {
-    r.string("GOOGLE_CLOUD_PROJECT", { required: true });
-    r.string("GOOGLE_CLOUD_LOCATION", { required: true });
-    r.string("GEMINI_MODEL_PLANNER", { required: true });
-    r.string("GEMINI_MODEL_AGENT", { required: true });
-  }
-  const commitSha = r.string("COMMIT_SHA", { required: cloud, pattern: /^[0-9a-f]{7,40}$/ });
-
-  if (cloud) {
-    // 同じ値だと入口のトークンの種類を見分けられない（15:330）
-    if (guestToken !== undefined && ownerToken !== undefined && guestToken === ownerToken) r.flag("GUEST_ENTRY_TOKEN");
-    // Gemini は IAM で呼ぶ。鍵の経路を作らない（ADR-032、SO §3.1.1 の5）
-    r.forbid("GEMINI_API_KEY");
-    r.forbid("GOOGLE_API_KEY");
-  }
+  const commitSha = r.string("COMMIT_SHA", { pattern: /^[0-9a-f]{7,40}$/ });
 
   return r.done({
-    deploymentMode: mode,
     appEnv: r.string("APP_ENV"),
     port: r.port(),
     webDist: r.string("WEB_DIST"),
     ownerToken,
     guestToken,
     cookieSecret,
-    cookieSecure: cloud ? true : source.COOKIE_SECURE !== "false",
+    cookieSecure: source.COOKIE_SECURE !== "false",
     databaseUrl,
     databaseUrlMaint,
     appBaseUrl,
-    appInternalUrl,
     gatewayUrl,
     simWorldUrl,
     serviceAuth,
@@ -172,7 +134,7 @@ export function readAppEnv(source: EnvSource = process.env): EnvCheck<AppEnv> {
     commitSha,
     googleConnect: readGoogleConnectEnv(source, appBaseUrl),
     githubConnect: readGithubConnectEnv(source, appBaseUrl),
-    sandbox: readSandboxEnv(source, cloud, (n) => r.flag(n)),
+    sandbox: readSandboxEnv(source, (n) => r.flag(n)),
   });
 }
 

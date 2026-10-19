@@ -44,7 +44,7 @@ export const SANDBOX_TOOL_SET: ReadonlySet<string> = new Set<SandboxTool>(["list
 
 /** 作業場の上限（edge 側） */
 export const SANDBOX_EDGE_LIMITS = {
-  /** 作業場が起きるまで待つ（Cloud Run Jobs の起動は数十秒） */
+  /** 作業場が起きるまで待つ（コンテナの起動には時間がかかる） */
   startupWaitSec: 180,
   /** コマンドの既定の時間・上限（作業場の実行役と同じ） */
   commandTimeoutSec: 120,

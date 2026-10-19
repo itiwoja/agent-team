@@ -5,7 +5,7 @@
 
 import { getConnInfo } from "@hono/node-server/conninfo";
 import { csrfTokenMatches, resolveSession, SESSION_LIMITS, touchSession, type MemberRole, type SessionCtx } from "@open-team/db";
-import { AppError, errorResponse, parseInput, setupRequired, type DeploymentMode } from "@open-team/platform";
+import { AppError, errorResponse, parseInput, setupRequired } from "@open-team/platform";
 import type { Context, MiddlewareHandler } from "hono";
 import { deleteCookie, getCookie, setCookie } from "hono/cookie";
 import { secureHeaders } from "hono/secure-headers";
@@ -228,19 +228,8 @@ export function isLoopbackRequest(c: Context): boolean {
   return xff === undefined || xff.split(",").every(isLoopbackAddress);
 }
 
-/**
- * 呼び出し元の IP（BR-65 の数え方・失敗が続く IP の待ち時間。保存は HMAC：M-55）。
- * cloud は X-Forwarded-For の右端（Google のフロントエンドが付ける値。左は利用者が偽れる：SO I-12）、local は接続の相手
- */
-export function clientIp(c: Context, mode: DeploymentMode): string {
-  if (mode === "cloud") {
-    const parts = (c.req.header("x-forwarded-for") ?? "")
-      .split(",")
-      .map((s) => s.trim())
-      .filter((s) => s !== "");
-    const last = parts[parts.length - 1];
-    if (last) return last;
-  }
+/** 呼び出し元の IP（BR-65 の数え方・失敗が続く IP の待ち時間。保存は HMAC：M-55）。接続の相手を使う */
+export function clientIp(c: Context): string {
   try {
     return getConnInfo(c).remote.address ?? "unknown";
   } catch {

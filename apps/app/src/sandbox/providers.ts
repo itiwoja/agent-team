@@ -1,7 +1,6 @@
 // 作業場（サンドボックス）の起こし方（D-116）。edge の SandboxProvider の実装。
-// - cloudrun：Cloud Run Jobs の実行を1つ起こす（jobs.run の overrides でトークンを渡す）。権限ゼロの SA・通信の制限はジョブの側の設定（infra/sandbox-setup.sh）
 // - docker：手元の Docker でコンテナを1つ起こす（docker compose で試すとき）
-// - inprocess：app と同じプロセスで作業場の実行役を動かす（隔離なし。local と試験だけ：env が cloud で拒む）
+// - inprocess：app と同じプロセスで作業場の実行役を動かす（隔離なし）
 // どれも「起こすだけ」で待たない。実行役は sandbox-edge（/sandbox/v1）にトークンで来る
 
 import { spawn } from "node:child_process";
@@ -12,53 +11,6 @@ import type { SandboxEdge, SandboxProvider } from "@open-team/edge";
 import type { Logger } from "@open-team/platform";
 import { runExecutor, type SandboxTransport } from "@open-team/sandbox";
 import type { SandboxEnv } from "../env.ts";
-
-/** Cloud Run のメタデータサーバーからアクセストークンを取る（app の SA：run.jobs.runWithOverrides が要る） */
-async function metadataAccessToken(fetchFn: typeof fetch): Promise<string> {
-  const res = await fetchFn("http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token", {
-    headers: { "Metadata-Flavor": "Google" },
-    signal: AbortSignal.timeout(5_000),
-  });
-  if (!res.ok) throw new Error(`メタデータサーバーのトークンを取れない（${res.status}）`);
-  const body = (await res.json()) as { access_token?: unknown };
-  if (typeof body.access_token !== "string") throw new Error("メタデータサーバーの応答にトークンがない");
-  return body.access_token;
-}
-
-export function cloudRunJobsProvider(o: { job: string; edgeUrl: string; fetch?: typeof fetch; log: Logger }): SandboxProvider {
-  const f = o.fetch ?? fetch;
-  return {
-    name: "cloudrun",
-    async start({ sessionId, taskId, token }) {
-      const access = await metadataAccessToken(f);
-      const res = await f(`https://run.googleapis.com/v2/${o.job}:run`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${access}`, "content-type": "application/json" },
-        body: JSON.stringify({
-          overrides: {
-            containerOverrides: [
-              {
-                env: [
-                  { name: "SANDBOX_TOKEN", value: token },
-                  { name: "SANDBOX_EDGE_URL", value: o.edgeUrl },
-                  { name: "SANDBOX_SESSION_ID", value: sessionId },
-                  { name: "SANDBOX_TASK_ID", value: taskId },
-                ],
-              },
-            ],
-            taskCount: 1,
-          },
-        }),
-        signal: AbortSignal.timeout(30_000),
-      });
-      if (!res.ok) throw new Error(`Cloud Run Jobs の実行を起こせない（${res.status}）`);
-      const op = (await res.json()) as { name?: unknown; metadata?: { name?: unknown } };
-      const ref = typeof op.metadata?.name === "string" ? op.metadata.name : typeof op.name === "string" ? op.name : "cloudrun";
-      o.log.info("sandbox.started", "作業場（Cloud Run Jobs）を起こした", { sessionId, taskId, ref });
-      return { ref };
-    },
-  };
-}
 
 export function dockerProvider(o: { image: string; edgeUrl: string; network?: string; log: Logger }): SandboxProvider {
   return {
@@ -86,7 +38,7 @@ export function dockerProvider(o: { image: string; edgeUrl: string; network?: st
   };
 }
 
-/** 同じプロセスで実行役を動かす（隔離なし。local と試験だけ）。runs は試験が終わりを待つため */
+/** 同じプロセスで実行役を動かす（隔離なし）。runs は試験が終わりを待つため */
 export function inProcessProvider(o: { edge: () => SandboxEdge; log: Logger; sleep?: (ms: number) => Promise<void>; nextWaitSec?: number }): SandboxProvider & { runs: Set<Promise<unknown>> } {
   const runs = new Set<Promise<unknown>>();
   return {
@@ -114,10 +66,8 @@ export function inProcessProvider(o: { edge: () => SandboxEdge; log: Logger; sle
 }
 
 /** 環境変数から作業場の起こし方を決める。none なら null（作業場の道具は渡さない） */
-export function createSandboxProvider(env: SandboxEnv, o: { edge: () => SandboxEdge; log: Logger; fetch?: typeof fetch }): SandboxProvider | null {
+export function createSandboxProvider(env: SandboxEnv, o: { edge: () => SandboxEdge; log: Logger }): SandboxProvider | null {
   switch (env.provider) {
-    case "cloudrun":
-      return env.job !== undefined && env.edgeUrl !== undefined ? cloudRunJobsProvider({ job: env.job, edgeUrl: env.edgeUrl, log: o.log, ...(o.fetch === undefined ? {} : { fetch: o.fetch }) }) : null;
     case "docker":
       return env.dockerImage !== undefined && env.edgeUrl !== undefined
         ? dockerProvider({ image: env.dockerImage, edgeUrl: env.edgeUrl, log: o.log, ...(env.dockerNetwork === undefined ? {} : { network: env.dockerNetwork }) })

@@ -44,7 +44,7 @@ export interface EdgeHooks {
  * 形は本番の取得・検索と同じ（fetch は転送の後の URL を finalUrl で返す。404 などは status で返す）
  */
 /**
- * 作業場（サンドボックス）を起こす口（D-116）。app が本番（Cloud Run Jobs）・手元（Docker）・試験（同じプロセス）の実装を渡す。
+ * 作業場（サンドボックス）を起こす口（D-116）。app が手元（Docker）・試験（同じプロセス）の実装を渡す。
  * start は作業場の実行役を起こすだけで、待たない。実行役は sandbox-edge にトークンで来て、コマンドを取りに来る
  */
 export interface SandboxProvider {

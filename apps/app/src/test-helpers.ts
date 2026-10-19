@@ -32,7 +32,6 @@ export const T0 = new Date("2026-10-14T01:00:00.000Z"); // 10:00 JST
 
 export function testEnv(over: Partial<AppEnv> = {}): AppEnv {
   return {
-    deploymentMode: "local",
     appEnv: "test",
     port: 0,
     webDist: undefined,
@@ -43,16 +42,15 @@ export function testEnv(over: Partial<AppEnv> = {}): AppEnv {
     databaseUrl: "postgres://test",
     databaseUrlMaint: undefined,
     appBaseUrl: ORIGIN,
-    appInternalUrl: ORIGIN,
     gatewayUrl: GATEWAY_URL,
     simWorldUrl: SIM_URL,
-    serviceAuth: { mode: "local", sharedToken: SHARED_TOKEN },
-    gemini: { project: undefined, location: "global", agentModel: "gemini-test", plannerModel: "gemini-test", compareModels: [] },
+    serviceAuth: { sharedToken: SHARED_TOKEN },
+    gemini: { apiKey: undefined, agentModel: "gemini-test", plannerModel: "gemini-test", compareModels: [] },
     guestRetestMode: "replay",
     commitSha: "0123abc",
     googleConnect: undefined,
     githubConnect: undefined,
-    sandbox: { provider: "none", job: undefined, edgeUrl: undefined, dockerImage: undefined, dockerNetwork: undefined },
+    sandbox: { provider: "none", edgeUrl: undefined, dockerImage: undefined, dockerNetwork: undefined },
     ...over,
   };
 }
@@ -243,12 +241,8 @@ export function inProcessSimWorld(clock: { now(): Date } = { now: () => T0 }, si
   const store = (simStore ?? new MemorySimStore()) as MemorySimStore;
   const simApp = createSimWorldApp(
     {
-      deploymentMode: "local",
       port: 0,
       sharedToken: SHARED_TOKEN,
-      selfUrl: undefined,
-      gatewaySaEmail: undefined,
-      appSaEmail: undefined,
       databaseUrl: undefined,
       commitSha: "0123abc",
     },
@@ -256,7 +250,7 @@ export function inProcessSimWorld(clock: { now(): Date } = { now: () => T0 }, si
   );
   let down = false;
   const requests: string[] = [];
-  const auth = createServiceAuth({ mode: "local", sharedToken: SHARED_TOKEN });
+  const auth = createServiceAuth({ sharedToken: SHARED_TOKEN });
   const simClient = createSimClient({
     baseUrl: SIM_URL,
     authHeaders: (aud) => auth.serviceAuthHeaders("sa-app", aud),

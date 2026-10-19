@@ -1,4 +1,4 @@
-// Gemini の呼び出し（Vertex AI。ADR-032：API キーを使わず、Cloud Run の sa-app の ADC で認証する。SO §3.12-5・§9 I-14）
+// Gemini の呼び出し（Gemini API。GEMINI_API_KEY で認証する）
 // runner の会話（ChatMessage）を Gemini の contents に変え、応答を AssistantPart に戻す（formation-runtime.md §2.6・§3.10）。
 // タイムアウト120秒、429・5xx・ネットワークは 1・4・16秒あけて最大3回（04_functional_spec/runtime.md:141、11_tech_spec.md:293）。
 // 使った量と費用は usageMetadata から出す（思考のトークンを含む：SO §3.12-6）。プロンプト・応答の本文はエラーの文に入れない（SO §3.12-8）
@@ -15,7 +15,6 @@ import type {
   Part,
 } from "@google/genai";
 import type { AssistantPart, ChatMessage } from "@open-team/runner";
-import { DEFAULT_GEMINI_LOCATION } from "./models.ts";
 import { costMicroUsd, findPrice, GROUNDING_QUERY_MICRO_USD, type TokenUsage } from "./pricing.ts";
 import { llmAbortedError, withRetry, type RetryOptions } from "./retry.ts";
 import {
@@ -43,10 +42,8 @@ export interface GeminiRequestParams extends GenerateContentParameters {
 }
 
 export interface GeminiClientOptions {
-  /** GOOGLE_CLOUD_PROJECT。generateContent を渡さないときは必須 */
-  project?: string;
-  /** GOOGLE_CLOUD_LOCATION（既定 'global'） */
-  location?: string;
+  /** GEMINI_API_KEY。generateContent を渡さないときは必須 */
+  apiKey?: string;
   /** 試験用：ai.models.generateContent の代わり（渡すと SDK のクライアントを作らない） */
   generateContent?: GenerateContentFn;
   /** 1回の呼び出しのタイムアウト（既定 120秒） */
@@ -83,15 +80,11 @@ export class GeminiClient implements LlmClient {
     if (opts.generateContent !== undefined) {
       this.generateContent = opts.generateContent;
     } else {
-      const project = opts.project?.trim();
-      if (project === undefined || project === "") {
-        throw new Error("GeminiClient: project（GOOGLE_CLOUD_PROJECT）がありません");
+      const apiKey = opts.apiKey?.trim();
+      if (apiKey === undefined || apiKey === "") {
+        throw new Error("GeminiClient: apiKey（GEMINI_API_KEY）がありません");
       }
-      this.generateContent = createVertexGenerateContent({
-        project,
-        location: opts.location ?? DEFAULT_GEMINI_LOCATION,
-        timeoutMs: this.timeoutMs,
-      });
+      this.generateContent = createGeminiGenerateContent({ apiKey, timeoutMs: this.timeoutMs });
     }
   }
 
@@ -142,22 +135,17 @@ export class GeminiClient implements LlmClient {
   }
 }
 
-/**
- * Vertex AI の SDK のクライアント。API キーは渡さない（ADR-032）。project・location を明示すると、
- * SDK は環境変数の GOOGLE_API_KEY・GEMINI_API_KEY も使わない（ADC で認証する）
- */
-export function createVertexAi(opts: { project: string; location: string; timeoutMs?: number }): GoogleGenAI {
+/** Gemini API の SDK のクライアント（API キーで認証する） */
+export function createGeminiAi(opts: { apiKey: string; timeoutMs?: number }): GoogleGenAI {
   return new GoogleGenAI({
-    vertexai: true,
-    project: opts.project,
-    location: opts.location,
+    apiKey: opts.apiKey,
     // SDK の再試行は使わない（retryOptions を渡さない。やり直しは withRetry の1か所）。timeout は X-Server-Timeout でサーバーにも伝わる
     httpOptions: opts.timeoutMs === undefined ? undefined : { timeout: opts.timeoutMs },
   });
 }
 
-export function createVertexGenerateContent(opts: { project: string; location: string; timeoutMs?: number }): GenerateContentFn {
-  const ai = createVertexAi(opts);
+export function createGeminiGenerateContent(opts: { apiKey: string; timeoutMs?: number }): GenerateContentFn {
+  const ai = createGeminiAi(opts);
   return (params) => ai.models.generateContent(params);
 }
 
@@ -202,7 +190,7 @@ export function toGeminiContents(messages: readonly ChatMessage[], table: McpFun
   };
   for (const m of messages) {
     if (m.role === "user") {
-      // 空の文字の部品は Vertex が 400 を返すので送らない
+      // 空の文字の部品は Gemini が 400 を返すので送らない
       if (m.content !== "") push("user", [{ text: m.content }]);
     } else if (m.role === "assistant") {
       push("model", m.content.flatMap((p) => assistantPart(p, table, callNames)));

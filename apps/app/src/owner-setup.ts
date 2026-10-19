@@ -2,7 +2,7 @@
 // 手順（外部の呼び出しはトランザクションの外：G-14）：
 // 1. 利用者・ワークスペース・所属（db の ensureOwnerWorkspace。監査ログの起点 workspace.created）
 // 2. ワークスペースのポリシー v1（kernel の既定。オーナーは per_day_usd 10：M-59）と、sim-core の SHOP_CONNECTORS をコネクタに登録
-//    （url = SIM_WORLD_URL + path、cloud の認証は sa-app の ID トークン：MT §3.14 の5）
+//    （url = SIM_WORLD_URL + path、認証は none：MT §3.14 の5）
 // 3. gateway の EP-51 でツールを同期（tools/list。新しいツールは unclassified で入る：MT §3.12.4）
 // 4. manifest の分類・引数の役割を確定し、tool_hash を計算し直す（MT §3.14 の7。MCP の注釈は使わない。needs_review のツールは触らない）
 // 5. sim-world のデモ店舗（rehearsal_run_id が NULL の走行。あればそれ）
@@ -185,7 +185,7 @@ export async function seedWorkspace(
   const formation = opts.formation ?? SHOP_DEMO_FORMATION;
   const simWorldUrl = deps.env.simWorldUrl;
   if (!simWorldUrl) throw new OwnerSetupError("env", "SIM_WORLD_URL が設定されていない");
-  const auth: ConnectorAuth = deps.env.deploymentMode === "cloud" ? { type: "gcp_id_token", audience: simWorldUrl } : { type: "none" };
+  const auth: ConnectorAuth = { type: "none" };
   const created: OwnerSetupResult["created"] = {
     workspace: o.workspaceCreated,
     policy: false,

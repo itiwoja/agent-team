@@ -1,4 +1,4 @@
-// @open-team/llm：Gemini（Vertex AI）の呼び出し。使えるのは edge（app）と scripts だけ（runner は import しない：D-52）
+// @open-team/llm：Gemini（Gemini API）の呼び出し。使えるのは edge（app）と scripts だけ（runner は import しない：D-52）
 export * from "./types.ts";
 export * from "./gemini.ts";
 export * from "./tools.ts";

@@ -11,7 +11,7 @@ export interface TokenPrices {
 }
 
 export interface PriceEntry extends TokenPrices {
-  /** Vertex AI のモデル ID（normalizeModelId の形） */
+  /** モデル ID（normalizeModelId の形） */
   model: string;
   /** 入力がこのトークン数を超える呼び出しは、入力・出力・思考の全部をこの単価で数える（Pro 系の 20万トークン超） */
   longContext?: TokenPrices & { overInputTokens: number };

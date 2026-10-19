@@ -116,11 +116,11 @@ export function unavailableGatewayClient(): GatewayClient {
   return { callReadTool: fail, executeIntent: fail, syncTools: fail, revokeCredential: fail };
 }
 
-/** GOOGLE_CLOUD_PROJECT がないとき（local）。呼ぶ前に断る（status null・やり直さない） */
+/** GEMINI_API_KEY がないとき。呼ぶ前に断る（status null・やり直さない） */
 export function unavailableLlm(): LlmClient {
   return {
     async generate() {
-      throw new LlmError("GOOGLE_CLOUD_PROJECT が設定されていないので Gemini を呼べない", null, false);
+      throw new LlmError("GEMINI_API_KEY が設定されていないので Gemini を呼べない", null, false);
     },
   };
 }
@@ -140,7 +140,7 @@ export function createAppDeps(env: AppEnv, missing: readonly string[], overrides
   const llm =
     overrides.llm ??
     // 1回だけ呼ぶクライアント。やり直しは edge の callGemini の1か所でする（中でもやり直すと二重になり、504 の待ちが最大 約8分に伸びて見えない）
-    (env.gemini.project ? createEdgeGeminiClient({ project: env.gemini.project, location: env.gemini.location }) : unavailableLlm());
+    (env.gemini.apiKey ? createEdgeGeminiClient({ apiKey: env.gemini.apiKey }) : unavailableLlm());
   const clock = overrides.clock ?? systemClock;
   // sandbox-edge は作業場からのトークンで動く（LLM・gateway は使わない）
   const sandboxEdge = overrides.sandboxEdge ?? sandboxEdgeOf(createRuntime({ db, llm, gateway: gatewayClient, clock, log }));

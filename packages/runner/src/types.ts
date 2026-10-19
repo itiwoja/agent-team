@@ -1,5 +1,5 @@
 // runner と edge の境界（formation-runtime.md §2.5・2.6 を正とし、会話の形を具体にしたもの）
-// runner は型と自分の実装だけを持ち、DB・Vertex AI・gateway のクライアントを import しない（D-52）。
+// runner は型と自分の実装だけを持ち、DB・Gemini・gateway のクライアントを import しない（D-52）。
 // edge の実装は app（本番）か scripts/measure（計測の統制なし）が渡す。
 
 import type { Decision, IsoDateTime, Uuid } from "@open-team/kernel";

@@ -169,7 +169,7 @@ const guardedLookup: LookupFunction = (hostname, options, callback) => {
   });
 };
 
-/** Grounding の出典の転送用ホスト（最初の1歩だけ、ドメインの付与にかかわらず通す。転送先は checkUrl で確かめ直す） */
+/** Gemini の Google 検索 Grounding の転送（出典の URL がここを経由する）に使うホスト（最初の1歩だけ、ドメインの付与にかかわらず通す。転送先は checkUrl で確かめ直す） */
 export const TRANSIT_HOST = "vertexaisearch.cloud.google.com";
 
 /** 取りに行ってよい URL か（スキーム・利用者情報・ポート・ドメイン・IP の直書き）。allowTransit は最初の1歩だけ true */

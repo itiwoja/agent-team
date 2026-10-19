@@ -1,7 +1,6 @@
 // EP-50 書き込みの実行（IA §3.12・§6.8 G-1〜G-18、AS §3.17 EP-50・T-158・T-159、MT §3.12.6・DR-02・DR-09・DR-12、
 // SW §4.5・§5.3・SH-03〜06、M-20・M-21・M-52、D-18・BR-59・BR-67）
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createServiceAuth } from "@open-team/platform";
 import { GatewayClientError } from "@open-team/gateway-client";
 import { useTestDb } from "@open-team/db/testing";
 import {
@@ -225,33 +224,7 @@ describe("実行しないもの（IA §3.12 の2、G-2〜G-5、T-158）", () => 
   });
 });
 
-describe("境界（G-17、BR-63・66・67②）", () => {
-  it("G-17 公開デプロイで接続先が ALLOWED_CONNECTOR_URLS の外 → 実行しない（failed(precondition_failed)・public_deployment）。policy_decisions に Intent つきで残す", async () => {
-    const { db } = T();
-    const ws = await workspace(db);
-    await sim.createDemoStore(ws.workspaceId);
-    const gw = startGateway(db, { ...gatewayEnv(sim.url), deploymentMode: "cloud" }, {
-      deps: {
-        serviceAuth: createServiceAuth({ mode: "local", sharedToken: GW_TOKEN }),
-        connectorAuth: async () => ({ authorization: `Bearer ${SIM_TOKEN}`, "x-ot-caller": "sa-gateway" }),
-      },
-    });
-    const shop = await seedShop(db, gw.client, ws, sim.url, { slugs: ["supplier"] });
-    const task = await taskWithToken(db, ws, { status: "executing" });
-    const { intentId } = await insertIntent(db, ws, { taskId: task.taskId, jobId: task.agent.jobId, connector: shop.supplier!, tool: shop.supplier!.tools.place_order!, args: BEANS_20 });
-    await db.query("UPDATE connectors SET url = 'https://evil.example/mcp' WHERE id = $1", [shop.supplier!.id]);
-    const before = gw.sent.length;
-    expect(await gw.client.executeIntent(intentId)).toEqual({ intentId, status: "failed", failReason: "precondition_failed", expiredReason: null });
-    expect(gw.sent.slice(before)).toHaveLength(0);
-    expect((await intentRow(db, intentId)).result).toEqual({ reasonCode: "public_deployment" });
-    // gateway の記録だけを見る（Intent には edge の Kernel の判定の行もある：SG-03 の照合の証拠）
-    const d = (await db.query<Record<string, any>>("SELECT * FROM policy_decisions WHERE intent_id = $1 AND subject->>'gate' = 'gateway'", [intentId])).rows;
-    expect(d).toHaveLength(1);
-    expect(d[0]).toMatchObject({ subject_kind: "intent", action_type: "mcp_write", decision: "deny", reason_code: "public_deployment", matched_rule: "boundary.public_deployment" });
-    // タスクは終わる（failed(action_failed)）
-    expect((await taskRow(db, task.taskId))).toMatchObject({ status: "failed", fail_reason: "action_failed" });
-  });
-
+describe("境界（BR-63・67②）", () => {
   it("SH-03 影の Intent の接続先が sim-world 以外 → shadow_real_connector、実行しない", async () => {
     const s = await setup();
     const rows = await rehearsalRows(s.db, s.ws, s.task.agent, "shadow");

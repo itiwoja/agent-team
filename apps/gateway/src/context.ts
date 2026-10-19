@@ -1,5 +1,5 @@
 // gateway の処理が使う依存（DB・時計・ログ・HTTP・認証）と、コネクタを呼ぶときの宛先（URL と頭）を作る。
-// sim-world へは呼び出し元の証明（cloud は ID トークン、local は SIM_WORLD_SHARED_TOKEN）と X-OT-* を付ける。
+// sim-world へは呼び出し元の証明（SIM_WORLD_SHARED_TOKEN）と X-OT-* を付ける。
 // X-OT-* の値はタスク・Intent の行から引き直したものだけ（M-43・15:486）。実のコネクタ（フェーズ0）には X-OT-* を渡さない（MT §3.12.5 の7）
 
 import { createSign } from "node:crypto";
@@ -230,27 +230,22 @@ export interface DefaultConnectorAuthDeps {
 
 /**
  * 既定の証明（MT D-12、SO §3.9、16 §3.5）：
- * - sim-world：cloud は ID トークン（aud = SIM_WORLD_URL）、local は共有トークン＋x-ot-caller: sa-gateway（apps/sim-world の auth.ts）
- * - Google カレンダー（auth.type = oauth・provider google、URL の origin が GCAL_URL）：呼び出しの証明（cloud は ID トークン aud = GCAL_URL、
- *   local は GCAL_SHARED_TOKEN）。purpose = call のときは資格情報を開き、アクセストークンと GCAL_HEADER.* を足す。
+ * - sim-world：共有トークン＋x-ot-caller: sa-gateway（apps/sim-world の auth.ts）
+ * - Google カレンダー（auth.type = oauth・provider google、URL の origin が GCAL_URL）：呼び出しの証明（GCAL_SHARED_TOKEN）。purpose = call のときは資格情報を開き、アクセストークンと GCAL_HEADER.* を足す。
  *   アクセストークンはメモリに exp−60秒までキャッシュする（資格情報の行の id が変われば取り直す）
- * - GitHub（auth.type = oauth・provider github、URL の origin が GITHUB_URL）：呼び出しの証明（cloud は ID トークン aud = GITHUB_URL、
- *   local は GITHUB_SHARED_TOKEN）。purpose = call のときは資格情報の行のインストールで GitHub App のトークンを作り、
+ * - GitHub（auth.type = oauth・provider github、URL の origin が GITHUB_URL）：呼び出しの証明（GITHUB_SHARED_TOKEN）。purpose = call のときは資格情報の行のインストールで GitHub App のトークンを作り、
  *   GITHUB_HEADER.*（トークン・保護したブランチへの許可・冪等キー）を足す。許可は実行のときの行の値（18 §2-5）
- * - 実のコネクタ（local だけ。cloud は境界で止まる）：auth.type = none は頭なし。api_key と local の gcp_id_token は 0-H では使えない
+ * - 実のコネクタ：auth.type = none は頭なし。api_key は 0-H では使えない
  */
 export function defaultConnectorAuth(env: GatewayEnv, deps: DefaultConnectorAuthDeps): ConnectorAuthProvider {
-  let cloudAuth: ServiceAuth | null = null;
   let simLocalAuth: ServiceAuth | null = null;
   let gcalLocalAuth: ServiceAuth | null = null;
   let githubLocalAuth: ServiceAuth | null = null;
-  const cloud = (): ServiceAuth => (cloudAuth ??= createServiceAuth(env.serviceAuth));
   /** キー：<connector_id>:<credential_id>。値はアクセストークンだけ（ログに出さない） */
 
   const gcalCallerProof = async (gcal: GcalConfig): Promise<Record<string, string>> => {
-    if (env.deploymentMode === "cloud") return cloud().serviceAuthHeaders("sa-gateway", gcal.url);
     if (gcal.sharedToken === null) throw new ConnectorAuthUnsupported("GCAL_SHARED_TOKEN がない");
-    gcalLocalAuth ??= createServiceAuth({ mode: "local", sharedToken: gcal.sharedToken });
+    gcalLocalAuth ??= createServiceAuth({ sharedToken: gcal.sharedToken });
     return gcalLocalAuth.serviceAuthHeaders("sa-gateway", gcal.url);
   };
 
@@ -317,13 +312,9 @@ export function defaultConnectorAuth(env: GatewayEnv, deps: DefaultConnectorAuth
     const github = env.github;
     if (github === null) throw new ConnectorAuthUnsupported("GITHUB_URL がない（GitHub のコネクタは使えない）");
     if (originOf(connector.url) !== github.origin) throw new ConnectorAuthUnsupported("GitHub のコネクタの URL が GITHUB_URL と違う");
-    let caller: Record<string, string>;
-    if (env.deploymentMode === "cloud") caller = await cloud().serviceAuthHeaders("sa-gateway", github.url);
-    else {
-      if (github.sharedToken === null) throw new ConnectorAuthUnsupported("GITHUB_SHARED_TOKEN がない");
-      githubLocalAuth ??= createServiceAuth({ mode: "local", sharedToken: github.sharedToken });
-      caller = await githubLocalAuth.serviceAuthHeaders("sa-gateway", github.url);
-    }
+    if (github.sharedToken === null) throw new ConnectorAuthUnsupported("GITHUB_SHARED_TOKEN がない");
+    githubLocalAuth ??= createServiceAuth({ sharedToken: github.sharedToken });
+    const caller = await githubLocalAuth.serviceAuthHeaders("sa-gateway", github.url);
     if (req.purpose === "list") return caller;
 
     const cred = await activeCredentialFor(req);
@@ -348,11 +339,7 @@ export function defaultConnectorAuth(env: GatewayEnv, deps: DefaultConnectorAuth
   return async (req) => {
     const { connector, simWorld } = req;
     if (simWorld) {
-      if (env.deploymentMode === "cloud") {
-        if (!env.simWorldUrl) throw new ConnectorAuthUnsupported("SIM_WORLD_URL がない");
-        return cloud().serviceAuthHeaders("sa-gateway", env.simWorldUrl);
-      }
-      simLocalAuth ??= createServiceAuth({ mode: "local", sharedToken: env.simWorldSharedToken });
+      simLocalAuth ??= createServiceAuth({ sharedToken: env.simWorldSharedToken });
       try {
         return await simLocalAuth.serviceAuthHeaders("sa-gateway", env.simWorldUrl ?? connector.url);
       } catch {
@@ -362,9 +349,6 @@ export function defaultConnectorAuth(env: GatewayEnv, deps: DefaultConnectorAuth
     switch (connector.auth.type) {
       case "none":
         return {};
-      case "gcp_id_token":
-        if (env.deploymentMode !== "cloud") throw new ConnectorAuthUnsupported("local では ID トークンを取れない");
-        return cloud().serviceAuthHeaders("sa-gateway", connector.auth.audience);
       case "oauth":
         return connector.auth.provider === "github" ? githubAuth(req) : googleAuth(req);
       default:
@@ -404,7 +388,6 @@ export interface GatewayContext {
   presendBackoffMs: readonly number[];
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   knownSecrets: readonly string[];
-  allowedOrigins: readonly string[];
   /** SIM_WORLD_URL（末尾の / なし。模擬の Google カレンダーへ向け直すときの基になる：effectiveConnectorUrl） */
   simWorldUrl: string | null;
   simWorldOrigin: string | null;
@@ -435,7 +418,7 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<boolea
 export function resolveContext(env: GatewayEnv, deps: GatewayDeps): GatewayContext {
   const knownSecrets = [...(deps.knownSecrets ?? knownSecretsFromEnv(process.env))];
   if (env.simWorldSharedToken) knownSecrets.push(env.simWorldSharedToken);
-  if (env.serviceAuth.mode === "local" && env.serviceAuth.sharedToken) knownSecrets.push(env.serviceAuth.sharedToken);
+  if (env.serviceAuth.sharedToken) knownSecrets.push(env.serviceAuth.sharedToken);
   if (env.gcal?.sharedToken) knownSecrets.push(env.gcal.sharedToken);
   if (env.gcal) knownSecrets.push(env.gcal.clientSecret, env.gcal.tokenKey);
   if (env.github) knownSecrets.push(env.github.privateKey, ...(env.github.sharedToken ? [env.github.sharedToken] : []));
@@ -476,7 +459,6 @@ export function resolveContext(env: GatewayEnv, deps: GatewayDeps): GatewayConte
     presendBackoffMs: deps.presendBackoffMs ?? PRESEND_BACKOFF_MS,
     sleep: deps.sleep ?? (async (ms, signal) => void (await abortableSleep(ms, signal))),
     knownSecrets,
-    allowedOrigins: env.allowedConnectorUrls.map((u) => originOf(u)).filter((o): o is string => o !== null),
     simWorldUrl: env.simWorldUrl,
     simWorldOrigin: env.simWorldUrl ? originOf(env.simWorldUrl) : null,
     gcalOrigin: env.gcal?.origin ?? null,

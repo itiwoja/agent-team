@@ -71,7 +71,7 @@ async function setup(planner: unknown[], behavior: Record<string, "report" | "fa
   const llm = llmOf(state, behavior);
   const t = makeTestApp(db, {
     deps: { gatewayClient: w.gatewayClient, simClient: w.simClient, llm, clock: ticking() },
-    env: { gemini: { project: undefined, location: "global", agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
+    env: { gemini: { apiKey: undefined, agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
   });
   const issued = await issueSession(db, { workspaceId: w.ws.workspaceId, userId: w.ws.userId, ipHash: null, userAgent: null, now: T0 });
   return { w, t, llm, cookie: issued.cookieValue, csrf: issued.csrfToken, planner: state.planner, get plannerCalls() { return state.plannerCalls; } };

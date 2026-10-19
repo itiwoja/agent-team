@@ -84,7 +84,7 @@ export const DEFAULT_CEILINGS: Ceilings = deepFreeze({
     payment: ["handoff", "deny"], // handoff のみ（BR-36）＋ deny
   },
   // per_task_usd・max_steps は BR-06、per_day_usd 200 は policy.yaml の範囲の上端。
-  // max_minutes は BR-06 の 60 ではなく 55（M-59：Cloud Run の60分と同時に切れると halted(timeout) が記録されない）
+  // max_minutes は BR-06 の 60 ではなく 55（M-59：外側の60分の打ち切りと同時に切れると halted(timeout) が記録されない）
   budget: { per_task_usd: 20, per_day_usd: 200, max_steps: 200, max_minutes: 55 },
   breakers: { same_action_repeat: 20, denied_attempts_max: 20, step_cost_usd_max: 5 }, // policy.yaml の範囲の上端
   max_intents_per_task: 20, // A-85

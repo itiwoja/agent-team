@@ -10,7 +10,6 @@ import { realpathSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import postgres from "postgres";
-import { socketHostOf, withoutHostParam } from "./client.ts";
 
 /** packages/db/migrations の絶対パス */
 export const MIGRATIONS_DIR = fileURLToPath(new URL("../migrations/", import.meta.url));
@@ -90,10 +89,7 @@ export async function runMigrations(url: string, opts: MigrateOptions = {}): Pro
   const log = opts.log ?? (() => {});
   const withRoles = opts.roles ?? rolesEnabledByEnv();
   const migrations = await loadMigrations(dir);
-  // Cloud Run Job は Cloud SQL に unix ソケット（?host=/cloudsql/…）で繋ぐ。postgres.js は ?host= を読まないので createDb と同じに分ける
-  const socketHost = socketHostOf(url);
-  const sql = postgres(socketHost ? withoutHostParam(url) : url, {
-    ...(socketHost ? { host: socketHost } : {}),
+  const sql = postgres(url, {
     max: 1,
     prepare: false,
     // roles.sql の「ロールを作る権限がないので飛ばす」などを残す

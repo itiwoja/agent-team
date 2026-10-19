@@ -88,7 +88,7 @@ describe("ensureOwnerWorkspace（G-08）", () => {
     expect(p.rows[0]?.policy.connectors.enabled).toEqual(["bank", "mail", "store", "supplier"]);
   });
 
-  it("コネクタは SIM_WORLD_URL ＋ path、local の認証は none（cloud は sa-app の ID トークン）", async () => {
+  it("コネクタは SIM_WORLD_URL ＋ path、認証は none", async () => {
     const { db } = T();
     const { t } = setup(db);
     await ensureOwnerWorkspace(t.deps);
@@ -96,14 +96,11 @@ describe("ensureOwnerWorkspace（G-08）", () => {
     expect(rows.rows).toEqual(
       ["bank", "mail", "store", "supplier"].map((slug) => ({ slug, url: `${SIM_URL}/mcp/shop/${slug}`, auth: { type: "none" }, kind: "sim" })),
     );
-    const cloud = setup(db, { env: { deploymentMode: "cloud", simWorldUrl: "https://sim-world-1.run.app" } });
-    const r = await ensureOwnerWorkspace(cloud.t.deps);
+    const moved = setup(db, { env: { simWorldUrl: "http://sim-world-2.test" } });
+    const r = await ensureOwnerWorkspace(moved.t.deps);
     expect(r.created.connectorsUpdated).toEqual(["store", "supplier", "mail", "bank"]);
     const updated = await db.query<{ url: string; auth: unknown }>("SELECT url, auth FROM connectors WHERE slug = 'supplier'");
-    expect(updated.rows[0]).toEqual({
-      url: "https://sim-world-1.run.app/mcp/shop/supplier",
-      auth: { type: "gcp_id_token", audience: "https://sim-world-1.run.app" },
-    });
+    expect(updated.rows[0]).toEqual({ url: "http://sim-world-2.test/mcp/shop/supplier", auth: { type: "none" } });
   });
 
   it("manifest の分類・引数の役割を確定し、tool_hash = toolHashOf(説明・スキーマ・役割)（MT §3.14 の7）。classified_by は system:seed", async () => {

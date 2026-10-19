@@ -1,63 +1,57 @@
 # 構成
 
-Google Cloud（asia-northeast1）の Cloud Run に、境界ごとに別のサービス・別のサービスアカウントで置きます。外から届くのは `app` だけで、書き込みは必ず `gateway` を通ります。
+手元の PC で、役割ごとに別のプロセスとして動かします（`pnpm dev`）。DB は Docker の PostgreSQL です。画面から届くのは `app` だけで、書き込みは必ず `gateway` を通ります。
 
 ```mermaid
 flowchart TB
-  U(["ブラウザ・スマホ（PWA）"]) -->|"入口のトークン＋セッション"| API
+  U(["ブラウザ（PWA）<br/>localhost:5173"]) -->|"入口のトークン＋セッション"| API
 
-  subgraph GCP["Google Cloud"]
-    subgraph APP["Cloud Run: app（公開）"]
+  subgraph LOCAL["ローカル"]
+    subgraph APP["app :8080"]
       direction TB
       API["API・画面の配信"] --> RUN["runner：エージェントの実行枠"]
       RUN --> EDGE["edge：LLM Proxy・ツールの窓口<br/>Kernel の判定・費用の上限"]
+      TIMER["タイマー<br/>毎分の tick・毎時の掃除"] --> API
     end
-    EDGE --> VX[["Gemini（Vertex AI）<br/>IAM で呼ぶ・API キーなし"]]
-    EDGE -->|"タスクのトークンつき"| GW["Cloud Run: gateway（内部のみ）<br/>書き込みの唯一の出口"]
-    GW --> SIM["Cloud Run: sim-world（内部のみ）<br/>模擬の世界"]
-    GW --> GCAL["Cloud Run: gcal<br/>カレンダーのアダプター"]
-    GW --> GH["Cloud Run: github<br/>GitHub のアダプター"]
-    API -->|"ジョブを起こす"| SBX["Cloud Run Jobs: sandbox<br/>作業場"]
+    EDGE -->|"タスクのトークンつき"| GW["gateway :8082<br/>書き込みの唯一の出口"]
+    GW --> SIM["sim-world :8081<br/>模擬の世界"]
+    GW --> GCAL["gcal :8083<br/>カレンダーのアダプター"]
+    GW --> GH["github :8084<br/>GitHub のアダプター"]
+    API -->|"コンテナを起こす"| SBX["sandbox（Docker）<br/>作業場"]
     SBX -->|"作業場だけのトークン"| EDGE
-    API --> SQL[("Cloud SQL<br/>PostgreSQL 16")]
+    API --> SQL[("PostgreSQL 16<br/>docker compose")]
     GW --> SQL
     SIM --> SQL
-    SCH["Cloud Scheduler"] -->|"毎分の起こし"| API
-    SM["Secret Manager"] -.-> APP
   end
 
+  EDGE --> GEM[["Gemini API<br/>GEMINI_API_KEY"]]
   EDGE -->|"web_fetch：許可したドメインだけ"| WEB(["公開の Web ページ"])
+  GCAL --> GAPI(["Google カレンダー API"])
+  GH --> GHAPI(["GitHub API"])
 ```
+
+`gcal`・`github`・`sandbox` は使うときだけ起動します。
 
 ## サービス
 
 | サービス | 役割 |
 |---|---|
-| `app` | API・セッション・画面の配信・エージェントの実行・安全チェックの進行・Kill Switch |
+| `app` | API・セッション・画面の配信・エージェントの実行・安全チェックの進行・Kill Switch。毎分の tick（承認の期限切れ・止まったタスクの拾い直しなど）と毎時のゲストの掃除をプロセスの中のタイマーで動かす |
 | `gateway` | 書き込みの唯一の出口。`workspace_id` はリクエストではなくタスクのトークンから引き直す。コネクタの資格情報を使えるのはここだけ |
 | `sim-world` | 模擬の世界（仕入れ係の店舗）を MCP で出す。損害額の式もここにある |
 | `gcal`・`github` | 実の外部サービスのアダプター。DB も秘密も持たず、gateway が付けたトークンでその1回だけ API を呼ぶ |
-| `sandbox` | 作業場。権限のない利用者でコマンドを動かす |
+| `sandbox` | 作業場。Docker のコンテナで、権限のない利用者としてコマンドを動かす |
 
 ## 信頼の境界
 
-- **公開は `app` だけ**。`gateway`・`sim-world` は Ingress を内部に限り、決まったサービスアカウントからしか呼べない。
+- **サービス間は共有トークンで確かめる**。呼ぶ側は `INTERNAL_SHARED_TOKEN` と呼び出し元の名前（`x-ot-caller`）を付け、受ける側は決まった呼び出し元しか通さない。
 - **`runner` は外に直接届かない**。DB・Gemini・gateway のクライアントを import しないことを `pnpm lint:deps`（dependency-cruiser）で CI が検査する。LLM とツールには `edge` の関数を通してしか届かない。
-- **Gemini は API キーを持たない**。`app` のサービスアカウントの IAM だけで呼ぶ。
-- **秘密は DB に置かない**。Google カレンダーの refresh token は暗号化して保存し、使うのは gateway だけ。GitHub は App の秘密鍵を持つ gateway が、そのつどインストールのトークンを作る。
+- **秘密は DB に平文で置かない**。Google カレンダーの refresh token は暗号化して保存し、使うのは gateway だけ。GitHub は App の秘密鍵を持つ gateway が、そのつどインストールのトークンを作る。
+- **ログに秘密を出さない**。`GEMINI_API_KEY` などの秘密の値はログでマスクする。
 
-## デプロイ
+## CI
 
-`main` への push で [`deploy.yml`](../.github/workflows/deploy.yml) が動きます。
-
-1. CI（[`ci.yml`](../.github/workflows/ci.yml)：型・テスト・依存の境界・zizmor・gitleaks）
-2. Workload Identity 連携で GCP に入る（鍵ファイルなし）
-3. Artifact Registry にイメージを置く
-4. マイグレーション（Cloud Run Job `migrate`）
-5. `sim-world` → アダプター → `gateway` → `app` の順にデプロイ
-6. スモークテスト。落ちたら前のリビジョンへ戻す
-
-PR からはデプロイできません。GCP の初期設定は [infra/README.md](../infra/README.md) にあります。
+[`ci.yml`](../.github/workflows/ci.yml)：`main` への push と PR で、型・テスト・依存の境界・Dockerfile の digest の固定・zizmor・gitleaks を流します。
 
 ## パッケージ
 
@@ -78,4 +72,3 @@ PR からはデプロイできません。GCP の初期設定は [infra/README.m
 | `packages/sandbox` | 作業場の実行役とのやりとり |
 | `packages/gateway-client`・`packages/sim-client` | app から gateway・sim-world を呼ぶクライアント |
 | `scripts/measure` | 統制なしのエージェントの引っかかり率の計測 |
-| `infra` | GCP の初期設定スクリプト |

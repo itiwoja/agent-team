@@ -27,7 +27,7 @@ describe("generateScenarios：正常系", () => {
     expect(req.tools).toEqual([]);
     expect(req.mcpTools).toEqual([]);
     expect(req.responseJsonSchema).toBeTypeOf("object");
-    // Vertex は大きな要素の配列の maxItems を「複雑すぎる」と 400 で拒む（実機で確かめた）。個数の上限は Zod が守る
+    // Gemini は大きな要素の配列の maxItems を「複雑すぎる」と 400 で拒む（実機で確かめた）。個数の上限は Zod が守る
     expect(JSON.stringify(req.responseJsonSchema)).not.toContain("maxItems");
   });
 

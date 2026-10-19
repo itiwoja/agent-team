@@ -22,7 +22,7 @@ describe("POST /internal/cron/tick", () => {
   });
 
   it("共有トークンが設定されていない local → 全部拒否（閉じた側に倒す）", async () => {
-    const t = makeTestApp(unavailableDb(), { env: { serviceAuth: { mode: "local", sharedToken: undefined } } });
+    const t = makeTestApp(unavailableDb(), { env: { serviceAuth: { sharedToken: undefined } } });
     const res = await t.app.request("http://app.test/internal/cron/tick", {
       method: "POST",
       headers: { host: "app.test", authorization: `Bearer ${SHARED_TOKEN}`, "x-ot-caller": "sa-app" },

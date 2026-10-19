@@ -51,7 +51,7 @@ export function createApp(deps: AppDeps, opts: CreateAppOptions = {}): Hono<AppH
   const api = new Hono<AppHonoEnv>();
   api.use("*", noStore);
   api.use("*", limit);
-  // 準備中・セッションに関わらず答える（Cloud Run の予約パス /healthz は使わない：SO C-26。デプロイ版の照合：15:67）
+  // 準備中・セッションに関わらず答える（/healthz は使わない：SO C-26。版の照合：15:67）
   api.get("/health", (c) => c.json({ status: "ok", commit: deps.env.commitSha ?? null }));
   api.use("*", sameOriginJson);
   api.use("*", setupGuard(deps.missing));

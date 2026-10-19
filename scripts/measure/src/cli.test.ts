@@ -138,29 +138,28 @@ describe("runMeasureCli", () => {
     expect(d.err.join("")).toContain("使い方");
   });
 
-  it("--llm gemini：GOOGLE_CLOUD_PROJECT がない・API キーが置かれている → 走らせない（値は出さない：D-47、ADR-032）", async () => {
-    const missing = deps(await tempDir());
+  it("--llm gemini：GEMINI_API_KEY がない → 走らせない（値は出さない：D-47）", async () => {
+    const missing = deps(await tempDir(), { env: { GEMINI_API_KEY: "  " } });
     expect(await runMeasureCli(["--llm", "gemini"], missing)).toBe(2);
-    expect(missing.err.join("")).toContain("GOOGLE_CLOUD_PROJECT");
-    const withKey = deps(await tempDir(), { env: { GOOGLE_CLOUD_PROJECT: "p", GEMINI_API_KEY: "secret-value" } });
-    expect(await runMeasureCli(["--llm", "gemini"], withKey)).toBe(2);
-    expect(withKey.err.join("")).toContain("GEMINI_API_KEY");
-    expect(withKey.err.join("")).not.toContain("secret-value");
+    expect(missing.err.join("")).toContain("GEMINI_API_KEY");
+    const unset = deps(await tempDir());
+    expect(await runMeasureCli(["--llm", "gemini"], unset)).toBe(2);
+    expect(unset.err.join("")).toContain("GEMINI_API_KEY");
   });
 
-  it("--llm gemini：Router は本番と同じ（GEMINI_MODEL_AGENT）。Vertex AI の代わりを差し込んで最後まで通る", async () => {
+  it("--llm gemini：Router は本番と同じ（GEMINI_MODEL_AGENT）。Gemini の代わりを差し込んで最後まで通る", async () => {
     const cwd = await tempDir();
-    let created: { project: string; location: string } | null = null;
+    let created: { apiKey: string; onRetry: unknown; allowUnpricedModels: boolean } | null = null;
     const llm = scriptedLlm("safe");
     const d = deps(cwd, {
-      env: { GOOGLE_CLOUD_PROJECT: "my-project", GOOGLE_CLOUD_LOCATION: "asia-northeast1", GEMINI_MODEL_AGENT: "gemini-2.5-flash" },
+      env: { GEMINI_API_KEY: "my-key", GEMINI_MODEL_AGENT: "gemini-2.5-flash" },
       createGemini: (o) => {
         created = o;
         return llm;
       },
     });
     expect(await runMeasureCli(["--llm", "gemini", "--runs", "1", "--faults", "F-04", "--out", "out"], d)).toBe(0);
-    expect(created).toEqual({ project: "my-project", location: "asia-northeast1", onRetry: expect.any(Function), allowUnpricedModels: false });
+    expect(created).toEqual({ apiKey: "my-key", onRetry: expect.any(Function), allowUnpricedModels: false });
     expect(new Set(llm.requests.map((r) => r.model))).toEqual(new Set(["gemini-2.5-flash"]));
     const files = await readdir(join(cwd, "out"));
     expect(files.some((f) => f.endsWith("-gemini.json"))).toBe(true);
@@ -180,7 +179,7 @@ describe("runMeasureCli", () => {
       const cwd = await tempDir();
       let n = 0;
       const d = deps(cwd, {
-        env: { GOOGLE_CLOUD_PROJECT: "p" },
+        env: { GEMINI_API_KEY: "p" },
         createGemini: (o) =>
           new GeminiClient({
             generateContent: async () => {
@@ -201,14 +200,14 @@ describe("runMeasureCli", () => {
   });
 
   it("価格表にないモデルは使わない（費用を数えられず $5 の上限が効かない）→ 終了コード 2。--allow-unpriced で呼べることを案内する", async () => {
-    const d = deps(await tempDir(), { env: { GOOGLE_CLOUD_PROJECT: "p" }, createGemini: () => scriptedLlm("trap") });
+    const d = deps(await tempDir(), { env: { GEMINI_API_KEY: "p" }, createGemini: () => scriptedLlm("trap") });
     expect(await runMeasureCli(["--llm", "gemini", "--model", "gemini-9-ultra"], d)).toBe(2);
     expect(d.err.join("")).toContain("価格表にないモデル");
     expect(d.err.join("")).toContain("--allow-unpriced");
     const s = deps(await tempDir());
     expect(await runMeasureCli(["--model", "unknown-model"], s)).toBe(2);
     // GEMINI_MODEL_AGENT（Router）が表にないモデルでも同じ
-    const env = deps(await tempDir(), { env: { GOOGLE_CLOUD_PROJECT: "p", GEMINI_MODEL_AGENT: "gemini-9-ultra" }, createGemini: () => scriptedLlm("trap") });
+    const env = deps(await tempDir(), { env: { GEMINI_API_KEY: "p", GEMINI_MODEL_AGENT: "gemini-9-ultra" }, createGemini: () => scriptedLlm("trap") });
     expect(await runMeasureCli(["--llm", "gemini"], env)).toBe(2);
   });
 
@@ -226,7 +225,7 @@ describe("runMeasureCli", () => {
     let allowed: boolean | null = null;
     const models: string[] = [];
     const d = deps(cwd, {
-      env: { GOOGLE_CLOUD_PROJECT: "p" },
+      env: { GEMINI_API_KEY: "p" },
       createGemini: (o) => {
         allowed = o.allowUnpricedModels;
         return new GeminiClient({
@@ -246,7 +245,7 @@ describe("runMeasureCli", () => {
     const file = (await readdir(join(cwd, "o"))).find((f) => f.endsWith(".json"))!;
     const report = JSON.parse(await readFile(join(cwd, "o", file), "utf8")) as TrapRateReport;
     expect(report.conditions.unpricedModels).toEqual(["gemini-9-ultra"]);
-    // 高めの単価の見積もりはタスクの予算 $0.2 を1回目で超えるので、Vertex AI（の代わり）は呼ばれない（費用の守りは緩めない）
+    // 高めの単価の見積もりはタスクの予算 $0.2 を1回目で超えるので、Gemini（の代わり）は呼ばれない（費用の守りは緩めない）
     expect(models).toEqual([]);
     expect(d.out.join("")).toContain("価格表にないモデル（gemini-9-ultra）を高めの単価で数えた結果（--allow-unpriced）");
     expect(d.out.join("")).toContain("価格表にないモデル（gemini-9-ultra）は高めの単価で数えた");

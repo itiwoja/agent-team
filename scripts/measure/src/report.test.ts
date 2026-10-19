@@ -66,7 +66,7 @@ describe("renderTrapRateMarkdown", () => {
     const gemini: TrapRateReport = { ...report, conditions: { ...report.conditions, llm: "gemini", scriptedBehavior: null, model: "gemini-3.8-flash" } };
     const md = renderTrapRateMarkdown(gemini);
     expect(md).not.toContain("偽物");
-    expect(md).toContain("- LLM：Gemini（Vertex AI）／モデル：gemini-3.8-flash");
+    expect(md).toContain("- LLM：Gemini／モデル：gemini-3.8-flash");
   });
 
   it("途中で止めた結果はそう書く（費用の上限：A-94）", async () => {

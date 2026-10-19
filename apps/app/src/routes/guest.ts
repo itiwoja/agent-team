@@ -22,7 +22,7 @@ export function guestRoutes(r: ApiRouter, deps: AppDeps): void {
   r.post("/guest/restart", async (c) => {
     const s = sessionOf(c);
     if (s.kind !== "guest") throw new AppError("FORBIDDEN", "ゲストだけが最初からやり直せます");
-    const ip = clientIp(c, deps.env.deploymentMode);
+    const ip = clientIp(c);
     const ipHash = deps.env.cookieSecret ? system.hashIp(ip, deps.env.cookieSecret) : null;
 
     const created = await enterAsNewGuest(deps, { ipHash, userAgent: c.req.header("user-agent") ?? null, existing: null });

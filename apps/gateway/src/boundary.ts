@@ -1,17 +1,13 @@
 // 接続先の境界（mcp-taint.md §3.12.2、security-ops-deploy.md §3.2、BR-63・64・66・67②）。登録（tools/list）・読み取り・書き込みのたびに見る。
-// 上から順に、最初に当たったものを返す：public → guest → shadow → rehearsal（cross-check §1.7。E2E が public_deployment を求めるので BR-66 が先）。
+// 上から順に、最初に当たったものを返す：public → guest → shadow → rehearsal（cross-check §1.7）。
 // workspaceKind・rehearsalRunId・shadow はリクエストの値を使わず、タスクのトークン（読み取り）か Intent の行（書き込み）から DB で引いた値（15:486・520）
 
-import type { DeploymentMode } from "@open-team/platform";
 import type { ConnectorAuth, WorkspaceKind } from "@open-team/db";
 
-export const BOUNDARY_REASONS = ["public_deployment", "guest_workspace", "shadow_real_connector", "rehearsal_real_connector"] as const;
+export const BOUNDARY_REASONS = ["guest_workspace", "shadow_real_connector", "rehearsal_real_connector"] as const;
 export type BoundaryReason = (typeof BOUNDARY_REASONS)[number];
 
 export interface BoundaryInput {
-  deploymentMode: DeploymentMode;
-  /** ALLOWED_CONNECTOR_URLS の origin（cloud で使う） */
-  allowedOrigins: readonly string[];
   /** SIM_WORLD_URL の origin（なければどの URL も sim-world ではない） */
   simWorldOrigin: string | null;
   workspaceKind: WorkspaceKind;
@@ -101,17 +97,12 @@ export function effectiveConnectorUrl(
 
 /**
  * 境界の確認（MT §3.12.2 connectorBoundary）
- * 1 cloud（公開デプロイ）で origin が ALLOWED_CONNECTOR_URLS にない → public_deployment（BR-66。ワークスペースの種類によらない）
- * 2 ゲストで sim-world 以外（ownOAuthConnector の Google カレンダー・GitHub は通す）→ guest_workspace（BR-64）
- * 3 影で sim-world 以外 → shadow_real_connector（BR-67②）
- * 4 リハーサルの走行で sim-world 以外 → rehearsal_real_connector（BR-63）
+ * 1 ゲストで sim-world 以外（ownOAuthConnector の Google カレンダー・GitHub は通す）→ guest_workspace（BR-64）
+ * 2 影で sim-world 以外 → shadow_real_connector（BR-67②）
+ * 3 リハーサルの走行で sim-world 以外 → rehearsal_real_connector（BR-63）
  * 読めない URL は sim-world でも許可の一覧でもないものとして扱う（閉じた側）
  */
 export function connectorBoundary(i: BoundaryInput): BoundaryCheck {
-  const origin = originOf(i.connectorUrl);
-  if (i.deploymentMode === "cloud" && (origin === null || !i.allowedOrigins.includes(origin))) {
-    return { ok: false, reasonCode: "public_deployment" };
-  }
   const sim = isSimWorldUrl(i.connectorUrl, i.simWorldOrigin);
   if (i.workspaceKind === "guest" && !sim && !i.ownOAuthConnector) return { ok: false, reasonCode: "guest_workspace" };
   if (i.shadow && !sim) return { ok: false, reasonCode: "shadow_real_connector" };

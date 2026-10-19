@@ -1,4 +1,4 @@
-// 作業場（サンドボックス）の実行役のエントリ（Cloud Run Jobs・Docker。D-116）。
+// 作業場（サンドボックス）の実行役のエントリ（Docker。D-116）。
 // 環境変数：SANDBOX_TOKEN（この作業場だけのトークン）・SANDBOX_EDGE_URL（app の URL）・SANDBOX_ROOT（既定 /workspace）・
 // SANDBOX_RUN_AS_UID / SANDBOX_RUN_AS_GID（コマンドを動かす利用者。既定 10001）。
 // トークンは読んだらすぐ環境変数から消す（コマンドは権限のない利用者で動き、この プロセスの環境変数は読めない）

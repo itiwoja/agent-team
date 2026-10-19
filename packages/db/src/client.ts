@@ -109,32 +109,10 @@ export function isRetryableTxError(e: unknown): boolean {
   return code === PG_ERROR.deadlockDetected || code === PG_ERROR.serializationFailure;
 }
 
-/**
- * Cloud SQL の unix ソケット（postgres://user:pass@localhost/db?host=/cloudsql/<接続名>）の host を取り出す。
- * postgres.js は URL の ?host= を読まないので、オプションで渡す。ソケットでなければ undefined
- */
-export function socketHostOf(url: string): string | undefined {
-  try {
-    const h = new URL(url).searchParams.get("host");
-    return h !== null && h.startsWith("/") ? h : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-export function withoutHostParam(url: string): string {
-  const u = new URL(url);
-  u.searchParams.delete("host");
-  return u.toString();
-}
-
-/** 接続を作る（プールは遅延で開く）。url は postgres://user:pass@host:port/db（?sslmode=… も可。Cloud SQL は ?host=/cloudsql/… のソケット） */
+/** 接続を作る（プールは遅延で開く）。url は postgres://user:pass@host:port/db（?sslmode=… も可） */
 export function createDb(url: string, opts: DbOptions = {}): Db {
   const prepare = opts.prepare ?? true;
-  const socketHost = socketHostOf(url);
-  // ?host= を残すと postgres.js が接続の設定パラメータとして送り、サーバーに "unrecognized configuration parameter host" と拒まれる
-  const sql = postgres(socketHost ? withoutHostParam(url) : url, {
-    ...(socketHost ? { host: socketHost } : {}),
+  const sql = postgres(url, {
     max: opts.max ?? 2,
     connect_timeout: opts.connectTimeoutSec ?? 10,
     idle_timeout: opts.idleTimeoutSec ?? 60,

@@ -1,6 +1,6 @@
-// 使うモデルと Vertex AI の場所（15_hackathon.md:587、SO §2.2・§9 I-03）
+// 使うモデル（SO §2.2・§9 I-03）
 // エージェントの推論・要約は Flash 系、設定プランナー・状況の生成（解釈・締める提案を含む）は上位のモデル。
-// モデル ID は 2026-10-03 に Vertex AI（global）へ実際に呼んで確かめた。版つきの ID にする（別名が裏で替わると、合格証の「モデルの変更」が働かない：SO I-03）
+// 版つきの ID にする（別名が裏で替わると、合格証の「モデルの変更」が働かない：SO I-03）
 
 import type { LlmPhase } from "@open-team/runner";
 
@@ -8,14 +8,10 @@ import type { LlmPhase } from "@open-team/runner";
 export const DEFAULT_AGENT_MODEL = "gemini-3.8-flash";
 /** 設定プランナー・状況の生成（GEMINI_MODEL_PLANNER の既定）。エージェントと同じ gemini-3.8-flash に固定している */
 export const DEFAULT_PLANNER_MODEL = "gemini-3.8-flash";
-/** GOOGLE_CLOUD_LOCATION の既定。3 系は global だけで、asia-northeast1 には 2.5 Flash までしかない（2026-10-03 に確かめた。SO I-03） */
-export const DEFAULT_GEMINI_LOCATION = "global";
 
 export interface GeminiEnv {
-  /** GOOGLE_CLOUD_PROJECT */
-  project: string | undefined;
-  /** GOOGLE_CLOUD_LOCATION */
-  location: string;
+  /** GEMINI_API_KEY（ログ・応答に出さない。platform の SECRET_ENV_NAMES でマスクする） */
+  apiKey: string | undefined;
   /** GEMINI_MODEL_AGENT */
   agentModel: string;
   /** GEMINI_MODEL_PLANNER */
@@ -26,23 +22,16 @@ export interface GeminiEnv {
 
 export function readGeminiEnv(source: NodeJS.ProcessEnv = process.env): GeminiEnv {
   return {
-    project: valueOf(source.GOOGLE_CLOUD_PROJECT),
-    location: valueOf(source.GOOGLE_CLOUD_LOCATION) ?? DEFAULT_GEMINI_LOCATION,
+    apiKey: valueOf(source.GEMINI_API_KEY),
     agentModel: valueOf(source.GEMINI_MODEL_AGENT) ?? DEFAULT_AGENT_MODEL,
     plannerModel: valueOf(source.GEMINI_MODEL_PLANNER) ?? DEFAULT_PLANNER_MODEL,
     compareModels: [...new Set((source.GEMINI_MODELS_COMPARE ?? "").split(",").map((s) => s.trim()).filter((s) => s !== ""))],
   };
 }
 
-/** 置いてはいけない変数（Gemini は IAM で呼び、鍵の経路を作らない：ADR-032、SO §2.2） */
-export const FORBIDDEN_GEMINI_ENV = ["GEMINI_API_KEY", "GOOGLE_API_KEY"] as const;
-
-/** 足りない・置いてはいけない変数の名前だけを返す（値は出さない：D-47。public では準備中の理由にする：SO-ENV-07） */
+/** 足りない変数の名前だけを返す（値は出さない：D-47） */
 export function missingGeminiEnv(source: NodeJS.ProcessEnv = process.env): string[] {
-  const names: string[] = [];
-  if (valueOf(source.GOOGLE_CLOUD_PROJECT) === undefined) names.push("GOOGLE_CLOUD_PROJECT");
-  for (const name of FORBIDDEN_GEMINI_ENV) if (valueOf(source[name]) !== undefined) names.push(name);
-  return names;
+  return valueOf(source.GEMINI_API_KEY) === undefined ? ["GEMINI_API_KEY"] : [];
 }
 
 /** 上位のモデル ／ Flash 系（SO §2.6 GeminiModelRole） */

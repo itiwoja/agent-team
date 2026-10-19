@@ -2,7 +2,6 @@ import type { LlmPhase } from "@open-team/runner";
 import { describe, expect, it } from "vitest";
 import {
   DEFAULT_AGENT_MODEL,
-  DEFAULT_GEMINI_LOCATION,
   DEFAULT_PLANNER_MODEL,
   missingGeminiEnv,
   MODEL_ROLE_BY_PURPOSE,
@@ -14,28 +13,25 @@ import {
 import { findPrice } from "./pricing.ts";
 
 describe("readGeminiEnv（SO §2.2）", () => {
-  it("既定：エージェントは gemini-3.8-flash、上位も gemini-3.8-flash、場所は global、プロジェクトはなし", () => {
+  it("既定：エージェントは gemini-3.8-flash、上位も gemini-3.8-flash、API キーはなし", () => {
     expect(readGeminiEnv({})).toEqual({
-      project: undefined,
-      location: "global",
+      apiKey: undefined,
       agentModel: "gemini-3.8-flash",
       plannerModel: "gemini-3.8-flash",
       compareModels: [],
     });
-    expect([DEFAULT_AGENT_MODEL, DEFAULT_PLANNER_MODEL, DEFAULT_GEMINI_LOCATION]).toEqual(["gemini-3.8-flash", "gemini-3.8-flash", "global"]);
+    expect([DEFAULT_AGENT_MODEL, DEFAULT_PLANNER_MODEL]).toEqual(["gemini-3.8-flash", "gemini-3.8-flash"]);
   });
 
   it("環境変数で上書きする（前後の空白は除く）", () => {
     expect(
       readGeminiEnv({
-        GOOGLE_CLOUD_PROJECT: " open-team-hack ",
-        GOOGLE_CLOUD_LOCATION: "asia-northeast1",
+        GEMINI_API_KEY: " key-1 ",
         GEMINI_MODEL_AGENT: "gemini-3-flash-preview",
         GEMINI_MODEL_PLANNER: "gemini-3.1-pro-preview",
       }),
     ).toMatchObject({
-      project: "open-team-hack",
-      location: "asia-northeast1",
+      apiKey: "key-1",
       agentModel: "gemini-3-flash-preview",
       plannerModel: "gemini-3.1-pro-preview",
     });
@@ -43,7 +39,7 @@ describe("readGeminiEnv（SO §2.2）", () => {
 
   it("空・空白だけの値は「ない」とみなして既定を使う", () => {
     expect(
-      readGeminiEnv({ GOOGLE_CLOUD_PROJECT: "", GOOGLE_CLOUD_LOCATION: "  ", GEMINI_MODEL_AGENT: "", GEMINI_MODEL_PLANNER: " " }),
+      readGeminiEnv({ GEMINI_API_KEY: "  ", GEMINI_MODEL_AGENT: "", GEMINI_MODEL_PLANNER: " " }),
     ).toEqual(readGeminiEnv({}));
   });
 
@@ -62,20 +58,14 @@ describe("readGeminiEnv（SO §2.2）", () => {
   });
 });
 
-describe("missingGeminiEnv（D-47・ADR-032）", () => {
-  it("GOOGLE_CLOUD_PROJECT がなければその名前を返す", () => {
-    expect(missingGeminiEnv({})).toEqual(["GOOGLE_CLOUD_PROJECT"]);
-    expect(missingGeminiEnv({ GOOGLE_CLOUD_PROJECT: "  " })).toEqual(["GOOGLE_CLOUD_PROJECT"]);
-  });
-
-  it("SO-ENV-07：GEMINI_API_KEY・GOOGLE_API_KEY が置かれていれば名前だけを返す（値は返さない）", () => {
-    const names = missingGeminiEnv({ GOOGLE_CLOUD_PROJECT: "p", GEMINI_API_KEY: "secret-1", GOOGLE_API_KEY: "secret-2" });
-    expect(names).toEqual(["GEMINI_API_KEY", "GOOGLE_API_KEY"]);
-    expect(names.join(",")).not.toContain("secret");
+describe("missingGeminiEnv（D-47）", () => {
+  it("GEMINI_API_KEY がなければその名前を返す（値は返さない）", () => {
+    expect(missingGeminiEnv({})).toEqual(["GEMINI_API_KEY"]);
+    expect(missingGeminiEnv({ GEMINI_API_KEY: "  " })).toEqual(["GEMINI_API_KEY"]);
   });
 
   it("そろっていれば空", () => {
-    expect(missingGeminiEnv({ GOOGLE_CLOUD_PROJECT: "p", GEMINI_API_KEY: "" })).toEqual([]);
+    expect(missingGeminiEnv({ GEMINI_API_KEY: "k" })).toEqual([]);
   });
 });
 

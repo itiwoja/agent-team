@@ -1,5 +1,5 @@
 // sim-world の管理 API のクライアント（fetch だけ。app が使う。apps/sim-world/src/admin.ts の入出力に合わせる）
-// 呼び出し元の証明は差し込む（cloud は sa-app の ID トークン、local は共有トークン＋x-ot-caller：platform の serviceAuthHeaders）。
+// 呼び出し元の証明は差し込む（共有トークン＋x-ot-caller：platform の serviceAuthHeaders）。
 // 失敗は SimClientError（HTTP の失敗はサーバーの error.code、届かない・時間切れは status 0）。トークンの値は文に入れない
 
 import type { DamageBreakdown, Scenario, SimEvent } from "@open-team/sim-core";
@@ -23,7 +23,7 @@ import {
 } from "./types.ts";
 
 export interface SimClientOptions {
-  /** SIM_WORLD_URL（例 https://sim-world-xxxx.a.run.app。末尾の / はなくてよい）。ID トークンの aud にも使う */
+  /** SIM_WORLD_URL（例 http://localhost:8788。末尾の / はなくてよい） */
   baseUrl: string;
   /** 呼び出し元の証明のヘッダー（audience は baseUrl） */
   authHeaders: (audience: string) => Promise<Record<string, string>>;

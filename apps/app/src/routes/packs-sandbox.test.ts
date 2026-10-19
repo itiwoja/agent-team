@@ -89,7 +89,7 @@ async function setup(o: { planner?: unknown[]; responder?: ScriptedResponder; sa
       sandbox: provider,
       sandboxEdge: sandboxEdgeOf(createRuntime({ db, llm, gateway: w.gatewayClient, retry: { sleep: fast } })),
     },
-    env: { gemini: { project: undefined, location: "global", agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
+    env: { gemini: { apiKey: undefined, agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
   });
   appRef.t = t;
   const issued = await issueSession(db, { workspaceId: w.ws.workspaceId, userId: w.ws.userId, ipHash: null, userAgent: null, now: T0 });

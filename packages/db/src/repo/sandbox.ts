@@ -46,7 +46,7 @@ export async function getSandboxSession(q: Queryable, ctx: WsCtx, sessionId: Uui
   return r.rows[0] ?? null;
 }
 
-/** プロバイダーが起こした作業場の参照（Cloud Run の実行の名前など）を残す */
+/** プロバイダーが起こした作業場の参照（コンテナの名前など）を残す */
 export async function setSandboxProviderRef(q: Queryable, ctx: WsCtx, sessionId: Uuid, ref: string): Promise<void> {
   await q.query("UPDATE sandbox_sessions SET provider_ref = $3 WHERE workspace_id = $1 AND id = $2", [ctx.workspaceId, sessionId, ref.slice(0, 500)]);
 }

@@ -46,7 +46,7 @@ async function setup(o: { ruleProvenance?: boolean } = {}): Promise<Setup> {
   const first = await runRehearsalSuite(w.deps(llm), { ctx: w.ws.ctx, requesterId: w.ws.userId, subject: { jobId: w.agent.jobId }, trigger: "initial", seed: 9, modelId: DEFAULT_AGENT_MODEL });
   const t = makeTestApp(db, {
     deps: { gatewayClient: w.gatewayClient, simClient: w.simClient, llm: new ScriptedLlmClient(orderScript(BIG_ORDER)), clock: w.clock },
-    env: { gemini: { project: undefined, location: "global", agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
+    env: { gemini: { apiKey: undefined, agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
   });
   const issued = await issueSession(db, { workspaceId: w.ws.workspaceId, userId: w.ws.userId, ipHash: null, userAgent: null, now: T0 });
   return { w, t, cookie: issued.cookieValue, csrf: issued.csrfToken, base: `/api/v1/workspaces/${w.ws.workspaceId}/rehearsals`, firstRunId: first.run.id };

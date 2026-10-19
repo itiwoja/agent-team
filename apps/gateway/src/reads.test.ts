@@ -1,6 +1,5 @@
 // EP-49 読み取り（MT §3.12.5・§6.9・§6.10、AS §3.17 EP-49・T-155〜157、SO §3.10・§7.6、BR-63・64・66・67②、F-08）
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
-import { createServiceAuth } from "@open-team/platform";
 import { GatewayClientError } from "@open-team/gateway-client";
 import { useTestDb } from "@open-team/db/testing";
 import {
@@ -169,35 +168,7 @@ describe("ツールの確かめ（MT §3.12.5 の4・5、D-15）", () => {
   });
 });
 
-describe("境界（BR-63・64・66・67②、MT BD-07〜09、SO-BD-05〜08）", () => {
-  it("BD-07・SO-BD-08 公開デプロイで DB の connectors.url を実在のホストに書き換えて呼ぶ → public_deployment。policy_decisions と監査ログに残り、そのホストには送らない", async () => {
-    const { db } = T();
-    const ws = await workspace(db);
-    await sim.createDemoStore(ws.workspaceId);
-    const env = { ...gatewayEnv(sim.url), deploymentMode: "cloud" as const };
-    const gw = startGateway(db, env, {
-      deps: {
-        serviceAuth: createServiceAuth({ mode: "local", sharedToken: GW_TOKEN }),
-        connectorAuth: async () => ({ authorization: `Bearer ${SIM_TOKEN}`, "x-ot-caller": "sa-gateway" }),
-      },
-    });
-    const shop = await seedShop(db, gw.client, ws, sim.url);
-    const { taskId, token } = await taskWithToken(db, ws);
-    // BD-03：公開デプロイでも sim-world の URL なら通る
-    expect((await gw.client.callReadTool(token, { connectorId: shop.store!.id, tool: "get_inventory", arguments: {}, toolCallId: "c0" })).ok).toBe(true);
-    await db.query("UPDATE connectors SET url = 'https://mcp.example.com/mcp' WHERE id = $1", [shop.store!.id]);
-    const before = gw.sent.length;
-    const res = await gw.client.callReadTool(token, { connectorId: shop.store!.id, tool: "get_inventory", arguments: {}, toolCallId: "c1" });
-    expect(res).toEqual({ ok: false, reasonCode: "public_deployment" });
-    expect(gw.sent.slice(before)).toHaveLength(0);
-    const d = (await decisions(db, ws.workspaceId)).at(-1)!;
-    expect(d).toMatchObject({ decision: "deny", reason_code: "public_deployment", matched_rule: "boundary.public_deployment", enforced: true, subject_kind: "tool_call", action_type: "mcp_read" });
-    expect(d.flags).toMatchObject({ deploymentMode: "cloud", workspaceKind: "owner", connectorOrigin: "https://mcp.example.com" });
-    const audit = (await auditEvents(db, ws.workspaceId)).filter((e) => e.event_type === "decision.made").at(-1)!;
-    expect(audit.payload).toMatchObject({ taskId, decision: "deny", reasonCode: "public_deployment", source: "gateway", action: "mcp.store.get_inventory" });
-    expect(gw.logs.records.some((r) => r.event === "gateway.connector_denied")).toBe(true);
-  });
-
+describe("境界（BR-63・64・67②、MT BD-08〜09、SO-BD-05〜08）", () => {
   it("SO-BD-05・T-157 の gateway の側：ゲストのタスクが sim-world 以外のコネクタ → guest_workspace", async () => {
     const { db, ws, gw, shop } = await setup("guest");
     await db.query("UPDATE connectors SET url = 'https://real-mcp.example/mcp' WHERE id = $1", [shop.store!.id]);

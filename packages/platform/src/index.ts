@@ -1,11 +1,10 @@
 // @open-team/platform：app・gateway・sim-world が共有する土台（cross-check §3.1。SO §3.1・3.9・3.17・2.11）
-// 環境変数の読み方・エラーの形・構造化ログとマスク・サービス間の認証（ID トークン／共有トークン）・本当の時刻と費用の日の区切り
+// 環境変数の読み方・エラーの形・構造化ログとマスク・サービス間の認証（共有トークン）・本当の時刻と費用の日の区切り
 // runner はこのパッケージを import しない（鍵・環境変数に届かない：15:487、.dependency-cruiser.cjs の runner-no-secrets）
 //
 // 使い方（gateway の例）：
 //   const r = new EnvReader(process.env);
-//   const mode = r.deploymentMode();
-//   const authConfig = readServiceAuthEnv(r, mode, { audienceVar: "GATEWAY_URL", callers: ["sa-app"] });
+//   const authConfig = readServiceAuthEnv(r);
 //   const { missing } = r.done({});                       // 名前だけ（D-47）。gateway・sim-world は足りなければ起動しない
 //   const log = createLogger({ service: "gateway", commit: r.string("COMMIT_SHA") });
 //   const auth = createServiceAuth(authConfig, { log });
@@ -18,13 +17,10 @@
 //   // 処理の中：throw new AppError("TASK_HALTED", undefined, { details: { haltReason } })
 
 export {
-  DEPLOYMENT_MODES,
   EnvReader,
   MIN_SECRET_LENGTH,
   describeMissing,
   normalizeServiceUrl,
-  readDeploymentMode,
-  type DeploymentMode,
   type EnvCheck,
   type EnvSource,
   type ReadOptions,
@@ -67,7 +63,6 @@ export {
 export {
   REQUEST_ID_HEADER,
   REQUEST_ID_PATTERN,
-  TRACE_KEY,
   createLogger,
   loggerOf,
   memoryLogger,
@@ -76,7 +71,6 @@ export {
   requestIdOf,
   requestSecretsOf,
   silentLogger,
-  traceOf,
   type LogContext,
   type LogFields,
   type LogInput,
@@ -88,39 +82,15 @@ export {
   type ServiceName,
 } from "./log.ts";
 export {
-  GOOGLE_ISSUERS,
-  ID_TOKEN_REFRESH_BEFORE_SEC,
-  bearerTokenOf,
-  checkGoogleIdToken,
-  createIdTokenSource,
-  decodeJwtClaims,
-  googleIdTokenFetcher,
-  googleIdTokenVerifier,
-  normalizeAudience,
-  verifyGoogleIdToken,
-  type CallerIdentity,
-  type IdTokenCheck,
-  type IdTokenClaims,
-  type IdTokenFetcher,
-  type IdTokenRejectReason,
-  type IdTokenSignatureVerifier,
-  type IdTokenSource,
-  type IdTokenSourceOptions,
-  type IdTokenVerifyDeps,
-  type InternalAuthPolicy,
-} from "./id-token.ts";
-export {
-  CALLER_EMAIL_VARS,
   CALLER_HEADER,
   SERVICE_CALLERS,
+  bearerTokenOf,
   createServiceAuth,
   readServiceAuthEnv,
   safeEqual,
-  type AudienceVar,
   type ServiceAuth,
   type ServiceAuthConfig,
   type ServiceAuthDeps,
-  type ServiceAuthEnvOptions,
   type ServiceAuthRejectReason,
   type ServiceCaller,
   type ServiceCallerCheck,

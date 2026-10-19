@@ -1,9 +1,9 @@
 // 統制ありの計測（harness.ts）の配管の確かめと、本物の Gemini での計測の入口。
 // - 既定：台本の LLM（決定論）で F-05（豆の値上がり）を1回ずつ3つの設定に通し、設定ごとの違い（確認に回る・すり抜ける・締めて塞がる）が出ることを確かめる
-// - MEASURE_GOVERNED=1：本物の Gemini（Vertex AI。開発者の ADC）で計測し、scripts/measure/results/ に JSON と Markdown を書く。
-//   GOOGLE_CLOUD_PROJECT・GOOGLE_CLOUD_LOCATION（既定 global）、MEASURE_RUNS（既定5）、MEASURE_FAULTS（既定 F-01〜F-07）、
+// - MEASURE_GOVERNED=1：本物の Gemini（GEMINI_API_KEY）で計測し、scripts/measure/results/ に JSON と Markdown を書く。
+//   MEASURE_RUNS（既定5）、MEASURE_FAULTS（既定 F-01〜F-07）、
 //   MEASURE_MAX_COST_USD（既定10）、MEASURE_CONFIGS（既定 no_rule,candidate_rule,tightened。1走行が数分かかるので、
-//   no_rule と candidate_rule,tightened を別のプロセスで並行に走らせてよい）。鍵の経路を作らない（ADR-032）：GEMINI_API_KEY・GOOGLE_API_KEY があれば走らせない
+//   no_rule と candidate_rule,tightened を別のプロセスで並行に走らせてよい）
 
 import { execSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -124,10 +124,8 @@ function conditionsOf(a: {
 
 describe.runIf(process.env.MEASURE_GOVERNED === "1")("統制ありの計測（本物の Gemini）", () => {
   it("F-01〜F-07 を3つの設定で走らせて結果を書く", async () => {
-    if (process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY) throw new Error("GEMINI_API_KEY・GOOGLE_API_KEY を外してから走らせる（ADR-032：ADC で呼ぶ）");
-    const project = process.env.GOOGLE_CLOUD_PROJECT;
-    if (!project) throw new Error("GOOGLE_CLOUD_PROJECT が要る");
-    const location = process.env.GOOGLE_CLOUD_LOCATION ?? "global";
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error("GEMINI_API_KEY が要る");
     const runs = Number(process.env.MEASURE_RUNS ?? 5);
     const faults = (process.env.MEASURE_FAULTS?.split(",") ?? [...MEASURE_FAULT_IDS]).map((f) => f.trim());
     if (!faults.every(isMeasureFaultId)) throw new Error(`MEASURE_FAULTS は ${MEASURE_FAULT_IDS.join(",")} から選ぶ`);
@@ -139,7 +137,7 @@ describe.runIf(process.env.MEASURE_GOVERNED === "1")("統制ありの計測（�
     const commit = headCommit();
     const out = await runGovernedMeasurement({
       openDb: () => openTestDb(),
-      llm: new GeminiClient({ project, location }),
+      llm: new GeminiClient({ apiKey }),
       modelId: DEFAULT_AGENT_MODEL,
       faults,
       runs,

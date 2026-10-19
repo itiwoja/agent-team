@@ -1,31 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { EnvReader, MIN_SECRET_LENGTH, describeMissing, normalizeServiceUrl, readDeploymentMode } from "./env.ts";
+import { EnvReader, MIN_SECRET_LENGTH, describeMissing, normalizeServiceUrl } from "./env.ts";
 
 const S32 = "s".repeat(MIN_SECRET_LENGTH);
-
-describe("readDeploymentMode（DEPLOYMENT_MODE：local / cloud）", () => {
-  it("既定は local（SO §3.1.1）", () => {
-    expect(readDeploymentMode({})).toEqual({ mode: "local", valid: true });
-    expect(readDeploymentMode({ DEPLOYMENT_MODE: "  " })).toEqual({ mode: "local", valid: true });
-    expect(readDeploymentMode({ DEPLOYMENT_MODE: "local" })).toEqual({ mode: "local", valid: true });
-  });
-
-  it("cloud と、SO・MT の名前 public は cloud", () => {
-    expect(readDeploymentMode({ DEPLOYMENT_MODE: "cloud" })).toEqual({ mode: "cloud", valid: true });
-    expect(readDeploymentMode({ DEPLOYMENT_MODE: "public" })).toEqual({ mode: "cloud", valid: true });
-  });
-
-  it("知らない値は厳しい側（cloud）で読み、不正にする", () => {
-    expect(readDeploymentMode({ DEPLOYMENT_MODE: "prod" })).toEqual({ mode: "cloud", valid: false });
-    expect(readDeploymentMode({ DEPLOYMENT_MODE: "Cloud" })).toEqual({ mode: "cloud", valid: false });
-  });
-
-  it("Cloud Run（K_SERVICE あり）で local・未設定のままなら cloud で読んで不正（BR-66 の確認が外れないように）", () => {
-    expect(readDeploymentMode({ K_SERVICE: "gateway" })).toEqual({ mode: "cloud", valid: false });
-    expect(readDeploymentMode({ K_SERVICE: "gateway", DEPLOYMENT_MODE: "local" })).toEqual({ mode: "cloud", valid: false });
-    expect(readDeploymentMode({ K_SERVICE: "gateway", DEPLOYMENT_MODE: "cloud" })).toEqual({ mode: "cloud", valid: true });
-  });
-});
 
 describe("EnvReader（足りない・不正な名前だけを積む。D-47）", () => {
   it("SO-ENV-01 足りない名前は読んだ順（既存の並び：PHASE0_ACCESS_TOKEN → SESSION_COOKIE_SECRET）", () => {
@@ -44,7 +20,7 @@ describe("EnvReader（足りない・不正な名前だけを積む。D-47）", 
     expect(ok.missing).toEqual([]);
   });
 
-  it("秘密の値は前後の空白を除かない。前後に空白・改行があれば不正（Secret Manager の改行に気づけるように）", () => {
+  it("秘密の値は前後の空白を除かない。前後に空白・改行があれば不正（改行の混入に気づけるように）", () => {
     const r = new EnvReader({ A: `${S32}\n`, B: ` ${S32}`, C: `${S32}` });
     expect(r.secret("A")).toBeUndefined();
     expect(r.secret("B")).toBeUndefined();
@@ -152,14 +128,11 @@ describe("EnvReader（足りない・不正な名前だけを積む。D-47）", 
     expect(blank.missing).toEqual([]);
   });
 
-  it("deploymentMode は1回だけ積み、2回目も同じ値。flag は重複しない", () => {
-    const r = new EnvReader({ DEPLOYMENT_MODE: "prod" });
-    expect(r.deploymentMode()).toBe("cloud");
-    expect(r.deploymentMode()).toBe("cloud");
-    r.flag("DEPLOYMENT_MODE");
+  it("flag は重複しない", () => {
+    const r = new EnvReader({});
     r.flag("X");
     r.flag("X");
-    expect(r.missing).toEqual(["DEPLOYMENT_MODE", "X"]);
+    expect(r.missing).toEqual(["X"]);
   });
 
   it("done は env と missing の写しを返す（あとから積んでも前の結果は変わらない）", () => {

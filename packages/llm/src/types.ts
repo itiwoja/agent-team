@@ -1,4 +1,4 @@
-// LLM の呼び出しの型（Gemini を Vertex AI 経由で呼ぶ。ADR-032）
+// LLM の呼び出しの型（Gemini API で呼ぶ）
 // runner の会話の形（ChatMessage）をそのまま受け取り、モデルの応答を AssistantPart に戻す。
 // 使えるのは edge（app）と scripts だけ。runner はこのパッケージを import しない（D-52）。
 
@@ -26,7 +26,7 @@ export interface LlmRequest {
 export interface LlmGrounding {
   /** モデルが投げた検索の語句（回数が費用になる） */
   queries: string[];
-  /** 出典（url は Vertex の転送の URL のことがある。開くと元のページに移る） */
+  /** 出典（url は Grounding の転送の URL のことがある。開くと元のページに移る） */
   sources: { title: string; url: string }[];
 }
 

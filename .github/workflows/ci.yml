@@ -1,21 +1,18 @@
-# CI（15 §提出物「CI」・§公開時のセキュリティ・§サプライチェーン、D-50・D-51・D-52、SO §4.7）
-# 型の検査・単体テスト・依存の境界（dependency-cruiser）・ワークフローの検査（zizmor）・秘密情報の検査（gitleaks）。
-# main への push は deploy.yml がこのワークフローを呼んでからデプロイする（同じコミットで2回走らせない）。
+# CI：型の検査・単体テスト・依存の境界（dependency-cruiser）・ワークフローの検査（zizmor）・秘密情報の検査（gitleaks）。
 # アクションはコミット SHA で固定し、版はコメントに書く。pull_request_target は使わない。
 name: ci
 
 on:
   push:
-    branches-ignore: [main]
+    branches: [main]
   pull_request:
-  workflow_call:
 
 # ジョブごとに必要な権限だけを付ける
 permissions: {}
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  # 古い PR の実行だけ止める（main のデプロイの前の CI は止めない）
+  # 古い PR の実行だけ止める（main の CI は止めない）
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -35,7 +32,7 @@ jobs:
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.23.3 # Dockerfile のベースイメージと同じ版
+          node-version: 22.23.3 # apps/*/Dockerfile のベースイメージと同じ版
           cache: pnpm
 
       # lockfile のまま入れる。3日待ち・install スクリプトなしは pnpm-workspace.yaml の設定（D-50）

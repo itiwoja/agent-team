@@ -2,14 +2,6 @@
 // 各サービスの必須の組み合わせ（app の readAppEnv・gateway・sim-world）は apps が EnvReader で組む。
 // 不正な値は undefined にして返す（使ってしまわないように、閉じた側に倒す）
 
-/**
- * local＝ローカル（docker compose・計測。サービス間は共有トークン：G-11）、
- * cloud＝Cloud Run（フェーズ0-H の公開デプロイ。サービス間は Google の ID トークン：SO §3.9）。
- * SO・MT の値 public は cloud と同じに読む
- */
-export type DeploymentMode = "local" | "cloud";
-export const DEPLOYMENT_MODES: readonly DeploymentMode[] = ["local", "cloud"];
-
 /** 秘密の値の最小の長さ（SO §2.1 の secretMinLen。apps/app/src/env.ts の MIN_SECRET_LENGTH と同じ） */
 export const MIN_SECRET_LENGTH = 32;
 
@@ -26,18 +18,6 @@ const nonEmpty = (v: string | undefined): string | undefined => {
   return t ? t : undefined;
 };
 
-/**
- * DEPLOYMENT_MODE を読む。既定は local（SO §3.1.1）。知らない値は厳しい側（cloud）で読み、valid=false。
- * Cloud Run（K_SERVICE がある）で local のまま動くと BR-66 の起動時の確認などが外れるので、cloud で読んで valid=false にする【決定：platform】
- */
-export function readDeploymentMode(source: EnvSource): { mode: DeploymentMode; valid: boolean } {
-  const raw = nonEmpty(source.DEPLOYMENT_MODE);
-  const onCloudRun = nonEmpty(source.K_SERVICE) !== undefined;
-  if (raw === "cloud" || raw === "public") return { mode: "cloud", valid: true };
-  if (raw === undefined || raw === "local") return onCloudRun ? { mode: "cloud", valid: false } : { mode: "local", valid: true };
-  return { mode: "cloud", valid: false };
-}
-
 export interface ReadOptions {
   /** 無ければ足りないに入れる */
   required?: boolean;
@@ -52,7 +32,6 @@ const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 export class EnvReader {
   readonly #source: EnvSource;
   readonly #missing: string[] = [];
-  #mode: DeploymentMode | undefined;
 
   constructor(source: EnvSource = process.env) {
     this.#source = source;
@@ -73,16 +52,6 @@ export class EnvReader {
     return nonEmpty(this.#source[name]) !== undefined;
   }
 
-  /** DEPLOYMENT_MODE（readDeploymentMode。外れていれば名前を積む）。2回目からは同じ値 */
-  deploymentMode(): DeploymentMode {
-    if (this.#mode === undefined) {
-      const r = readDeploymentMode(this.#source);
-      if (!r.valid) this.flag("DEPLOYMENT_MODE");
-      this.#mode = r.mode;
-    }
-    return this.#mode;
-  }
-
   /** 前後の空白を除いた文字列。空なら undefined */
   string(name: string, opts: ReadOptions & { pattern?: RegExp } = {}): string | undefined {
     const v = nonEmpty(this.#source[name]);
@@ -99,7 +68,7 @@ export class EnvReader {
 
   /**
    * 秘密の値（そのまま。空白を除かない）。minLength（既定 32）より短い・前後に空白や改行がある値は不正。
-   * Secret Manager に改行つきで入れた値を「準備中」の名前で気づけるようにする
+   * 改行つきで入れた値を「準備中」の名前で気づけるようにする
    */
   secret(name: string, opts: ReadOptions & { minLength?: number } = {}): string | undefined {
     const v = this.#source[name];
@@ -116,7 +85,7 @@ export class EnvReader {
 
   /**
    * http(s) の URL。認証情報・クエリ・# を持つものは不正。
-   * 返す形は `${protocol}//${host}${path}`（末尾の / を除く。ホストは小文字）。ID トークンの aud・呼び先に使う
+   * 返す形は `${protocol}//${host}${path}`（末尾の / を除く。ホストは小文字）。呼び先に使う
    */
   url(name: string, opts: ReadOptions & { httpsOnly?: boolean } = {}): string | undefined {
     const v = this.string(name, opts);
@@ -126,7 +95,7 @@ export class EnvReader {
     return normalized ?? undefined;
   }
 
-  /** メールアドレスの形（サービスアカウント）。小文字にそろえる */
+  /** メールアドレスの形。小文字にそろえる */
   email(name: string, opts: ReadOptions = {}): string | undefined {
     const v = this.string(name, opts);
     if (v === undefined) return undefined;
@@ -149,7 +118,7 @@ export class EnvReader {
     return n;
   }
 
-  /** 待ち受けのポート（Cloud Run が PORT を渡す。既定 8080） */
+  /** 待ち受けのポート（既定 8080） */
   port(name = "PORT", fallback = 8080): number {
     return this.int(name, { fallback, min: 0, max: 65535 });
   }
@@ -164,7 +133,7 @@ export class EnvReader {
     return items;
   }
 
-  /** 置いてはいけない変数（例：public の GEMINI_API_KEY。SO §3.1.1 の 5）。値があれば名前を積む */
+  /** 置いてはいけない変数。値があれば名前を積む */
   forbid(name: string): void {
     if (this.has(name)) this.flag(name);
   }
@@ -177,7 +146,7 @@ export class EnvReader {
 
 /**
  * サービスの URL を正規化する（不正なら null）。http(s) だけ、認証情報・クエリ・# なし。
- * `https://Gateway-1.run.app/` → `https://gateway-1.run.app`
+ * `http://Localhost:8082/` → `http://localhost:8082`
  */
 export function normalizeServiceUrl(raw: string, httpsOnly = false): string | null {
   let u: URL;

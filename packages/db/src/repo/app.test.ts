@@ -229,8 +229,8 @@ describe("オーナーの初期投入に使う行", () => {
     expect(a).toMatchObject({ created: true, updated: false, row: { kind: "sim", enabled: true } });
     const b = await db.transaction((tx) => upsertSimConnector(tx, ws.ctx, seed, NOW));
     expect(b).toMatchObject({ created: false, updated: false, row: { id: a.row.id } });
-    const c = await db.transaction((tx) => upsertSimConnector(tx, ws.ctx, { ...seed, url: "https://sim2/mcp/shop/store", auth: { type: "gcp_id_token", audience: "https://sim2" } }, NOW));
-    expect(c).toMatchObject({ created: false, updated: true, row: { id: a.row.id, url: "https://sim2/mcp/shop/store", auth: { type: "gcp_id_token", audience: "https://sim2" } } });
+    const c = await db.transaction((tx) => upsertSimConnector(tx, ws.ctx, { ...seed, url: "https://sim2/mcp/shop/store" }, NOW));
+    expect(c).toMatchObject({ created: false, updated: true, row: { id: a.row.id, url: "https://sim2/mcp/shop/store", auth: { type: "none" } } });
     await db.query("INSERT INTO connectors (workspace_id, slug, display_name, kind, url) VALUES ($1, 'mail', 'm', 'mcp_remote', 'https://x')", [ws.workspaceId]);
     await expect(db.transaction((tx) => upsertSimConnector(tx, ws.ctx, { ...seed, slug: "mail" }, NOW))).rejects.toThrow(/sim でない/);
   });

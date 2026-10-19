@@ -356,9 +356,8 @@ describe("ローカルのトークンなしの入口（POST /entry/local）", ()
     expect((await send(t, "POST", "/api/v1/entry/local", { body: {} })).status).toBe(403);
   });
 
-  it("cloud では 404、/session も localEntry を返さない", async () => {
-    const t = makeTestApp(T().db, { env: { deploymentMode: "cloud" } });
-    expect((await sendFrom(t, "127.0.0.1")).status).toBe(404);
-    expect(await (await send(t, "GET", "/api/v1/session")).json()).toEqual({ state: "signed_out" });
+  it("/session は localEntry を返す", async () => {
+    const t = makeTestApp(T().db);
+    expect(await (await send(t, "GET", "/api/v1/session")).json()).toEqual({ state: "signed_out", localEntry: true });
   });
 });

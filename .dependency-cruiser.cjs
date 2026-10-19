@@ -1,7 +1,7 @@
-// dependency-cruiser の設定。CI の `pnpm lint:deps` で回し、違反があればデプロイしない（D-52、15 §公開時のセキュリティ）
-// - packages/runner は DB・Gemini（Vertex AI）・gateway のクライアントと鍵に届くものを import しない（D-52、15:446,487-488）
+// dependency-cruiser の設定。CI の `pnpm lint:deps` で回す（D-52）
+// - packages/runner は DB・Gemini・gateway のクライアントと鍵に届くものを import しない（D-52、15:446,487-488）
 // - 純粋なパッケージ（kernel・sim-core・oracles・rehearsal と runner のロジック）は node:crypto のほかに I/O の組み込みとネットワークのパッケージを使わない
-// - 循環・解決できない import・本番のコードからの devDependencies（イメージは本番の依存だけ：Dockerfile）を禁止
+// - 循環・解決できない import・本番のコードからの devDependencies を禁止
 // 規則が本当に違反を見つけるかは .github/depcruise-selftest/run.mjs で確かめる（SO-RB-01）
 "use strict";
 
@@ -301,7 +301,7 @@ module.exports = {
     },
     {
       name: "not-to-dev-dep",
-      comment: "デプロイするコード（apps・packages）から devDependencies を使わない。イメージは本番の依存だけを入れる（Dockerfile）。テストとビルドの設定は除く",
+      comment: "apps・packages の本番のコードから devDependencies を使わない（Docker のイメージは本番の依存だけを入れる）。テストとビルドの設定は除く",
       severity: "error",
       from: { path: "^(apps|packages)/", pathNot: [TEST_FILES, BUILD_CONFIG_FILES] },
       to: { dependencyTypes: ["npm-dev"], dependencyTypesNot: ["type-only"] },

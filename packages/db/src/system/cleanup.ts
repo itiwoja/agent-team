@@ -128,7 +128,7 @@ async function cleanupOne(maint: Db, id: Uuid, now: Date, idleBefore: Date, grac
   });
 }
 
-/** ゲストの掃除を1回（batch 件まで）行う。残りは次の回（Cloud Scheduler の試行の期限に収める） */
+/** ゲストの掃除を1回（batch 件まで）行う。残りは次の回（1回を短く収める） */
 export async function cleanupGuestWorkspaces(maint: Db, now: Date, opts: CleanupOptions = {}): Promise<CleanupResult> {
   const batch = opts.batch ?? CLEANUP_DEFAULTS.batch;
   const graceMs = opts.graceMs ?? CLEANUP_DEFAULTS.graceMs;

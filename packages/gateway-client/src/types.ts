@@ -1,6 +1,6 @@
 // gateway の内部 API（EP-49〜51）の型（パッケージをまたぐ契約。変えるときは gateway・edge・app をすべて直す）
 // 出典：spec/api-surface.md §2.12.2・§3.17、intents-approvals.md §3.12、mcp-taint.md §3.12、cross-check.md M-20・M-21・M-43
-// 認証：Cloud Run は sa-app の ID トークン、ローカルは共有トークン＋呼び出し元の名前（platform の serviceAuthHeaders）。
+// 認証：共有トークン＋呼び出し元の名前（platform の serviceAuthHeaders）。
 // 本文に workspaceId などを載せても gateway は読まない（タスクのトークン・Intent の行から DB で引き直す：15:486）
 
 import type { ReasonCode, ToolHash, Uuid } from "@open-team/kernel";
@@ -12,7 +12,6 @@ export type GwRejectReason =
   | "tool_not_read"
   | "tool_removed"
   | "connector_not_found"
-  | "public_deployment"
   | "guest_workspace"
   | "shadow_real_connector"
   | "rehearsal_real_connector"
@@ -41,7 +40,7 @@ export type GwExecuteStatus =
 export interface GwExecuteResponse {
   intentId: Uuid;
   status: GwExecuteStatus;
-  /** tool_error・auth_required・unreachable・precondition_failed・public_deployment など（intents-approvals.md §2.2） */
+  /** tool_error・auth_required・unreachable・precondition_failed など（intents-approvals.md §2.2） */
   failReason: string | null;
   /** tool_changed・superseded・policy_changed など */
   expiredReason: string | null;

@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
-import { createServiceAuth, loggerOf, requestContext, type ServiceAuth, type ServiceAuthDeps } from "@open-team/platform";
+import { createServiceAuth, loggerOf, requestContext, type ServiceAuth } from "@open-team/platform";
 import { adminRoutes } from "./admin.ts";
 import { SIM_OPERATIONS, allowedCallersOf, serviceAuthConfigOf, type SimOperation } from "./auth.ts";
 import type { SimWorldHonoEnv } from "./context.ts";
@@ -27,8 +27,6 @@ export interface SimWorldDeps {
   newId?: () => string;
   /** 呼び出し元の確認（packages/platform）。省略は env から createServiceAuth で作る */
   serviceAuth?: ServiceAuth;
-  /** serviceAuth を env から作るときの依存（cloud の署名の検証器・時計。試験は偽の検証器を渡す） */
-  serviceAuthDeps?: Omit<ServiceAuthDeps, "log">;
   log?: Logger;
 }
 
@@ -62,14 +60,14 @@ export function createApp(env: SimWorldEnv, deps: SimWorldDeps = {}) {
   const now = deps.now ?? (() => new Date());
   const newId = deps.newId ?? randomUUID;
   const log = deps.log ?? silentLogger;
-  const auth = deps.serviceAuth ?? createServiceAuth(serviceAuthConfigOf(env), { ...deps.serviceAuthDeps, log });
+  const auth = deps.serviceAuth ?? createServiceAuth(serviceAuthConfigOf(env), { log });
 
   const app = new Hono<SimWorldHonoEnv>();
 
   // リクエスト ID（来た x-request-id は形が合えば引き継ぐ：内部のサービス）とリクエストの Logger（Bearer などをマスク）
   app.use("*", requestContext({ logger: log, acceptIncoming: true }));
 
-  // Cloud Run の予約パスを避けた /api/health も同じ（SO §4.1）
+  // /api/health も同じ（SO §4.1）
   const health = { status: "ok", service: "sim-world", commit: env.commitSha ?? null } as const;
   app.get("/healthz", (c) => c.json(health));
   app.get("/api/health", (c) => c.json(health));

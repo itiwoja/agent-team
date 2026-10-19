@@ -1,6 +1,6 @@
 // client.ts（postgres.js の包み）の試験：値の変換・1回に1つの文・トランザクション・エラーの見分け
 import { describe, expect, it } from "vitest";
-import { isCheckViolation, isRetryableTxError, isUniqueViolation, parseInt8, pgErrorInfo, socketHostOf, withoutHostParam, withTransaction } from "./client.ts";
+import { isCheckViolation, isRetryableTxError, isUniqueViolation, parseInt8, pgErrorInfo, withTransaction } from "./client.ts";
 import { useTestDb } from "./testing.ts";
 
 const T = useTestDb();
@@ -168,23 +168,5 @@ describe("エラーの見分けと LISTEN", () => {
     for (let i = 0; i < 50 && got.length === 0; i++) await new Promise((r) => setTimeout(r, 20));
     expect(got).toEqual(["ws-1"]);
     await l.unlisten();
-  });
-});
-
-describe("socketHostOf", () => {
-  it("?host=/… の unix ソケットを取り出す", () => {
-    expect(socketHostOf("postgres://u:p@localhost/db?host=/cloudsql/proj:asia-northeast1:inst")).toBe("/cloudsql/proj:asia-northeast1:inst");
-  });
-  it("ソケットでなければ undefined", () => {
-    expect(socketHostOf("postgres://u:p@db.example:5432/db?sslmode=require")).toBeUndefined();
-    expect(socketHostOf("postgres://u:p@localhost/db?host=example.com")).toBeUndefined();
-    expect(socketHostOf("not a url")).toBeUndefined();
-  });
-});
-
-describe("withoutHostParam（migrate.ts もソケット接続に使う）", () => {
-  it("?host= だけを外し、ほかの部分は残す", () => {
-    expect(withoutHostParam("postgres://u:p@localhost/db?host=/cloudsql/proj:asia-northeast1:inst")).toBe("postgres://u:p@localhost/db");
-    expect(withoutHostParam("postgres://u:p@localhost/db?host=/cloudsql/x&sslmode=disable")).toBe("postgres://u:p@localhost/db?sslmode=disable");
   });
 });

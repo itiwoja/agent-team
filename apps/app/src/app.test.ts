@@ -27,7 +27,7 @@ describe("SO-HDR-01〜03 ヘッダー", () => {
     expect(res.headers.get("x-request-id")).toMatch(/^req_[0-9A-HJKMNP-TV-Z]{26}$/);
   });
 
-  it("GET /api/health は準備中でも 200 { status, commit }（Cloud Run の予約パス /healthz は使わない：SO C-26）", async () => {
+  it("GET /api/health は準備中でも 200 { status, commit }（/healthz は使わない：SO C-26）", async () => {
     const setup = makeTestApp(unavailableDb(), { missing: ["DATABASE_URL"] });
     const res = await send(setup, "GET", "/api/health");
     expect(res.status).toBe(200);

@@ -1,6 +1,6 @@
 // SSE の購読（EventSource）のつなぎ直しの論理。api.ts の subscribeWorkspace がここを使う。
 //
-// ブラウザの EventSource は、サーバーが非 200 で閉じたり Cloud Run が切ったりすると readyState が CLOSED になって
+// ブラウザの EventSource は、サーバーが非 200 で閉じたり プロキシなどが切ったりすると readyState が CLOSED になって
 // 二度とつなぎ直さない（ネットワークの切断なら CONNECTING で自動でつなぎ直す）。ここでは
 // - CLOSED なら指数バックオフ（1s→2s→…最大30s）で EventSource を作り直す。受けた事象の id を覚えていれば
 //   クエリ lastEventId で渡す（サーバーは Last-Event-ID かクエリ lastEventId を受ける：apps/app/src/routes/stream.ts）

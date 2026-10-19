@@ -14,11 +14,8 @@ export const REPO = "octo/app";
 export const INTENT = "01234567-89ab-cdef-0123-456789abcdef";
 
 export const LOCAL_ENV: GithubEnv = {
-  deploymentMode: "local",
   port: 0,
   sharedToken: LOCAL_TOKEN,
-  selfUrl: undefined,
-  gatewaySaEmail: undefined,
   githubApiBase: API_BASE,
   commitSha: "0123abc",
 };

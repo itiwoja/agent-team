@@ -44,7 +44,7 @@ async function setup(llm: ScriptedLlmClient, o: { parentDone?: boolean; guest?: 
   const w = (world = await startRehearsalWorld(db, url, o.guest ? { workspaceKind: "guest" } : {}));
   const t = makeTestApp(db, {
     deps: { gatewayClient: w.gatewayClient, simClient: w.simClient, llm, clock: w.clock },
-    env: { gemini: { project: undefined, location: "global", agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
+    env: { gemini: { apiKey: undefined, agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
   });
   const issued = await issueSession(db, { workspaceId: w.ws.workspaceId, userId: w.ws.userId, ipHash: null, userAgent: null, now: T0 });
   const parent = await insertRehearsalRun(db, w.ws.ctx, { subject: { jobId: w.agent.jobId }, trigger: "manual", seed: 1, modelId: "m", now: T0 });

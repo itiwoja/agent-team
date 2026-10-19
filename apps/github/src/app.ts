@@ -13,7 +13,6 @@ import {
   type Logger,
   type PlatformEnv,
   type ServiceAuth,
-  type ServiceAuthDeps,
 } from "@open-team/platform";
 import { GITHUB_HEADER, GITHUB_MCP_PATH } from "@open-team/github-core";
 import { GITHUB_CALLERS } from "./auth.ts";
@@ -25,8 +24,6 @@ export interface GithubDeps {
   fetch?: typeof fetch;
   /** 呼び出し元の確認。省略は env から createServiceAuth で作る */
   serviceAuth?: ServiceAuth;
-  /** serviceAuth を env から作るときの依存（cloud の署名の検証器・時計。試験は偽の検証器を渡す） */
-  serviceAuthDeps?: Omit<ServiceAuthDeps, "log">;
   log?: Logger;
 }
 
@@ -36,7 +33,7 @@ export const BODY_LIMIT_BYTES = 12 * 1024 * 1024;
 export function createApp(env: GithubEnv, deps: GithubDeps = {}) {
   const fetchFn = deps.fetch ?? ((input: string | URL | Request, init?: RequestInit) => fetch(input, init));
   const log = deps.log ?? silentLogger;
-  const auth = deps.serviceAuth ?? createServiceAuth(serviceAuthConfigOf(env), { ...deps.serviceAuthDeps, log });
+  const auth = deps.serviceAuth ?? createServiceAuth(serviceAuthConfigOf(env), { log });
 
   const app = new Hono<PlatformEnv>();
 

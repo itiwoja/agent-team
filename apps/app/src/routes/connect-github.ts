@@ -39,7 +39,7 @@ type GithubConnectOutcome = "github_denied" | "github_not_installed" | "github_f
 const ProtectedWriteBody = z.strictObject({ allow: z.boolean() });
 
 function stateCookieOptions(deps: Pick<AppDeps, "env">) {
-  return { httpOnly: true, secure: deps.env.deploymentMode === "cloud", sameSite: "Lax" as const, path: GITHUB_STATE_COOKIE_PATH };
+  return { httpOnly: true, secure: deps.env.cookieSecure, sameSite: "Lax" as const, path: GITHUB_STATE_COOKIE_PATH };
 }
 
 function parseStateCookie(raw: string | undefined): { state: string; binding: string } | null {

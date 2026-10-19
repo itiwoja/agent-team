@@ -64,12 +64,8 @@ export interface SimWorldHandle {
 export async function startSimWorld(deps: Omit<SimWorldDeps, "store"> = {}): Promise<SimWorldHandle> {
   const store = new MemorySimStore();
   const env: SimWorldEnv = {
-    deploymentMode: "local",
     port: 0,
     sharedToken: SIM_TOKEN,
-    selfUrl: undefined,
-    gatewaySaEmail: undefined,
-    appSaEmail: undefined,
     databaseUrl: undefined,
     commitSha: "test",
   };
@@ -256,12 +252,11 @@ export function connectionReset(): TypeError {
 
 export function gatewayEnv(simUrl: string | null, over: Partial<GatewayEnv> = {}): GatewayEnv {
   return {
-    deploymentMode: "local",
     port: 0,
     databaseUrl: "postgres://unused",
     allowedConnectorUrls: simUrl ? [simUrl] : [],
     simWorldUrl: simUrl,
-    serviceAuth: { mode: "local", sharedToken: GW_TOKEN },
+    serviceAuth: { sharedToken: GW_TOKEN },
     simWorldSharedToken: SIM_TOKEN,
     gcal: null,
     github: null,

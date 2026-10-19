@@ -1,4 +1,4 @@
-// 構造化ログ（security-ops-deploy.md §2.10・§3.17、NFR-032）。Cloud Run の標準出力に1行1JSON（Cloud Logging が jsonPayload にする）。
+// 構造化ログ（security-ops-deploy.md §2.10・§3.17、NFR-032）。標準出力に1行1JSON。
 // 必須のキー（severity・message・service・event・requestId・workspaceId・taskId）は値がなくても null で出す。
 // 出す前にすべての値をマスクする（mask.ts）。プロンプト・応答・リクエストの本文・トークンは呼び出し側も渡さない（SO §3.17 の 3・4）。
 // リクエスト ID のミドルウェアもここ（X-Request-Id。09_api/common.md:52、SO §3.3 の 2）
@@ -12,9 +12,6 @@ export type LogSeverity = "DEBUG" | "INFO" | "NOTICE" | "WARNING" | "ERROR" | "C
 
 /** ログを出すサービス（SO §2.1 の ServiceName） */
 export type ServiceName = "app" | "gateway" | "sim-world" | "gcal" | "github";
-
-/** Cloud Logging の相関 ID のキー（Should。15:533） */
-export const TRACE_KEY = "logging.googleapis.com/trace";
 
 /** 呼び出し側が渡す1件。event は機械で数える名前（例 internal_auth.denied） */
 export interface LogInput {
@@ -42,7 +39,6 @@ export interface LogRecord {
   intentId?: string | null;
   rehearsalRunId?: string | null;
   commit?: string;
-  [TRACE_KEY]?: string;
   [k: string]: unknown;
 }
 
@@ -53,8 +49,6 @@ export interface LogContext {
   taskId?: string | null;
   intentId?: string | null;
   rehearsalRunId?: string | null;
-  /** `projects/<PROJECT_ID>/traces/<TRACE_ID>` */
-  trace?: string | null;
 }
 
 export interface Logger {
@@ -79,7 +73,7 @@ export interface LoggerOptions {
   write?: (line: string) => void;
 }
 
-const STANDARD_KEYS = new Set(["severity", "message", "service", "event", "requestId", "workspaceId", "taskId", "intentId", "rehearsalRunId", "commit", TRACE_KEY]);
+const STANDARD_KEYS = new Set(["severity", "message", "service", "event", "requestId", "workspaceId", "taskId", "intentId", "rehearsalRunId", "commit"]);
 
 const SEVERITIES: ReadonlySet<string> = new Set<LogSeverity>(["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]);
 
@@ -102,7 +96,6 @@ function buildRecord(service: ServiceName, commit: string | undefined, ctx: LogC
   const rehearsalRunId = pick("rehearsalRunId");
   if (rehearsalRunId !== undefined) record.rehearsalRunId = rehearsalRunId;
   if (commit) record.commit = commit;
-  if (ctx.trace) record[TRACE_KEY] = ctx.trace;
   for (const [k, v] of Object.entries(entry)) {
     if (!STANDARD_KEYS.has(k) && v !== undefined) record[k] = v;
   }
@@ -206,18 +199,6 @@ export function newRequestId(nowMs: number = Date.now()): string {
   return `req_${time}${rand}`;
 }
 
-/**
- * Cloud Logging の trace（Should：SO §3.17 の 5）。X-Cloud-Trace-Context（TRACE_ID/SPAN_ID;o=1）か traceparent から読む。
- * 読めなければ null
- */
-export function traceOf(headers: Headers, projectId: string): string | null {
-  const fromCloud = /^([0-9a-f]{32})(?:\/|;|$)/i.exec(headers.get("x-cloud-trace-context") ?? "")?.[1];
-  const fromW3c = /^[0-9a-f]{2}-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/i.exec(headers.get("traceparent") ?? "")?.[1];
-  const id = fromCloud ?? fromW3c;
-  if (!id || /^0+$/.test(id)) return null;
-  return `projects/${projectId}/traces/${id.toLowerCase()}`;
-}
-
 function cookieValue(cookieHeader: string | null, name: string): string | null {
   for (const part of (cookieHeader ?? "").split(";")) {
     const i = part.indexOf("=");
@@ -245,23 +226,20 @@ export interface RequestContextOptions {
    */
   acceptIncoming?: boolean;
   newRequestId?: () => string;
-  /** Cloud Logging の trace を付けるときのプロジェクト ID（GOOGLE_CLOUD_PROJECT） */
-  traceProjectId?: string;
   /** 1リクエスト1行の http.request（メソッド・パス・状態・時間。クエリは出さない） */
   accessLog?: boolean;
 }
 
 /**
  * リクエスト ID とリクエストの Logger を文脈に載せ、応答に X-Request-Id を付けるミドルウェア。
- * Logger には requestId（と trace）を付け、Cookie・タスクのトークン・CSRF・Bearer の値をマスクの既知の値に足す
+ * Logger には requestId を付け、Cookie・タスクのトークン・CSRF・Bearer の値をマスクの既知の値に足す
  */
 export function requestContext(options: RequestContextOptions): MiddlewareHandler<{ Variables: RequestVariables }> {
   const makeId = options.newRequestId ?? (() => newRequestId());
   return async (c, next) => {
     const given = c.req.header(REQUEST_ID_HEADER);
     const requestId = options.acceptIncoming && given !== undefined && REQUEST_ID_PATTERN.test(given) ? given : makeId();
-    const trace = options.traceProjectId ? traceOf(c.req.raw.headers, options.traceProjectId) : null;
-    const log = options.logger.child({ requestId, ...(trace ? { trace } : {}) }, requestSecretsOf(c.req.raw.headers));
+    const log = options.logger.child({ requestId }, requestSecretsOf(c.req.raw.headers));
     c.set("requestId", requestId);
     c.set("log", log);
     const started = performance.now();

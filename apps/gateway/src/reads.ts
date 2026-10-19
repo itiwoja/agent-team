@@ -65,8 +65,6 @@ export async function callReadTool(
   // リハーサル・影の本人の Google カレンダーは模擬へ向ける（16 §6.1）。境界と targetFor にはこの URL を渡す
   const url = effectiveConnectorUrl(g, connector, { rehearsalRunId: task.rehearsalRunId, shadow: task.shadow });
   const boundary = connectorBoundary({
-    deploymentMode: g.env.deploymentMode,
-    allowedOrigins: g.allowedOrigins,
     simWorldOrigin: g.simWorldOrigin,
     workspaceKind: ctx.kind,
     rehearsalRunId: task.rehearsalRunId,
@@ -199,7 +197,6 @@ export function boundaryInputsOf(
     origin = null;
   }
   return {
-    deploymentMode: g.env.deploymentMode,
     workspaceKind: task.ctx.kind,
     rehearsalRunId: task.rehearsalRunId,
     shadow: task.shadow,

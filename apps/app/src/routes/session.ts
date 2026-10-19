@@ -32,7 +32,7 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
       const body = await readJsonBody(c, EntryBody);
       const result = await enter(deps, {
         token: body.token,
-        ip: clientIp(c, deps.env.deploymentMode),
+        ip: clientIp(c),
         userAgent: c.req.header("user-agent") ?? null,
         existing: c.get("session"),
       });
@@ -53,15 +53,14 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
     { auth: "none" },
   );
 
-  // ローカル（deploymentMode = local）だけ：トークンなしでオーナーとして入る。cloud では 404。
+  // トークンなしでオーナーとして入る（ローカル実行）。
   // このマシンの中からの要求だけ通す（--host 0.0.0.0 で LAN に出ても入れない）
   r.post(
     "/entry/local",
     async (c) => {
-      if (deps.env.deploymentMode !== "local") throw new AppError("NOT_FOUND");
       if (!isLoopbackRequest(c)) throw new AppError("FORBIDDEN", "トークンなしで入れるのはこのマシンからだけです");
       await readJsonBody(c, LocalEntryBody);
-      const ip = clientIp(c, deps.env.deploymentMode);
+      const ip = clientIp(c);
       const result = await enterAsOwner(deps, {
         ipHash: deps.env.cookieSecret ? system.hashIp(ip, deps.env.cookieSecret) : null,
         userAgent: c.req.header("user-agent") ?? null,
@@ -82,8 +81,8 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
     "/session",
     async (c) => {
       const s = c.get("session");
-      // ローカルなら入口の画面がトークンなしで入れる（POST /entry/local）
-      if (!s) return c.json(deps.env.deploymentMode === "local" ? { state: "signed_out", localEntry: true } : { state: "signed_out" });
+      // 入口の画面がトークンなしで入れる（POST /entry/local）
+      if (!s) return c.json({ state: "signed_out", localEntry: true });
       const body: SessionSignedIn = { state: "signed_in", workspaceKind: s.kind, csrfToken: s.csrfToken, firstAskId: await preparedAskIdOf(deps, s) };
       return c.json(body);
     },
@@ -107,8 +106,8 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
     if (s.kind === "guest") await deps.db.transaction((tx) => requestWorkspaceDeletion(tx, s, now));
     await revokeSession(deps.db, s, now);
     clearSessionCookie(c, deps);
-    deleteCookie(c, GCAL_STATE_COOKIE, { path: GCAL_STATE_COOKIE_PATH, httpOnly: true, secure: deps.env.deploymentMode === "cloud", sameSite: "Lax" });
-    deleteCookie(c, GITHUB_STATE_COOKIE, { path: GITHUB_STATE_COOKIE_PATH, httpOnly: true, secure: deps.env.deploymentMode === "cloud", sameSite: "Lax" });
+    deleteCookie(c, GCAL_STATE_COOKIE, { path: GCAL_STATE_COOKIE_PATH, httpOnly: true, secure: deps.env.cookieSecure, sameSite: "Lax" });
+    deleteCookie(c, GITHUB_STATE_COOKIE, { path: GITHUB_STATE_COOKIE_PATH, httpOnly: true, secure: deps.env.cookieSecure, sameSite: "Lax" });
     c.set("session", null);
     deps.log.info("session.logout", "ログアウトした", { workspaceId: s.workspaceId });
     return c.body(null, 204);

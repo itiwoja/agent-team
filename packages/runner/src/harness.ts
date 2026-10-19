@@ -1,5 +1,5 @@
 // Harness のループ（FR-008。formation-runtime.md §3.8・§8-7・§8-36）
-// runner の出口は EdgePort だけ。DB・Vertex AI・gateway のクライアントを import しない（D-52）
+// runner の出口は EdgePort だけ。DB・Gemini・gateway のクライアントを import しない（D-52）
 // 状態は runTask の呼び出しの中（タスクごと）にだけ持ち、モジュールの変数・/tmp に置かない（15:487、BD-05）
 // 終わり方（completed など）は runner が決めない。edge が報告・finished・Intent から決める（§3.12）
 

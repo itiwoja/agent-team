@@ -58,7 +58,7 @@ const SEED_MODE_FLAG: Readonly<Record<SeedMode, string>> = { per_scenario: "per-
 
 export const MEASURE_USAGE = `使い方：pnpm measure -- [オプション]
 
-  --llm gemini|scripted      LLM（既定 scripted）。gemini は Vertex AI（GOOGLE_CLOUD_PROJECT と ADC が要る）
+  --llm gemini|scripted      LLM（既定 scripted）。gemini は Gemini API（GEMINI_API_KEY が要る）
   --runs N                   状況ごとの回数（既定 ${DEFAULT_RUNS}）
   --faults F-01,F-02,...     計測する障害（既定 ${MEASURE_FAULT_IDS.join(",")}）
   --out DIR                  結果の置き場所（既定 results。scripts/measure からの相対）
@@ -161,10 +161,10 @@ export interface MeasureCliDeps {
   stderr: (text: string) => void;
   signal?: AbortSignal;
   /**
-   * 試験で Vertex AI の代わりを渡す（既定は GeminiClient）。onRetry は GeminiClient の retry.onRetry に渡すもの
+   * 試験で Gemini の代わりを渡す（既定は GeminiClient）。onRetry は GeminiClient の retry.onRetry に渡すもの
    * （クライアントの中のやり直しで失敗した回の費用を、計測全体の費用に数える：SO §3.12-6）。allowUnpricedModels は --allow-unpriced
    */
-  createGemini?: (opts: { project: string; location: string; onRetry: (info: RetryInfo) => void; allowUnpricedModels: boolean }) => LlmClient;
+  createGemini?: (opts: { apiKey: string; onRetry: (info: RetryInfo) => void; allowUnpricedModels: boolean }) => LlmClient;
   /** 結果のファイル名の後ろに付ける印（--models でモデルごとに別の名前にする） */
   fileSuffix?: string;
   /** 書いた JSON のパス（--models が比較表に使う） */
@@ -209,18 +209,18 @@ export async function runMeasureCli(argv: readonly string[], deps: MeasureCliDep
   let modelFor: (phase: LlmPhase) => string;
   let modelLabel: string | undefined;
   if (o.llm === "gemini") {
-    // 鍵の経路を作らない（ADR-032）：GEMINI_API_KEY・GOOGLE_API_KEY があれば走らせない。値は出さない（D-47）
+    // GEMINI_API_KEY がなければ走らせない。値は出さない（D-47）
     const missing = missingGeminiEnv(deps.env);
     if (missing.length > 0) {
-      deps.stderr(`エラー：足りない・置いてはいけない環境変数：${missing.join("・")}\n`);
+      deps.stderr(`エラー：足りない環境変数：${missing.join("・")}\n`);
       return 2;
     }
     const genv = readGeminiEnv(deps.env);
-    const project = genv.project ?? "";
+    const apiKey = genv.apiKey ?? "";
     const allowUnpricedModels = o.allowUnpriced;
     llm = deps.createGemini
-      ? deps.createGemini({ project, location: genv.location, onRetry, allowUnpricedModels })
-      : new GeminiClient({ project, location: genv.location, retry: { onRetry }, allowUnpricedModels });
+      ? deps.createGemini({ apiKey, onRetry, allowUnpricedModels })
+      : new GeminiClient({ apiKey, retry: { onRetry }, allowUnpricedModels });
     // Router は本番の LLM Proxy と同じ（phase → Flash 系）。--model で上書きできる
     modelFor = (phase) => o.model ?? modelForPhase(genv, phase);
   } else {
