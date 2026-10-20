@@ -1,8 +1,8 @@
 // タブの題：画面の名前（main.tsx の titleOf）に、画面の中身が決める題（依頼の文など）と、見てほしいものの件数を重ねる。
-// 「(3) 在庫が減ったら発注して · Makase」。件数は、タブが裏にあるときに戻る理由が分かるように先頭に出す
+// 「(3) 在庫が減ったら発注して · AgentTeam」。件数は、タブが裏にあるときに戻る理由が分かるように先頭に出す
 import { useEffect, useSyncExternalStore } from "react";
 
-export const APP_NAME = "Makase";
+export const APP_NAME = "AgentTeam";
 
 /** 題に入れる文の長さの上限（長い依頼の文はここで切る） */
 const SCREEN_TITLE_MAX = 28;

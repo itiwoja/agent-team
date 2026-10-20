@@ -175,6 +175,7 @@ describe("chain", () => {
     expect(answer.memberLines.map((l) => l.agentName)).toEqual(["A", "B"]);
 
     const detail = (await buildAskDetail(w.db, w.ws.ctx, ask.id))!;
+    expect(detail.stages.map(s => s.taskStatus)).toEqual(["completed", "completed"]);
     expect(detail.stages.map((s) => [s.agentName, s.state, s.stateText])).toEqual([
       ["A", "done", "済み"],
       ["B", "done", "済み"],
@@ -200,8 +201,8 @@ describe("chain", () => {
     expect((await getLatestLiveRun(w.db, w.ws.ctx, ask.id))!.status).toBe("waiting_input");
     const waiting = (await buildAskDetail(w.db, w.ws.ctx, ask.id))!;
     expect(waiting.resume).toEqual({ agentName: "A", reason: "AI につながりませんでした" });
-    expect(waiting.stages[0]).toMatchObject({ state: "failed", stateText: "失敗：AI につながりませんでした" });
-    expect(waiting.stages[1]).toMatchObject({ state: "waiting", stateText: "待っています" });
+    expect(waiting.stages[0]).toMatchObject({ state: "failed", taskStatus: "failed", stateText: "失敗：AI につながりませんでした" });
+    expect(waiting.stages[1]).toMatchObject({ state: "waiting", taskStatus: null, stateText: "待っています" });
     expect(waiting.answer).toBeNull();
 
     behavior.A = "report";
@@ -263,6 +264,33 @@ describe("返事（API-077）と履歴（turns）", () => {
 });
 
 describe("parallel", () => {
+  it.each([2, 1])("実際のLLM待機が重なり、同時実行上限%dを超えない", async (limit) => {
+    const { w, ask } = await setup("parallel", ["A", "B", "C"]);
+    await w.db.query("UPDATE workspaces SET max_concurrent_tasks = $2 WHERE id = $1", [w.ws.workspaceId, limit]);
+    let active = 0, peak = 0;
+    const intervals: Array<{ name: string; start: number; end: number }> = [];
+    let release!: () => void;
+    const together = new Promise<void>((resolve) => { release = resolve; });
+    const timer = setTimeout(release, 3000);
+    const llm = new ScriptedLlmClient(async (req) => {
+      const all = `${req.system}\n${JSON.stringify(req.messages)}`;
+      const name = ["A", "B", "C"].find((n) => all.includes(`MARK-${n}`))!;
+      const interval = { name, start: performance.now(), end: 0 };
+      active++; peak = Math.max(peak, active);
+      try {
+        if (limit === 2 && intervals.length === 0) { if (active === 2) release(); await together; }
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { parts: [reportCall(`overlap-${name}`, `${name}の結果`)], usage: USAGE };
+      } finally { interval.end = performance.now(); intervals.push(interval); active--; }
+    });
+    try {
+      await (await startAskRun(runDeps(w, llm), w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" }))!.done;
+      expect(peak).toBe(limit);
+      expect((await tasksOf(w, ask.id)).every((t) => t.status === "completed")).toBe(true);
+      const overlaps = intervals.some((a, i) => intervals.slice(i + 1).some((b) => a.name !== b.name && Math.max(a.start, b.start) < Math.min(a.end, b.end)));
+      expect(overlaps).toBe(limit === 2);
+    } finally { clearTimeout(timer); release(); }
+  });
   it("全員を同時に始め、1人が失敗してもほかは続く。回答は Kernel が担当ごとの報告を見出しつきで並べる（失敗した担当は「失敗：」）", async () => {
     const { w, ask } = await setup("parallel", ["A", "B", "C"]);
     const { llm } = script({ A: "report", B: "fail", C: "report" });

@@ -155,7 +155,7 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
             <span className="logo" aria-hidden="true">
               ◎
             </span>
-            <span>Makase</span>
+            <span>AgentTeam</span>
           </Link>
           <button type="button" className="icon-btn" aria-label="閉じる" onClick={onClose}>
             <CloseIcon />

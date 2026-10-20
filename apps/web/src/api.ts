@@ -279,6 +279,8 @@ export interface StageView {
   state: StageState;
   /** 固定の文：待っています／動いています／済み／確認待ち／失敗：〇〇／止めました */
   stateText: string;
+  /** 実タスク状態。旧サーバーでは未提供 */
+  taskStatus?: string | null;
   taskId: string | null;
   report: { title: string; body: string } | null;
   tainted: boolean;

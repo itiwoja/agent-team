@@ -14,13 +14,14 @@ import { noticeHeadline, noticeLead } from "../lib/notice";
 import { noAnswerText, showsRequest, turnLabel, turnsOf } from "../lib/turns";
 import { moodOfStage } from "../lib/avatar";
 import { activityMark, stageClock } from "../lib/progress";
+import { dependencies, isWorking, stageLabel, teamCounts } from "../lib/teamActivity";
 import { askHeadLine, certificateTone, type CertificateTone } from "../lib/rehearsal";
 import { useScreenTitle } from "../lib/title";
 import { copyLabel, canCopy, useCopy } from "../lib/useCopy";
 import { useElapsedSeconds } from "../lib/useElapsed";
 import { Link, useLocationHash } from "../lib/router";
 import { Chevron } from "../ui/icons";
-import { placeMessages, threadMessages } from "../lib/placement";
+import { threadMessages } from "../lib/placement";
 import { useWorkspace, useWorkspaceEvent } from "../workspace";
 
 /** 担当が動いている間に取り直す間隔 */
@@ -154,8 +155,6 @@ export function AskPage({ askId }: { askId: string }) {
 
   return (
     <div className="ask">
-      {/* 担当が動いている間、ヘッダーの下に細い帯を流す（段まで下りなくても「いま動いている」と分かる） */}
-      {live && <div className="live-bar" aria-hidden="true" />}
       <header className="ask-head">
         <AskTitle text={ask.text} />
         {ask.trigger && (
@@ -194,13 +193,13 @@ export function AskPage({ askId }: { askId: string }) {
         )}
       </header>
 
+      <Stages detail={detail} messages={messages} stale={Boolean(error) || !online} />
       {ask.status === "failed" ? (
         <FailedCard text={ask.text} reason={ask.failure?.reason ?? null} message={ask.failure?.message ?? "作れませんでした"} />
       ) : (
         <Conversation detail={detail} approvals={visible.length} onReply={() => load()} blocked={killSwitchEngaged || !online} />
       )}
       {detail.resume && <Resume askId={askId} resume={detail.resume} onDone={() => load()} blocked={killSwitchEngaged || !online} />}
-      <Stages detail={detail} messages={messages} />
 
       {approvalsError ? (
         <section className="block" id="approvals" aria-label="送る前の確認">
@@ -296,7 +295,7 @@ function Conversation({ detail, approvals, onReply, blocked }: { detail: AskDeta
   const turns = turnsOf(detail);
   const last = turns.length - 1;
   const latest = turns[last] ?? null;
-  const spokesperson = detail.answerPending?.spokespersonName ?? null;
+  const spokesperson = detail.stages.find(s => s.agentName === detail.answerPending?.spokespersonName && isWorking(s))?.agentName ?? null;
   // 回答の主（窓口。並列・Kernel が書いた回答はまとめ役か最初の担当）
   const reporterOf = (a: AskAnswerView | null): string =>
     a?.spokesperson?.agentName ?? detail.stages.find((st) => st.isAggregator)?.agentName ?? detail.stages[0]?.agentName ?? "担当";
@@ -375,7 +374,7 @@ function PendingCard({ name, status }: { name: string | null; status: AskTurnVie
       ) : (
         <p className="muted answer-pending">
           {name && <Avatar name={name} mood="running" size={32} />}
-          <span>{name ? `${name}がまとめています` : "まとめています"}</span>
+          <span>{name ? `${name}がまとめています` : "担当の作業・報告を待っています"}</span>
         </p>
       )}
     </section>
@@ -629,113 +628,127 @@ function Resume({ askId, resume, onDone, blocked }: { askId: string; resume: Non
   );
 }
 
-const COLLAPSE_AT = 4;
-
-function Stages({ detail, messages }: { detail: AskDetail; messages: AskMessageView[] }) {
+export function Stages({ detail, messages, stale = false }: { detail: AskDetail; messages: AskMessageView[]; stale?: boolean }) {
   const shape = detail.ask.shape ?? detail.formation?.shape ?? "single";
-  const isChain = shape === "chain";
   const stages = useMemo(() => [...detail.stages].sort((a, b) => (a.isAggregator === b.isAggregator ? (a.position ?? 0) - (b.position ?? 0) : a.isAggregator ? 1 : -1)), [detail.stages]);
-  const placed = useMemo(() => placeMessages(isChain, stages, messages), [isChain, stages, messages]);
-  // 開いたかどうかだけを持ち、畳むかは件数から導く（マウント時の messages=[] で初期値が固まらないように）
-  const [opened, setOpened] = useState(false);
-  const collapsible = messages.length >= COLLAPSE_AT;
-  const folded = collapsible && !opened;
   if (stages.length === 0) return null;
-  // 返事の実行は窓口だけが動く。段がその担当だけなのを、見出しで言う
-  const replyRun = detail.run?.triggerType === "manual";
-
-  const showThread = (list: AskMessageView[]) =>
-    folded ? null : (
-      <ul className="plain exchange">
-        {threadMessages(list).map(({ message: m, replies }) => (
-          <li key={m.id}>
-            <p>
-              <span aria-hidden="true">⇄ </span>
-              {m.fromAgentName}「{m.body.split("\n")[0]}」{m.tainted && <span className="muted"> 外部の内容を含む</span>}
-            </p>
-            {replies.map((r) => (
-              <p key={r.id} className="reply muted">
-                {r.fromAgentName}「{r.body.split("\n")[0]}」
-              </p>
-            ))}
+  const counts = teamCounts(stages);
+  return (
+    <section className={`block stages team-board team-simple${counts.working > 1 && !stale ? " is-parallel" : ""}`} aria-label="チームの活動">
+      <h2 className="team-simple-title" aria-live="polite">{stale ? "最後に取得した状態" : counts.working > 1 ? `${counts.working}人が同時に作業中` : counts.working === 1 ? "1人が作業中" : counts.done === stages.length ? "作業が完了しました" : "チームの状況"}</h2>
+      {stale && <p role="status" className="team-reason">更新できていません。</p>}
+      <MobileTeam key={`mobile-${detail.run?.runId ?? "pending"}`} detail={detail} stages={stages} stale={stale} />
+      <ol className="plain stage-list team-desktop">
+        {stages.map(s => (
+          <li key={`${detail.run?.runId}:${s.memberId}:${s.taskId ?? "pending"}`} className={isWorking(s) && !stale ? "team-member is-working" : "team-member"}>
+            <Stage s={s} needs={dependencies(detail, s)} />
           </li>
         ))}
-      </ul>
-    );
-
-  return (
-    <section className="block stages" aria-label="担当の段">
-      {replyRun && <p className="muted stages-note">追加で頼んだことは、窓口の担当がひとりで受けます</p>}
-      <ol className="plain stage-list">
-        {stages.map((s, i) => {
-          const handoff = isChain ? detail.handoffs.find((h) => h.fromPosition === s.position && s.position !== null) : undefined;
-          return (
-            <li key={s.memberId}>
-              <Stage s={s} numbered={isChain && s.position !== null} />
-              {handoff && (
-                <p className="handoff muted">
-                  <span aria-hidden="true">↓ </span>渡した{handoff.taintMark && ` · ${handoff.taintMark}`}
-                </p>
-              )}
-              {isChain && placed.after.get(i) && showThread(placed.after.get(i)!)}
-            </li>
-          );
-        })}
       </ol>
-      {collapsible && (
-        <button type="button" className="btn btn-ghost running-toggle" aria-expanded={!folded} onClick={() => setOpened((v) => !v)}>
-          やり取り {messages.length}件 <Chevron open={!folded} />
-        </button>
-      )}
-      {!isChain && placed.end.length > 0 && showThread(placed.end)}
-      {isChain && placed.end.length > 0 && showThread(placed.end)}
+      <details className="team-extra" key={detail.run?.runId ?? "pending"}>
+        <summary>受け渡し・実行の詳細</summary>
+        <p className="team-run">{detail.run ? `実行 ${detail.run.runNo}` : "実行前"}</p>
+        {detail.run?.triggerType === "manual" && <p className="muted">追加の依頼は窓口の担当がひとりで受けます。</p>}
+        <div className="team-transfers">
+          <h3>受け渡しの記録 <span>{detail.handoffs.length}件</span></h3>
+          {detail.handoffs.length === 0 ? <p className="muted">この実行には受け渡しの記録がありません。</p> : <ul className="plain">{detail.handoffs.map((h,i)=><li key={i}><strong>{h.fromAgentName} → {h.toAgentName}</strong><span>受領済み · {h.label}{h.taintMark ? ` · ${h.taintMark}` : ""}</span></li>)}</ul>}
+        </div>
+        {shape === "aggregate" && <p className="team-boundary">まとめ役は読み取り専用です。次のチームに制作を任せる場合は、結果を渡して新しく依頼してください。</p>}
+        {messages.length > 0 && <div className="team-transfers"><h3>担当間のやり取り</h3><ul className="plain exchange">{threadMessages(messages).map(({message:m,replies})=><li key={m.id}><p>{m.fromAgentName}「{m.body}」{m.tainted && "（外部の内容を含む）"}</p>{replies.map(r=><p key={r.id}>{r.fromAgentName}「{r.body}」</p>)}</li>)}</ul></div>}
+      </details>
     </section>
   );
 }
 
-function Stage({ s, numbered }: { s: StageView; numbered: boolean }) {
-  const [open, setOpen] = useState(false);
+function MobileTeam({ detail, stages, stale }: { detail: AskDetail; stages: StageView[]; stale: boolean }) {
+  const [selected, setSelected] = useState<string | null>(null);
+  const dialog = useRef<HTMLDialogElement>(null);
+  const closing = useRef(false);
+  const selectedStage = stages.find(s => s.memberId === selected);
+  const isOpen = Boolean(selectedStage);
+  useEffect(() => {
+    if (!isOpen) return;
+    const before = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = before; };
+  }, [isOpen]);
+  const close = useCallback(() => {
+    if (closing.current) return;
+    closing.current = true;
+    if (history.state?.teamPanel === detail.ask.id) history.back();
+    else { setSelected(null); closing.current = false; }
+  }, [detail.ask.id]);
+  const choose = (memberId: string) => {
+    if (closing.current) return;
+    const state = { ...history.state, teamPanel: detail.ask.id, teamMember: memberId };
+    if (history.state?.teamPanel === detail.ask.id) history.replaceState(state, "");
+    else history.pushState(state, "");
+    setSelected(memberId);
+  };
+  useEffect(() => {
+    const pop = () => { closing.current = false; setSelected(history.state?.teamPanel === detail.ask.id ? history.state.teamMember : null); };
+    const media = window.matchMedia("(max-width: 600px)");
+    const resize = () => { if (!media.matches && history.state?.teamPanel === detail.ask.id) close(); };
+    window.addEventListener("popstate", pop); media.addEventListener("change", resize);
+    return () => {
+      window.removeEventListener("popstate", pop); media.removeEventListener("change", resize);
+      if (history.state?.teamPanel === detail.ask.id) { const {teamPanel, teamMember, ...rest} = history.state; history.replaceState(rest, ""); }
+    };
+  }, [detail.ask.id, close]);
+  useEffect(() => {
+    if (selectedStage) { if (!dialog.current?.open) dialog.current?.showModal(); }
+    else dialog.current?.close();
+  }, [selectedStage]);
+  return <div className="team-mobile">
+    <ul className="plain team-orbit" aria-label="担当一覧">
+      {stages.map(s => { const state = s.state === "running" && !isWorking(s) ? "waiting" : s.state; return <li key={s.memberId}>
+        <button type="button" className={`team-person${isWorking(s) && !stale ? " is-working" : ""}`} aria-label={`${s.agentName}、${stageLabel(s)}${s.files?.count ? `、成果物${s.files.count}件` : ""}。詳細を開く`} aria-haspopup="dialog" onClick={() => choose(s.memberId)}>
+          <Avatar name={s.agentName} mood={moodOfStage(state)} size={48} />
+          <span className="team-person-name">{s.agentName}</span>
+          <span className={`stage-state is-${state}`}>{stageLabel(s)}</span>
+          {Boolean(s.files?.count) && <span className="team-person-files">成果物 {s.files!.count}</span>}
+        </button>
+      </li>})}
+    </ul>
+    <dialog ref={dialog} className="team-mobile-sheet" aria-label="担当の詳細" onCancel={e => { e.preventDefault(); close(); }} onClick={e => { if (e.target === e.currentTarget) { const r=e.currentTarget.getBoundingClientRect(); if(e.clientY<r.top || e.clientX<r.left || e.clientX>r.right) close(); } }}>
+      <div className="team-sheet-header"><span>担当の詳細</span><button type="button" className="btn btn-ghost" autoFocus onClick={close}>閉じる</button></div>
+      {selectedStage && <>
+        <label className="sr-only" htmlFor="team-select-member">担当を切り替える</label>
+        <select id="team-select-member" value={selected ?? ""} onChange={e => choose(e.target.value)}>{stages.map(s=><option value={s.memberId} key={s.memberId}>{s.agentName}</option>)}</select>
+        {stale && <p className="team-reason">最後に取得した状態です。</p>}
+        <Stage key={`${selectedStage.memberId}:${selectedStage.taskId}`} s={selectedStage} needs={dependencies(detail, selectedStage)} />
+      </>}
+    </dialog>
+  </div>;
+}
+
+function Stage({ s, needs }: { s: StageView; needs: string[] }) {
+  const state = s.state === "running" && !isWorking(s) ? "waiting" : s.state;
   const failed = s.state === "failed";
   return (
-    <div className={`stage is-${s.state}${failed ? " stage-failed" : ""}`}>
-      <Avatar name={s.agentName} mood={moodOfStage(s.state)} size={46} className="stage-avatar" />
-      <div className="stage-main">
-        <button type="button" className="row-toggle stage-toggle" aria-expanded={s.report ? open : undefined} disabled={!s.report} onClick={() => setOpen((v) => !v)}>
-          <span className="stage-head">
-            {numbered && (
-              <span className="stage-no" aria-hidden="true">
-                {s.position}
-              </span>
-            )}
-            <span className="stage-name">
-              {numbered && <span className="sr-only">{s.position} </span>}
-              {s.agentName}
-            </span>
-            {s.reuseLine && <span className="muted small stage-reuse">{s.reuseLine}</span>}
-            <span className={`stage-state is-${s.state}`}>{s.stateText}</span>
-            {s.report && (
-              <span className="stage-chevron">
-                <Chevron open={open} />
-              </span>
-            )}
-          </span>
-          <span className="row-sub">{s.report?.title ?? s.summary}</span>
-        </button>
-        <StageProgress s={s} />
-        {s.taskId && s.files && s.files.count > 0 && (
-          <a className="stage-files" href={taskFilesUrl(s.taskId)} download>
-            作ったファイル（{s.files.count}件・{formatBytes(s.files.bytes)}）をダウンロード
-          </a>
-        )}
+    <div className={`stage is-${state}${failed ? " stage-failed" : ""}`}>
+      <div className="team-identity">
+        <Avatar name={s.agentName} mood={moodOfStage(state)} size={40} className="stage-avatar" />
+        <h3 className="stage-name">{s.agentName}</h3>
+        <span className={`stage-state is-${state}`}>{stageLabel(s)}</span>
       </div>
-      {open && s.report && <Markdown className="row-detail" text={s.report.body} />}
+      <p className="team-role">{s.summary}</p>
+      {s.isAggregator && <span className="team-readonly">読み取り専用</span>}
+      {(failed || s.state === "stopped" || (s.state === "done" && s.stateText !== "済み")) && <p className="team-reason">{s.stateText}</p>}
+      {s.taskId && s.files && s.files.count > 0 && <a className="stage-files" href={taskFilesUrl(s.taskId)} download>成果物をダウンロード（{s.files.count}件）</a>}
+      <details className="team-member-detail">
+        <summary>{s.report ? "報告・詳細" : "詳細"}<span className="sr-only">：{s.agentName}</span></summary>
+        {s.reuseLine && <p className="muted small">{s.reuseLine}</p>}
+        <StageProgress s={s} />
+        {needs.length > 0 && <p className="team-dependency">受け取る予定：{needs.join("、")} の報告</p>}
+        {s.report ? <Markdown className="row-detail" text={s.report.body} /> : <p className="muted small">報告はまだありません。</p>}
+      </details>
     </div>
   );
 }
-
 /** やったこと（ツールの呼び出しの判定）と経過。動いている間は最後に「考えています…」と経過秒を出す */
 function StageProgress({ s }: { s: StageView }) {
-  const running = s.state === "running";
+  const running = isWorking(s);
   const sec = useElapsedSeconds(s.startedAt, running);
   const activity = s.activity ?? [];
   const clock = stageClock(s, sec);
@@ -749,7 +762,7 @@ function StageProgress({ s }: { s: StageView }) {
         ))}
         {running && (
           <li className="activity-chip is-thinking">
-            <span>考えています</span>
+            <span>応答を待っています</span>
             <span className="thinking-dots" aria-hidden="true">
               <i />
               <i />

@@ -208,6 +208,8 @@ export const StageViewSchema = z.object({
   state: StageStateSchema,
   /** 固定の文：待っています／動いています／済み／確認待ち／失敗：〇〇／止めました */
   stateText: z.string(),
+  /** 集約前の実タスク状態。同時稼働とキュー待ちを区別する */
+  taskStatus: z.string().nullable().optional(),
   taskId: Uuid.nullable(),
   /** 担当の報告（開いたときに出す）。まだなければ null */
   report: z.object({ title: z.string(), body: z.string() }).nullable(),

@@ -3,17 +3,17 @@ import { composeTitle, shortenForTitle } from "./title";
 
 describe("composeTitle", () => {
   it("画面の名前とアプリ名", () => {
-    expect(composeTitle("チェック")).toBe("チェック · Makase");
+    expect(composeTitle("チェック")).toBe("チェック · AgentTeam");
   });
   it("見てほしいものがあれば件数を先頭に出す（0 なら出さない）", () => {
-    expect(composeTitle("任せる", { attention: 3 })).toBe("(3) 任せる · Makase");
-    expect(composeTitle("任せる", { attention: 0 })).toBe("任せる · Makase");
+    expect(composeTitle("任せる", { attention: 3 })).toBe("(3) 任せる · AgentTeam");
+    expect(composeTitle("任せる", { attention: 0 })).toBe("任せる · AgentTeam");
   });
   it("中身が決めた題は画面の名前より優先し、長ければ切る", () => {
-    expect(composeTitle("依頼", { override: "在庫が減ったら発注して" })).toBe("在庫が減ったら発注して · Makase");
+    expect(composeTitle("依頼", { override: "在庫が減ったら発注して" })).toBe("在庫が減ったら発注して · AgentTeam");
     const long = "あ".repeat(40);
-    expect(composeTitle("依頼", { override: long, attention: 2 })).toBe(`(2) ${"あ".repeat(27)}… · Makase`);
-    expect(composeTitle("依頼", { override: "" })).toBe("依頼 · Makase");
+    expect(composeTitle("依頼", { override: long, attention: 2 })).toBe(`(2) ${"あ".repeat(27)}… · AgentTeam`);
+    expect(composeTitle("依頼", { override: "" })).toBe("依頼 · AgentTeam");
   });
 });
 

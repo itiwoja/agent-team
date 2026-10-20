@@ -129,7 +129,7 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
 
   return (
     <main className="center">
-      <h1>Makase</h1>
+      <h1>AgentTeam</h1>
       <p className="muted">頼むだけで、あなたの担当が生まれる</p>
       {localEntry && (
         <button type="button" className="btn btn-primary" onClick={() => void enterLocal()} disabled={busy}>
@@ -201,7 +201,7 @@ function Screens() {
   const screenKey = screenKeyOf(route);
   const firstScreen = useRef(true);
 
-  // タブの題：「(3) 依頼の文 · Makase」。件数は、裏のタブからでも戻る理由が分かるように
+  // タブの題：「(3) 依頼の文 · AgentTeam」。件数は、裏のタブからでも戻る理由が分かるように
   useEffect(() => {
     document.title = composeTitle(titleOf(route), { override: titleOverride, attention: counts?.attention ?? 0 });
   }, [route, titleOverride, counts?.attention]);

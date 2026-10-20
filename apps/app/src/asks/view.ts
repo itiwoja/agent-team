@@ -160,6 +160,7 @@ function stageViews(
       reuseLine: reuseLineOf(m.is_new, priorAsks.get(m.agent_id) ?? 0),
       state: st.state,
       stateText: st.text,
+      taskStatus: t?.status ?? null,
       taskId: t?.id ?? null,
       report: t?.report == null ? null : { title: t.report_title ?? "", body: t.report },
       tainted: t?.tainted ?? false,
