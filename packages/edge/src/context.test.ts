@@ -94,8 +94,8 @@ describe("getTaskContext（API-036）", () => {
       isSpokesperson: false,
       isAggregator: false,
       members: [
-        { name: "受信箱係", position: 1, isAggregator: false },
-        { name: "仕入れ係", position: 2, isAggregator: false },
+        { name: "受信箱係", position: 1, isAggregator: false, dependsOn: [] },
+        { name: "仕入れ係", position: 2, isAggregator: false, dependsOn: [1] },
       ],
     });
   });

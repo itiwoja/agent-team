@@ -5,6 +5,7 @@ import {
   FORMATION_LIMITS,
   FORMATION_TEMPLATES_0H,
   TEAM_LIMITS,
+  chainStages,
   composeAnswer,
   failReasonText,
   haltReasonText,
@@ -98,6 +99,30 @@ describe("validateFormation（FR §3.3、agents.md:208-214、M-34）", () => {
   it("VF-04：chain 4段 → ok（境界）／VF-05：5段 → CHAIN_TOO_LONG", () => {
     expect(validate(chain(4))).toEqual({ ok: true });
     expect(codes(validate(chain(5)))).toEqual(["CHAIN_TOO_LONG"]);
+  });
+
+  it("chain：前の結果が要らない担当は依存を空にして同時に始められる（文章・デザイン → 実装 → チェック）", () => {
+    const p: FormationProposal = {
+      shape: "chain",
+      members: [member(1), member(2), member(3, { dependsOn: [1, 2] }), member(4, { dependsOn: [3], isSpokesperson: true })],
+    };
+    expect(validate(p)).toEqual({ ok: true });
+  });
+  it("chain：5人でも段の深さが4までなら ok。深さが5なら CHAIN_TOO_LONG", () => {
+    const wide: FormationProposal = {
+      shape: "chain",
+      members: [member(1), member(2), member(3, { dependsOn: [1, 2] }), member(4, { dependsOn: [3] }), member(5, { dependsOn: [4], isSpokesperson: true })],
+    };
+    expect(validate(wide)).toEqual({ ok: true });
+    expect(codes(validate(chain(5)))).toEqual(["CHAIN_TOO_LONG"]);
+  });
+  it("chain：最後の段に結果が届かない担当・後ろの段への依存・同じ段の重複は DEPENDS_ON_INVALID", () => {
+    const orphan = validate({ shape: "chain", members: [member(1), member(2), member(3, { dependsOn: [1], isSpokesperson: true })] });
+    expect(orphan).toEqual({ ok: false, violations: [{ code: "DEPENDS_ON_INVALID", position: 2, detail: "この担当の結果が最後の段に届かない" }] });
+    const forward = validate({ shape: "chain", members: [member(1, { dependsOn: [2] }), member(2, { dependsOn: [1], isSpokesperson: true })] });
+    expect(codes(forward)).toContain("DEPENDS_ON_INVALID");
+    const twice = validate({ shape: "chain", members: [member(1), member(2, { dependsOn: [1, 1], isSpokesperson: true })] });
+    expect(codes(twice)).toEqual(["DEPENDS_ON_INVALID"]);
   });
 
   it("chain 1段は SHAPE_MEMBER_COUNT（下限2は FR の提案）", () => {
@@ -367,6 +392,25 @@ describe("shapeLine（entrance.md:91-96、UI §4.5）", () => {
       { agentName: "B", position: 2 },
     ];
     expect(shapeLine("chain", ms)).toBe("A → B → C の順に進めて、Cが答えます");
+  });
+  it("chain：同時に動く担当は「・」でつなぎ、同時に動くことを添える", () => {
+    const ms = [
+      { agentName: "文章", position: 1, dependsOn: [] },
+      { agentName: "デザイン", position: 2, dependsOn: [] },
+      { agentName: "実装", position: 3, dependsOn: [1, 2] },
+      { agentName: "チェック", position: 4, dependsOn: [3] },
+    ];
+    expect(shapeLine("chain", ms)).toBe("文章・デザイン → 実装 → チェック の順に進めて（文章とデザインは同時に動きます）、チェックが答えます");
+  });
+  it("chainStages：依存のうち一番深い段の次に置く。dependsOn がなければ1つ前の段", () => {
+    const ms = [
+      { position: 1, dependsOn: [] },
+      { position: 2, dependsOn: [1] },
+      { position: 3, dependsOn: [] },
+      { position: 4, dependsOn: [2, 3] },
+    ];
+    expect(chainStages(ms).map((g) => g.map((m) => m.position))).toEqual([[1, 3], [2], [4]]);
+    expect(chainStages([{ position: 2 }, { position: 1 }]).map((g) => g.map((m) => m.position))).toEqual([[1], [2]]);
   });
   it("担当のいない chain は null", () => {
     expect(shapeLine("chain", [])).toBeNull();

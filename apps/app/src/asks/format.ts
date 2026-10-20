@@ -77,7 +77,7 @@ export function formationView(ask: Pick<AskRow, "shape" | "formation">, members:
     shape: ask.shape,
     shapeLine: shapeLine(
       ask.shape,
-      views.map((v, i) => ({ agentName: v.agentName, position: v.position ?? i + 1, isAggregator: v.isAggregator })),
+      views.map((v, i) => ({ agentName: v.agentName, position: v.position ?? i + 1, isAggregator: v.isAggregator, dependsOn: v.dependsOn })),
     ),
     members: views,
     notes,

@@ -43,7 +43,7 @@ interface MemberSpec {
   aggregator?: boolean;
 }
 
-async function setup(shape: "single" | "parallel" | "aggregate" | "chain", names: string[], o: { aggregatorIndex?: number } = {}) {
+async function setup(shape: "single" | "parallel" | "aggregate" | "chain", names: string[], o: { aggregatorIndex?: number; dependsOn?: number[][] } = {}) {
   const { db, url } = T();
   const w = (world = await startRehearsalWorld(db, url));
   const agents: SeededAgent[] = [];
@@ -54,7 +54,7 @@ async function setup(shape: "single" | "parallel" | "aggregate" | "chain", names
     return {
       agent,
       position: i + 1,
-      dependsOn: shape === "chain" && i > 0 ? [i] : aggregator ? Array.from({ length: n - 1 }, (_, k) => k + 1) : [],
+      dependsOn: o.dependsOn?.[i] ?? (shape === "chain" && i > 0 ? [i] : aggregator ? Array.from({ length: n - 1 }, (_, k) => k + 1) : []),
       spokesperson: shape === "single" ? i === 0 : shape === "chain" ? i === n - 1 : aggregator,
       aggregator,
     };
@@ -156,6 +156,72 @@ describe("single", () => {
 });
 
 describe("chain", () => {
+  it("前の結果が要らない担当は同時に動かし、依存が済んだ担当から始める（文章・デザイン → 実装 → チェック）", async () => {
+    const { w, ask } = await setup("chain", ["W", "D", "I", "C"], { dependsOn: [[], [], [1, 2], [3]] });
+    // 文章（W）とデザイン（D）は、2人とも動き出すまで返事をしない：1人ずつ動かすと待ちきれずに失敗する
+    const begun = new Set<string>();
+    let release!: () => void;
+    const both = new Promise<void>((r) => (release = r));
+    const seen = new Map<string, string[]>();
+    const llm = new ScriptedLlmClient(async (req) => {
+      const all = `${req.system}\n${JSON.stringify(req.messages)}`;
+      const mark = ["W", "D", "I", "C"].find((x) => all.includes(`MARK-${x}`));
+      if (mark === undefined) throw new LlmError("どの担当か分からない", null, false);
+      seen.set(mark, [...(seen.get(mark) ?? []), all]);
+      if (mark === "W" || mark === "D") {
+        begun.add(mark);
+        if (begun.size === 2) release();
+        const late = new Promise<"late">((r) => setTimeout(() => r("late"), 2000));
+        if ((await Promise.race([both.then(() => "ok" as const), late])) === "late") throw new LlmError("同時に動いていない", null, false);
+      }
+      return { parts: [reportCall(`c-${mark}`, `${mark}の結果`)], usage: USAGE };
+    });
+    const started = await startAskRun(runDeps(w, llm), w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" });
+    await started!.done;
+
+    const members = await listMembers(w.db, w.ws.ctx, ask.id);
+    const byName = new Map((await tasksOf(w, ask.id)).map((t) => [members.find((m) => m.id === t.ask_member_id)!.agent_name, t]));
+    expect([...byName.values()].every((t) => t.status === "completed")).toBe(true);
+    expect(byName.get("W")!.input_task_ids).toEqual([]);
+    expect(byName.get("D")!.input_task_ids).toEqual([]);
+    // 実装は文章とデザインの両方を受け取り、チェックは実装だけを受け取る
+    expect([...byName.get("I")!.input_task_ids].sort()).toEqual([byName.get("W")!.id, byName.get("D")!.id].sort());
+    expect(byName.get("C")!.input_task_ids).toEqual([byName.get("I")!.id]);
+    expect(seen.get("I")![0]).toContain("Wの結果");
+    expect(seen.get("I")![0]).toContain("Dの結果");
+    const run = (await getLatestLiveRun(w.db, w.ws.ctx, ask.id))!;
+    expect(run).toMatchObject({ status: "done", answer_task_id: byName.get("C")!.id });
+    const detail = (await buildAskDetail(w.db, w.ws.ctx, ask.id))!;
+    expect(detail.ask.shapeLine).toBe("W・D → I → C の順に進めて（WとDは同時に動きます）、Cが答えます");
+  });
+
+  it("同時に動く担当の1人が止まっても、もう1人は最後まで動き、依存する担当は始めず waiting_input。「やり直す」で両方の結果を渡して再開する", async () => {
+    const { w, ask } = await setup("chain", ["A", "B", "C"], { dependsOn: [[], [], [1, 2]] });
+    const behavior: Record<string, "report" | "fail"> = { A: "fail", B: "report", C: "report" };
+    const { llm } = script(behavior);
+    const deps = runDeps(w, llm);
+    const started = await startAskRun(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" });
+    await started!.done;
+
+    let tasks = await tasksOf(w, ask.id);
+    expect(tasks.map((t) => t.status).sort()).toEqual(["completed", "failed"]);
+    expect((await getAsk(w.db, w.ws.ctx, ask.id))!.status).toBe("waiting_input");
+
+    behavior.A = "report";
+    const resumed = await resumeAsk(deps, sessionOf(w), ask.id, "retry");
+    await resumed.done;
+    tasks = await tasksOf(w, ask.id);
+    const members = await listMembers(w.db, w.ws.ctx, ask.id);
+    const nameOf = (t: TaskRow) => members.find((m) => m.id === t.ask_member_id)!.agent_name;
+    const c = tasks.find((t) => nameOf(t) === "C")!;
+    const latestA = tasks.filter((t) => nameOf(t) === "A" && t.status === "completed");
+    const b = tasks.find((t) => nameOf(t) === "B")!;
+    expect(latestA).toHaveLength(1);
+    expect(c.status).toBe("completed");
+    expect([...c.input_task_ids].sort()).toEqual([latestA[0]!.id, b.id].sort());
+    expect((await getLatestLiveRun(w.db, w.ws.ctx, ask.id))!.status).toBe("done");
+  });
+
   it("1段ずつ動かし、前の段の報告を次の段にデータとして渡す（input_task_ids）。最後の段の報告が回答で、前の段は途中の経過", async () => {
     const { w, ask } = await setup("chain", ["A", "B"]);
     const { llm, seen } = script({ A: "report", B: "report" });

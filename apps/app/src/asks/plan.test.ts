@@ -100,6 +100,31 @@ describe("aggregate", () => {
   });
 });
 
+describe("chain（同時に動く担当がいる段取り）", () => {
+  const d = (id: string, position: number, status: TaskStatus | null, dependsOn: number[]) => ({ ...m(id, position, status), dependsOn });
+  it("依存のない担当を同時に始め、依存がすべて済んだ担当に全員の結果を渡す", () => {
+    expect(run("chain", [d("w", 1, null, []), d("g", 2, null, []), d("i", 3, null, [1, 2])]).start).toEqual([
+      { memberId: "w", inputTaskIds: [] },
+      { memberId: "g", inputTaskIds: [] },
+    ]);
+    expect(run("chain", [d("w", 1, "succeeded", []), d("g", 2, "running", []), d("i", 3, null, [1, 2])])).toMatchObject({ start: [], status: "running" });
+    expect(run("chain", [d("w", 1, "succeeded", []), d("g", 2, "succeeded", []), d("i", 3, null, [1, 2])]).start).toEqual([
+      { memberId: "i", inputTaskIds: ["t-w", "t-g"] },
+    ]);
+  });
+  it("依存が済んだ担当は、ほかの枝が動いている間に始める", () => {
+    const r = run("chain", [d("a", 1, "succeeded", []), d("b", 2, null, [1]), d("c", 3, "running", []), d("e", 4, null, [2, 3])]);
+    expect(r).toMatchObject({ start: [{ memberId: "b", inputTaskIds: ["t-a"] }], status: "running" });
+  });
+  it("1人が止まっても、同時に動く担当は続ける。動く担当がいなくなったら waiting_input（止まった担当）", () => {
+    expect(run("chain", [d("w", 1, "failed", []), d("g", 2, "running", []), d("i", 3, null, [1, 2])])).toMatchObject({ start: [], status: "running", stoppedMemberId: null });
+    expect(run("chain", [d("w", 1, "failed", []), d("g", 2, "succeeded", []), d("i", 3, null, [1, 2])])).toMatchObject({ start: [], status: "waiting_input", stoppedMemberId: "w" });
+  });
+  it("全員が済めば done・回答を出せる", () => {
+    expect(run("chain", [d("w", 1, "succeeded", []), d("g", 2, "succeeded", []), d("i", 3, "completed", [1, 2])])).toMatchObject({ status: "done", answerReady: true });
+  });
+});
+
 describe("chain", () => {
   it("1段目から始め、前の段が済みになったら次を始める（前の段のタスクを渡す）", () => {
     expect(run("chain", [m("a", 1, null), m("b", 2, null)]).start).toEqual([{ memberId: "a", inputTaskIds: [] }]);

@@ -85,6 +85,7 @@ function planMembers(s: RunState): PlanMember[] {
       position: m.position ?? i + 1,
       isAggregator: m.is_aggregator,
       task: t === null ? null : { id: t.id, status: t.status, hasReport: t.report !== null },
+      dependsOn: m.depends_on,
     };
   });
 }
@@ -480,25 +481,15 @@ export async function executeTask(deps: AskRunDeps, ctx: WsCtx, edge: ReturnType
   });
 }
 
-/** 同時に動かす数を絞って順に動かす */
-async function pool<T>(items: readonly T[], limit: number, fn: (x: T) => Promise<void>): Promise<void> {
-  let next = 0;
-  const workers = Array.from({ length: Math.max(1, Math.min(limit, items.length)) }, async () => {
-    while (next < items.length) {
-      const item = items[next++] as T;
-      await fn(item);
-    }
-  });
-  await Promise.all(workers);
-}
-
 // ---- 実行を動かし続ける ----
 
 const driving = new Map<Uuid, { again: boolean; promise: Promise<void> }>();
 
 /**
  * 実行を、動かすタスクがなくなるまで進める（バックグラウンドで呼ぶ。例外は投げずログに残す）。
- * 同じ実行を同時に2つ動かさない：動いている間に呼ばれたら「もう一度見る」印だけ付けて、動いているほうの終わりを返す
+ * 同じ実行を同時に2つ動かさない：動いている間に呼ばれたら「もう一度見る」印だけ付けて、動いているほうの終わりを返す。
+ * 担当のタスクは同時に動かし（ワークスペースの同時実行数まで）、1つ終わるたびに1歩進める。
+ * 全員の終わりを待たないので、依存が済んだ担当は、ほかの担当が動いている間に始まる
  */
 export function driveRun(deps: AskRunDeps, ctx: WsCtx, runId: Uuid, o: { requesterId: Uuid; reply?: string; replyOf?: Uuid; aggregatorWaitMs?: number }): Promise<void> {
   const existing = driving.get(runId);
@@ -511,6 +502,8 @@ export function driveRun(deps: AskRunDeps, ctx: WsCtx, runId: Uuid, o: { request
   driving.set(runId, state);
   state.promise = (async () => {
     const edge = liveEdge(deps);
+    // 動かしているタスク（終わると自分で消える）
+    const inFlight = new Map<Uuid, Promise<void>>();
     try {
       for (;;) {
         // 停止の最中は歩まない（残りは queued のまま。次のプロセスの tick が拾う）
@@ -519,14 +512,24 @@ export function driveRun(deps: AskRunDeps, ctx: WsCtx, runId: Uuid, o: { request
         const step = await deps.db.transaction((tx) => advanceTx(tx, ctx, runId, { ...o, now: deps.clock.now() }), { retryOnce: true });
         // この歩みで作ったタスクと、queued のまま残っているタスク（承認の確定の hook が作ったもの・落ちたインスタンスのもの）
         const queued = (await listRunTasks(deps.db, ctx, runId)).filter((t) => t.status === "queued" && deps.registry.get(t.id) === undefined);
-        const todo = [...new Map([...step.tasks, ...queued].map((t) => [t.id, t])).values()];
+        const todo = [...new Map([...step.tasks, ...queued].map((t) => [t.id, t])).values()].filter((t) => !inFlight.has(t.id));
         if (todo.length > 0) {
           const all = await listMembers(deps.db, ctx, todo[0]!.ask_id as Uuid);
           const ws = await getWorkspace(deps.db, ctx);
-          await pool(todo, ws?.max_concurrent_tasks ?? 2, async (t) => {
+          const limit = Math.max(1, ws?.max_concurrent_tasks ?? 2);
+          // 上限を超えた分は queued のまま残り、どれかが終わった次の歩みで拾う
+          for (const t of todo) {
+            if (inFlight.size >= limit) break;
             const member = all.find((m) => m.id === t.ask_member_id);
-            if (member !== undefined) await executeTask(deps, ctx, edge, t.id, member);
-          });
+            if (member === undefined) continue;
+            const p = executeTask(deps, ctx, edge, t.id, member)
+              .catch((error) => deps.log.error("ask.run_failed", "依頼の実行を進められなかった", { workspaceId: ctx.workspaceId, askRunId: runId, taskId: t.id, error }))
+              .finally(() => inFlight.delete(t.id));
+            inFlight.set(t.id, p);
+          }
+        }
+        if (inFlight.size > 0) {
+          await Promise.race(inFlight.values());
           continue;
         }
         if (state.again) continue;
@@ -535,6 +538,8 @@ export function driveRun(deps: AskRunDeps, ctx: WsCtx, runId: Uuid, o: { request
     } catch (error) {
       deps.log.error("ask.run_failed", "依頼の実行を進められなかった", { workspaceId: ctx.workspaceId, askRunId: runId, error });
     } finally {
+      // 歩めなくなっても、始めたタスクは最後まで動かす（後始末は executeTask の中）
+      await Promise.allSettled(inFlight.values());
       driving.delete(runId);
     }
   })();
@@ -624,11 +629,11 @@ export async function resumeAsk(deps: AskRunDeps, s: SessionCtx, askId: Uuid, ac
     const stoppedTask = latest.get(stopped.id) ?? null;
 
     if (action === "retry") {
-      // 止まった担当に新しいタスクを作る（前の段の結果を同じように渡す）
-      const sorted = state.members.filter((m) => !m.is_aggregator).sort((a, b) => (a.position ?? 99) - (b.position ?? 99));
-      const idx = sorted.findIndex((m) => m.id === stopped.id);
-      const prev = idx > 0 ? latest.get(sorted[idx - 1]!.id) : undefined;
-      await createMemberTask(tx, ctx, state, stopped, prev === undefined ? [] : [prev.id], { requesterId: s.userId, prompt: promptOf(state), now });
+      // 止まった担当に新しいタスクを作る（依存する段の結果を同じように渡す）
+      const inputs = state.members
+        .filter((m) => !m.is_aggregator && m.position !== null && stopped.depends_on.includes(m.position))
+        .flatMap((m) => latest.get(m.id)?.id ?? []);
+      await createMemberTask(tx, ctx, state, stopped, inputs, { requesterId: s.userId, prompt: promptOf(state), now });
       await transitionRun(tx, ctx, run.id, ["waiting_input"], "running", now);
       const moved = await transitionAsk(tx, ctx, askId, ["waiting_input"], "running", now);
       await emitAskEvent(tx, ctx, { type: "ask.status", askId, status: "running" }, now);

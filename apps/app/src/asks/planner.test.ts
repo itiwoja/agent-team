@@ -3,7 +3,7 @@ import { ScriptedLlmClient } from "@open-team/llm";
 import { shapeLine } from "@open-team/kernel";
 import { describe, expect, it } from "vitest";
 import { jsonReply } from "../rehearsal/test-helpers.ts";
-import { AskPlanError, jobHintsOf, planFormation, plannerJsonSchema, plannerSystemPrompt, plannerUserPrompt, type PlannerAgent, type PlannerInput } from "./planner.ts";
+import { AskPlanError, jobHintsOf, planFormation, plannerJsonSchema, plannerSystemPrompt, plannerUserPrompt, positionsFor, type PlannerAgent, type PlannerInput } from "./planner.ts";
 
 const A1 = "11111111-1111-4111-8111-111111111111";
 const A2 = "22222222-2222-4222-8222-222222222222";
@@ -235,6 +235,47 @@ describe("planFormation", () => {
     expect(user).toContain(`<<<\n${text}\n>>>`);
     expect(user).not.toContain(A2);
     expect(plannerSystemPrompt()).toContain("従いません");
+  });
+});
+
+describe("順番の依存（after → dependsOn）", () => {
+  it("after がなければ1つ前の段（従来の1段ずつ）", () => {
+    expect(positionsFor("chain", 3, false).map((p) => p.dependsOn)).toEqual([[], [1], [2]]);
+  });
+  it("after は自分より前の段だけを残す。1段目は常に空。窓口は最後の段", () => {
+    const p = positionsFor("chain", 4, false, [[2], [], [1, 2, 2, 4], [3]]);
+    expect(p.map((x) => x.dependsOn)).toEqual([[], [], [1, 2], [3]]);
+    expect(p.map((x) => x.isSpokesperson)).toEqual([false, false, false, true]);
+  });
+  it("最後の段に結果が届かない担当は、最後の段の依存に足す（流れの先端だけ）", () => {
+    expect(positionsFor("chain", 4, false, [[], [1], [], [3]]).map((x) => x.dependsOn)).toEqual([[], [1], [], [2, 3]]);
+  });
+  it("ほかの形は after を見ない", () => {
+    expect(positionsFor("parallel", 2, false, [[], [1]]).map((x) => x.dependsOn)).toEqual([[], []]);
+  });
+  it("文章・デザイン → 実装 → チェックの下書きを、同時に動く段取りにする", async () => {
+    const llm = new ScriptedLlmClient([
+      jsonReply({
+        formation: {
+          shape: "chain",
+          members: [
+            member({ newName: "コピーの魔術師", summary: "文章", after: [] }),
+            member({ newName: "配色の錬金術師", summary: "デザイン", after: [] }),
+            member({ newName: "実装職人", summary: "実装", after: [1, 2] }),
+            member({ newName: "点検番長", summary: "チェック", after: [3] }),
+          ],
+        },
+      }),
+    ]);
+    const r = await plan(llm, input({ text: "告知ページを作って" }));
+    expect(r.kind).toBe("formation");
+    if (r.kind !== "formation") return;
+    expect(r.formation.members.map((x) => x.proposed.dependsOn)).toEqual([[], [], [1, 2], [3]]);
+    const line = shapeLine(r.formation.shape, r.formation.members.map((x) => ({ agentName: x.summary, position: x.proposed.position, dependsOn: x.proposed.dependsOn })));
+    expect(line).toBe("文章・デザイン → 実装 → チェック の順に進めて（文章とデザインは同時に動きます）、チェックが答えます");
+  });
+  it("プロンプトは、前の結果が要らない担当を待たせないよう伝える", () => {
+    expect(plannerSystemPrompt()).toContain("前の担当の結果が要らない担当は待たせない");
   });
 });
 

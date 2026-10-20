@@ -4,7 +4,8 @@
 //   single    担当を始める
 //   parallel  全員を同時に始める。受け渡しはしない。一部が失敗しても、ほかはそのまま続ける
 //   aggregate 担当を同時に始め、全員が終わるか待ち時間（A-100）を過ぎたら、まとめ役を始める。終わった分だけでまとめる。全員が失敗したらまとめ役は動かさない
-//   chain     1段ずつ。前の段が済み（succeeded / completed）になったら次を始める。止まったら次は始めず waiting_input（やり直す／ここまでで終える）
+//   chain     依存する担当（dependsOn）がすべて済み（succeeded / completed）になった担当から始める。依存のない担当・依存が同時に済んだ担当は同時に始める。
+//             止まった担当に依存する担当は始めず、ほかの担当が動き終わったら waiting_input（やり直す／ここまでで終える）
 // 「受け渡し」は input_task_ids（元のタスク）と汚染の引き継ぎ（run.ts が taintFromInputs で）。この関数は誰の結果を渡すかまでを決める
 
 import type { TaskStatus } from "@open-team/db";
@@ -49,6 +50,8 @@ export interface PlanMember {
   isAggregator: boolean;
   /** この実行での最新のタスク（まだなければ null）。やり直しは新しいタスクが最新になる */
   task: PlanTask | null;
+  /** 順番で結果を受け取る担当の position。省略は1つ前の段（従来の1段ずつ） */
+  dependsOn?: readonly number[];
 }
 
 export interface PlanInput {
@@ -62,7 +65,7 @@ export interface PlanInput {
 
 export interface PlanStart {
   memberId: string;
-  /** 受け渡す元のタスク（BR-71）。順番は前の段、まとめ役は全担当、ほかは空 */
+  /** 受け渡す元のタスク（BR-71）。順番は依存する段、まとめ役は全担当、ほかは空 */
   inputTaskIds: string[];
 }
 
@@ -147,32 +150,34 @@ export function evaluateRun(input: PlanInput): PlanOutput {
 
     case "chain": {
       const stages = workers;
-      let previous: PlanMember | null = null;
-      for (const s of stages) {
+      const byPosition = new Map(stages.map((m) => [m.position, m]));
+      const depsOf = (m: PlanMember, i: number): PlanMember[] => {
+        const positions = m.dependsOn ?? (i === 0 ? [] : [stages[i - 1]!.position]);
+        return positions.flatMap((p) => byPosition.get(p) ?? []);
+      };
+      const start: PlanStart[] = [];
+      let stopped: PlanMember | null = null;
+      let open = false;
+      stages.forEach((s, i) => {
         if (s.task === null) {
-          const prevPhase = previous === null ? "ok" : phaseOf(previous.task?.status ?? null);
-          if (prevPhase === "ok") {
-            return {
-              start: [{ memberId: s.memberId, inputTaskIds: previous?.task ? [previous.task.id] : [] }],
-              status: "running",
-              stoppedMemberId: null,
-              answerReady: false,
-            };
+          const deps = depsOf(s, i);
+          if (deps.every((d) => phaseOf(d.task?.status ?? null) === "ok")) {
+            start.push({ memberId: s.memberId, inputTaskIds: deps.flatMap((d) => (d.task === null ? [] : [d.task.id])) });
           }
-          if (prevPhase === "stopped" && previous !== null) {
-            return { start: [], status: "waiting_input", stoppedMemberId: previous.memberId, answerReady: false };
-          }
-          // 前の段が動いている・確認待ち：待つ
-          return { start: [], status: "running", stoppedMemberId: null, answerReady: false };
+          return;
         }
         const p = phaseOf(s.task.status);
-        if (p === "stopped") return { start: [], status: "waiting_input", stoppedMemberId: s.memberId, answerReady: false };
-        if (p === "active" || p === "awaiting") {
-          const isLast = s === stages[stages.length - 1];
-          return { start: [], status: "running", stoppedMemberId: null, answerReady: isLast && s.task.hasReport };
-        }
-        previous = s;
+        if (p === "active" || p === "awaiting") open = true;
+        if (p === "stopped" && stopped === null) stopped = s;
+      });
+      const last = stages[stages.length - 1];
+      const lastPhase = phaseOf(last?.task?.status ?? null);
+      if (start.length > 0 || open) {
+        const answerReady = last?.task != null && (lastPhase === "active" || lastPhase === "awaiting") && last.task.hasReport;
+        return { start, status: "running", stoppedMemberId: null, answerReady };
       }
+      // 動いている担当がなく、止まった担当がいる：その先は始められない
+      if (stopped !== null) return { start: [], status: "waiting_input", stoppedMemberId: (stopped as PlanMember).memberId, answerReady: false };
       // すべての段が済み
       return { start: [], status: "done", stoppedMemberId: null, answerReady: true };
     }

@@ -415,6 +415,30 @@ describe("エージェントとして動く（10/14：見張りの前回の報�
   });
 });
 
+describe("編成の区画：同時に動く担当がいる順番", () => {
+  const members = [
+    { name: "文章係", position: 1, isAggregator: false, dependsOn: [] },
+    { name: "デザイン係", position: 2, isAggregator: false, dependsOn: [] },
+    { name: "実装係", position: 3, isAggregator: false, dependsOn: [1, 2] },
+    { name: "チェック係", position: 4, isAggregator: false, dependsOn: [3] },
+  ];
+  const at = (position: number): TaskContext => {
+    const ctx = inboxContext();
+    return { ...ctx, formation: { ...ctx.formation!, shape: "chain", position, stageCount: 4, isSpokesperson: position === 4, members } };
+  };
+  it("同時に動く担当には、待たずに進めることと渡す先を伝える", () => {
+    const system = buildSystemPrompt(at(1), 0);
+    expect(system).toContain("「文章係・デザイン係 → 実装係 → チェック係」の段取り");
+    expect(system).toContain("デザイン係は、あなたと同時に動いています");
+    expect(system).toContain("ほかの担当の結果を待たずに始めます");
+    expect(system).toContain("あなたの報告は実装係に受け渡されます");
+  });
+  it("依存する担当には、誰の報告を受け取るかを伝える。最後の担当は答える", () => {
+    expect(buildSystemPrompt(at(3), 0)).toContain("文章係・デザイン係の報告を、タスクの入力で受け渡します");
+    expect(buildSystemPrompt(at(4), 0)).toContain("あなたは最後の担当です");
+  });
+});
+
 describe("タスクの入力（buildTaskInput。§3.9 の6）", () => {
   it("依頼の本文は利用者の言葉としてそのまま出す（ag:119）", () => {
     expect(buildTaskInput(inboxContext())).toBe("# 依頼\n仕入れ先のメールを読んで、在庫を見て、必要なら発注して");

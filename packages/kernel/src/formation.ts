@@ -23,7 +23,7 @@ export const FORMATION_TEMPLATES_0H = ["researcher", "briefer", "assistant", "wa
 export const FORMATION_LIMITS = {
   minMembers: 1, // agents.md:209（まとめ役を除く）
   maxMembers: 5, // A-99
-  maxChainStages: 4, // A-99
+  maxChainStages: 4, // A-99（順番の段の深さ。同時に動く担当は同じ段に数える）
   aggregateMinMembers: 2,
   aggregateMaxMembers: 5,
   aggregatorCount: 1,
@@ -45,7 +45,7 @@ export interface ProposedMember {
   agent: { kind: "existing"; agentId: Uuid } | { kind: "new"; name: string; role?: string | null };
   /** 1 始まりの段の番号（M-34） */
   position: number;
-  /** 順番の前の段の position（M-34） */
+  /** 順番で結果を受け取る前の段の position（M-34）。前の段の結果が要らない担当は空にして、同時に始める */
   dependsOn: readonly number[];
   isSpokesperson: boolean;
   job: { template: string; deliver: ReadonlyArray<{ to: string }> };
@@ -123,8 +123,8 @@ function sameNumberSet(a: readonly unknown[], b: readonly number[]): boolean {
 
 /**
  * 編成案の検査（FR §3.3 V1〜V12、agents.md:208-214）。すべての項目を調べ、違反をすべて返す。
- * V1 人数 1〜5／V2 形ごとの人数（single 1・chain 2〜4・parallel 2〜5・aggregate 2〜5）／V3 まとめ役の有無／
- * V4 段の番号と依存／V5 担当の参照／V6 まとめ役は書き込みを持たない（BR-72）／V7 エージェント20体／V8 仕事10個／
+ * V1 人数 1〜5／V2 形ごとの人数（single 1・chain 2〜5（段の深さは4まで）・parallel 2〜5・aggregate 2〜5）／V3 まとめ役の有無／
+ * V4 段の番号と依存（chain は前の段だけを指し、どの担当も最後の段につながる）／V5 担当の参照／V6 まとめ役は書き込みを持たない（BR-72）／V7 エージェント20体／V8 仕事10個／
  * V9 窓口がちょうど1つ（並列は0）／V10 新しい名前／V11 担当の指定（mention）／V12 0-H のテンプレート
  */
 export function validateFormation(input: ValidateFormationInput): ValidateFormationResult {
@@ -168,10 +168,7 @@ export function validateFormation(input: ValidateFormationInput): ValidateFormat
   const countDetail = `${shape} に担当 ${n}人`;
   if (n < limits.minMembers || n > limits.maxMembers) add("SHAPE_MEMBER_COUNT", undefined, countDetail);
   if (shape === "single" && n !== 1) add("SHAPE_MEMBER_COUNT", undefined, countDetail);
-  if (shape === "chain") {
-    if (n > limits.maxChainStages) add("CHAIN_TOO_LONG", undefined, `順番は${limits.maxChainStages}段まで（${n}段）`);
-    if (n < 2) add("SHAPE_MEMBER_COUNT", undefined, countDetail); // 下限2は FR §3.3 V2 の提案
-  }
+  if (shape === "chain" && n < 2) add("SHAPE_MEMBER_COUNT", undefined, countDetail); // 下限2は FR §3.3 V2 の提案
   if (shape === "parallel" && (n < 2 || n > limits.maxMembers)) add("SHAPE_MEMBER_COUNT", undefined, countDetail);
   if (shape === "aggregate" && (n < limits.aggregateMinMembers || n > limits.aggregateMaxMembers)) {
     add("SHAPE_MEMBER_COUNT", undefined, countDetail);
@@ -181,7 +178,7 @@ export function validateFormation(input: ValidateFormationInput): ValidateFormat
   if (shape === "aggregate" && aggregator === null) add("AGGREGATOR_MISSING");
   if (shape !== "aggregate" && aggregator !== null) add("AGGREGATOR_NOT_ALLOWED", aggregator.position);
 
-  // V4 段の番号：担当は 1..n の重複なし。依存：chain は k 段目が [k-1]、ほかの担当は []、まとめ役は n+1 で全担当に依存
+  // V4 段の番号：担当は 1..n の重複なし。依存：chain は自分より前の段だけ（1段目と、前の結果が要らない担当は []）、ほかの担当は []、まとめ役は n+1 で全担当に依存
   const counts = new Map<number, number>();
   for (const m of members) counts.set(m.position, (counts.get(m.position) ?? 0) + 1);
   for (const m of members) {
@@ -198,10 +195,25 @@ export function validateFormation(input: ValidateFormationInput): ValidateFormat
     }
     if (deps.some((d) => typeof d !== "number" || !memberPositions.has(d))) add("DEPENDS_ON_INVALID", m.position, "編成にない段を指している");
     if (shape === "chain") {
-      const expected = m.position === 1 ? [] : [m.position - 1];
-      if (!sameNumberSet(deps, expected)) add("DEPENDS_ON_INVALID", m.position, "順番は前の段だけに依存する");
+      if (deps.some((d) => typeof d === "number" && d >= m.position)) add("DEPENDS_ON_INVALID", m.position, "順番は前の段だけに依存する");
+      if (new Set(deps).size !== deps.length) add("DEPENDS_ON_INVALID", m.position, "同じ段を2回指している");
     } else if (deps.length > 0) {
       add("DEPENDS_ON_INVALID", m.position, "この形の担当は依存を持たない");
+    }
+  }
+  if (shape === "chain" && n >= 2 && !violations.some((v) => v.code === "POSITION_INVALID" || v.code === "DEPENDS_ON_INVALID")) {
+    // 段の深さ（同時に動く担当は同じ段）と、どの担当の結果も最後の段（窓口）まで届くか
+    const byPos = new Map(members.map((m) => [m.position, m]));
+    const depth = new Map<number, number>();
+    for (const pos of [...byPos.keys()].sort((a, b) => a - b)) {
+      depth.set(pos, 1 + Math.max(0, ...byPos.get(pos)!.dependsOn.map((d) => depth.get(d) ?? 0)));
+    }
+    const deepest = Math.max(...depth.values());
+    if (deepest > limits.maxChainStages) add("CHAIN_TOO_LONG", undefined, `順番は${limits.maxChainStages}段まで（${deepest}段）`);
+    const reach = new Set<number>([n]);
+    for (let pos = n; pos >= 1; pos -= 1) if (reach.has(pos)) for (const d of byPos.get(pos)!.dependsOn) reach.add(d);
+    for (const pos of [...byPos.keys()].sort((a, b) => a - b)) {
+      if (!reach.has(pos)) add("DEPENDS_ON_INVALID", pos, "この担当の結果が最後の段に届かない");
     }
   }
   if (aggregator !== null && shape === "aggregate") {
@@ -308,12 +320,31 @@ export function validateFormation(input: ValidateFormationInput): ValidateFormat
 }
 
 /**
+ * 順番の段（同時に動く担当を同じ段にまとめる）。段の深さは「依存する段のうち一番深いもの + 1」。
+ * dependsOn がない担当は、前の段に依存するもの（従来の1段ずつ）として扱う。段の中は position の順
+ */
+export function chainStages<T extends { position: number; dependsOn?: readonly number[] }>(members: readonly T[]): T[][] {
+  const sorted = [...members].sort((a, b) => a.position - b.position);
+  const depth = new Map<number, number>();
+  sorted.forEach((m, i) => {
+    const deps = m.dependsOn ?? (i === 0 ? [] : [sorted[i - 1]!.position]);
+    depth.set(m.position, 1 + Math.max(0, ...deps.map((d) => depth.get(d) ?? 0)));
+  });
+  const stages: T[][] = [];
+  for (const m of sorted) {
+    const d = depth.get(m.position)! - 1;
+    (stages[d] ??= []).push(m);
+  }
+  return stages.filter((g) => g !== undefined);
+}
+
+/**
  * 形の1行（entrance.md:91-96、FR §2.9。固定の文で LLM に書かせない：entrance.md:110）。single は null。
- * 担当は position の順に並べ、まとめ役は数えない（UI E20-11・12）
+ * 担当は position の順に並べ、まとめ役は数えない（UI E20-11・12）。順番で同時に動く担当は「・」でつなぐ
  */
 export function shapeLine(
   shape: Shape,
-  members: ReadonlyArray<{ agentName: string; position: number; isAggregator?: boolean }>,
+  members: ReadonlyArray<{ agentName: string; position: number; isAggregator?: boolean; dependsOn?: readonly number[] }>,
 ): string | null {
   const ms = members.filter((m) => m.isAggregator !== true);
   switch (shape) {
@@ -322,9 +353,14 @@ export function shapeLine(
     case "aggregate":
       return `${ms.length}人が調べて、まとめ役が1つにして届けます`;
     case "chain": {
-      const names = [...ms].sort((a, b) => a.position - b.position).map((m) => m.agentName);
-      const last = names[names.length - 1];
-      return last === undefined ? null : `${names.join(" → ")} の順に進めて、${last}が答えます`;
+      const stages = chainStages(ms);
+      const last = stages[stages.length - 1]?.at(-1)?.agentName;
+      if (last === undefined) return null;
+      const flow = stages.map((g) => g.map((m) => m.agentName).join("・")).join(" → ");
+      const together = stages.filter((g) => g.length > 1).map((g) => g.map((m) => m.agentName).join("と"));
+      return together.length === 0
+        ? `${flow} の順に進めて、${last}が答えます`
+        : `${flow} の順に進めて（${together.join("、")}は同時に動きます）、${last}が答えます`;
     }
     default:
       return null;

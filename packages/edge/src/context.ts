@@ -137,6 +137,7 @@ export async function loadTaskSetup(
           name: m.agent_name,
           position: m.is_aggregator ? workers.length + 1 : positionOf(m),
           isAggregator: m.is_aggregator,
+          ...(ask.shape === "chain" && !m.is_aggregator ? { dependsOn: [...m.depends_on] } : {}),
         })),
       };
     }

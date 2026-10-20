@@ -144,7 +144,8 @@ export interface TaskContext {
     stageCount: number;
     isSpokesperson: boolean;
     isAggregator: boolean;
-    members: Array<{ name: string; position: number; isAggregator: boolean }>;
+    /** dependsOn は順番のときだけ：結果を受け取る段の position（ないときは1つ前の段） */
+    members: Array<{ name: string; position: number; isAggregator: boolean; dependsOn?: number[] }>;
   };
   /** 仮想の時計がある世界（sim-world）では仮想の今の時刻。プロンプトに「今」として出す */
   now: IsoDateTime;

@@ -1,6 +1,7 @@
 // 設定プランナー（FR-061）：依頼文から編成（形・担当・使い回すか作るか）を Gemini に作らせ、Kernel の validateFormation で検査する。
 // - LLM に書かせるのは「どの形か・誰がするか・その担当がすること・仕事の指示・要るコネクタ」だけ。
-//   段の番号・依存・窓口・まとめ役の権限・名前の重なりの避け方・形の1行・上限は、決まった規則でコードが決める（D-85：LLM に決めさせない）
+//   段の番号・依存・窓口・まとめ役の権限・名前の重なりの避け方・形の1行・上限は、決まった規則でコードが決める（D-85：LLM に決めさせない）。
+//   順番（chain）で LLM が書くのは「どの前の担当の結果を使うか」（after）だけ。前の結果が要らない担当は同時に始め、届かない担当は最後の段につなぐ
 // - 出力は zod で検証し、検査（validateFormation）に外れたら理由を添えて1回だけ作り直す（asks.planner_attempts ≤ 3 の範囲）
 // - 質問は1つまで（BR-49）。選択肢つき（最大4）。すでに答えをもらっていれば、もう質問せず編成を作る
 // - コネクタ未接続・広げる付与（widen）では止めない：足りないものは外して作り、notes に残す（entrance.md）
@@ -93,6 +94,8 @@ const MemberDraft = z.strictObject({
   /** この依頼での仕事の指示（利用者が書いた形の自然な文） */
   instructions: z.string().min(1).max(1500),
   grants: z.array(GrantDraft).max(8).default([]),
+  /** 順番のときだけ：この担当が結果を使う前の担当（members の何番目か。1 始まり）。前の結果が要らなければ空（同時に始める）。書かなければ1つ前 */
+  after: z.array(z.number().int().min(1).max(FORMATION_LIMITS.maxMembers)).max(FORMATION_LIMITS.maxMembers).optional(),
 });
 const FormationDraft = z.strictObject({
   shape: z.enum(SHAPES),
@@ -178,7 +181,10 @@ export function plannerSystemPrompt(): string {
     "- single（ひとり）：1つの成果を、1つの権限の境界で作れる。担当は1人。",
     "- parallel（並列）：互いの結果を使わない成果が2つ以上ある。担当は2〜5人。それぞれが報告する。",
     "- aggregate（まとめ）：複数の情報源・観点を調べて、1つの報告にまとめてほしい。担当（調べる人）は2〜5人と、まとめ役を aggregator に1人。まとめ役は読むだけで、書き込みは持たない。",
-    "- chain（順番）：後の担当が前の担当の結果を使う。または、外部を読む担当と書き込む担当を分けると権限が狭くなる。担当は2〜4人で、members の並びがそのまま順番。最後の担当が答える。",
+    "- chain（順番）：後の担当が前の担当の結果を使う。または、外部を読む担当と書き込む担当を分けると権限が狭くなる。担当は2〜5人で、members の並びがそのまま順番。最後の担当が答える。",
+    "  - 順番でも、前の担当の結果が要らない担当は待たせない。各担当の after に、結果を使う前の担当の番号（members の何番目か。1 始まり）だけを書く。after が空の担当は最初から同時に動く。",
+    "  - 例：文章・デザイン・実装・チェックなら、文章（after 空）とデザイン（after 空）を同時に動かし、実装は after [1, 2]、チェックは after [3]。1人ずつ順に並べるのは、本当に前の結果が要るときだけにする。",
+    "  - 同時に動く担当は同じ段に数え、段の深さは4段まで。最後の担当は、ほかの全員の結果がたどり着く担当にする。",
     "",
     "# 担当の決め方",
     "- すでにある担当で足りるなら、必ず使い回す（agentId に一覧の id をそのまま書く）。以後も許可にしたルール・権限を絞った設定・作業場の控え・スキルが引き継がれるため（ルールで確認が減るのは、その仕事で安全チェックを通したあと）。",
@@ -343,16 +349,37 @@ export function uniqueAgentName(raw: string | undefined, taken: Set<string>, fal
   return name;
 }
 
-/** 形ごとの段の番号・依存・窓口（kernel の validateFormation V4・V9 と同じ規則。LLM に決めさせない） */
-export function positionsFor(shape: Shape, n: number, hasAggregator: boolean): Array<{ position: number; dependsOn: number[]; isSpokesperson: boolean }> {
+/**
+ * 形ごとの段の番号・依存・窓口（kernel の validateFormation V4・V9 と同じ規則。LLM に決めさせない）。
+ * chain の依存は after（LLM の下書き）から、自分より前の段だけを残す。after がなければ1つ前の段。
+ * どの担当の結果も最後の段（窓口）に届くように、届かない担当は最後の段の依存に足す
+ */
+export function positionsFor(
+  shape: Shape,
+  n: number,
+  hasAggregator: boolean,
+  after: ReadonlyArray<readonly number[] | undefined> = [],
+): Array<{ position: number; dependsOn: number[]; isSpokesperson: boolean }> {
   const out = Array.from({ length: n }, (_, i) => {
     const position = i + 1;
-    return {
-      position,
-      dependsOn: shape === "chain" && position > 1 ? [position - 1] : [],
-      isSpokesperson: (shape === "single" && position === 1) || (shape === "chain" && position === n),
-    };
+    const wanted = after[i];
+    const dependsOn =
+      shape !== "chain" || position === 1
+        ? []
+        : wanted === undefined
+          ? [position - 1]
+          : [...new Set(wanted.filter((d) => Number.isInteger(d) && d >= 1 && d < position))].sort((a, b) => a - b);
+    return { position, dependsOn, isSpokesperson: (shape === "single" && position === 1) || (shape === "chain" && position === n) };
   });
+  if (shape === "chain" && n >= 2) {
+    const reach = new Set<number>([n]);
+    for (let k = n - 1; k >= 0; k -= 1) if (reach.has(k + 1)) for (const d of out[k]!.dependsOn) reach.add(d);
+    const last = out[n - 1]!;
+    // 届かない担当のうち、ほかの届かない担当から使われていないもの（流れの先端）だけを足す
+    const unreached = out.filter((o) => !reach.has(o.position)).map((o) => o.position);
+    const tips = unreached.filter((pos) => !out.some((o) => !reach.has(o.position) && o.dependsOn.includes(pos)));
+    if (tips.length > 0) last.dependsOn = [...new Set([...last.dependsOn, ...tips])].sort((a, b) => a - b);
+  }
   if (hasAggregator) out.push({ position: n + 1, dependsOn: Array.from({ length: n }, (_, i) => i + 1), isSpokesperson: true });
   return out;
 }
@@ -408,7 +435,12 @@ export function convertDraft(draft: z.infer<typeof FormationDraft>, input: Plann
 
   const byId = new Map(input.agents.map((a) => [a.agentId.toLowerCase(), a]));
   const taken = new Set(input.agents.map((a) => normalizeAgentName(a.name)));
-  const pos = positionsFor(shape, workers.length, aggregatorDraft !== null);
+  const pos = positionsFor(
+    shape,
+    workers.length,
+    aggregatorDraft !== null,
+    workers.map((w) => w.after),
+  );
   const members: PlannedMember[] = [];
 
   const build = (d: MemberDraftT, k: number, isAggregator: boolean): PlannedMember => {

@@ -3,7 +3,7 @@
 // タスクの入力は最初の user のメッセージにする（§3.8 の2）。「今」は ctx.now だけを使う（仮想の時計の世界でも同じ文になる）
 // 障害を狙い撃ちした防御の文は入れない・弱めない（D-54、R-43）
 
-import { wrapUntrusted } from "@open-team/kernel";
+import { chainStages, wrapUntrusted } from "@open-team/kernel";
 import type { McpToolSpec, TaskContext, TeamMessageKind, ToolCallResult } from "./types.ts";
 import { TEMPLATE_RUNTIME_0H } from "./templates.ts";
 
@@ -61,7 +61,7 @@ function formationSection(ctx: TaskContext): string | null {
   const workers = f.members
     .filter((m) => !m.isAggregator)
     .sort((a, b) => a.position - b.position)
-    .map((m) => ({ name: inline(m.name), position: m.position }));
+    .map((m) => ({ name: inline(m.name), position: m.position, ...(m.dependsOn === undefined ? {} : { dependsOn: m.dependsOn }) }));
   const names = workers.map((w) => w.name);
   const lines = ["# 編成"];
   switch (f.shape) {
@@ -70,6 +70,23 @@ function formationSection(ctx: TaskContext): string | null {
       break;
     case "chain": {
       const last = f.position >= f.stageCount;
+      const stages = chainStages(workers);
+      if (stages.some((g) => g.length > 1)) {
+        // 同時に動く担当がいる順番：自分と同時に動く担当・受け取る担当・渡す先を名前で書く
+        const flow = stages.map((g) => g.map((w) => w.name).join("・")).join(" → ");
+        const me = workers.find((w) => w.position === f.position);
+        const together = stages.find((g) => g.some((w) => w.position === f.position))?.filter((w) => w.position !== f.position) ?? [];
+        const from = workers.filter((w) => me?.dependsOn?.includes(w.position) === true);
+        const to = workers.filter((w) => w.dependsOn?.includes(f.position) === true);
+        lines.push(`この依頼は「${flow}」の段取りで、${f.stageCount}人の担当が進めます。同じ段の担当は同時に動きます。${last ? "あなたは最後の担当です。" : ""}`);
+        if (together.length > 0) lines.push(`${together.map((w) => w.name).join("・")}は、あなたと同時に動いています。その担当の結果を待たずに、自分の分を進めてください。`);
+        if (from.length > 0) lines.push(`${from.map((w) => w.name).join("・")}の報告を、タスクの入力で受け渡します。`);
+        else lines.push("あなたは、ほかの担当の結果を待たずに始めます。");
+        if (!last) {
+          lines.push(`あなたの報告は${to.length > 0 ? `${to.map((w) => w.name).join("・")}に` : "後の段に"}受け渡されます。依頼した人への回答は、最後の段の担当が書きます。`);
+        }
+        break;
+      }
       lines.push(
         `この依頼は「${names.join(" → ")}」の順番で、${f.stageCount}人の担当が1段ずつ進めます。` +
           `あなたは${f.position}段目${last ? "（最後）" : ""}の担当です。`,
