@@ -2,16 +2,16 @@
 // 担当は待機中、持ち物（スキル・スクリプト）や例の依頼を見ながら数秒おきに独り言をこぼし（自分で考えて動いている見た目）、
 // 下の入力欄から頼むと、返事を待たずにその場で全員が反応して動き出す。依頼の生成（ask.*）は入口と同じ畳み込み（lib/generation.ts）で追い、
 // 編成に入った担当の机が光る。入れていないときは机が薄く、[入れる] で入れるとセレモニーのあとに部屋に灯りがつく
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
-import { api, describeError, type AgentAskView, type AgentLibraryItem, type FormationView, type PackAgentView, type PackView } from "../api";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
+import { api, describeError, type AgentAskView, type AgentLibraryItem, type PackAgentView, type PackView } from "../api";
 import { Avatar } from "../components/Avatar";
-import { askNoticePermission } from "../components/Notices";
 import { PackInstallCeremony, type CeremonyAgent } from "../components/PackInstallCeremony";
 import { ASK_STATUS_TEXT } from "../lib/askList";
 import { formatTime } from "../lib/format";
-import { GIVE_UP_MS, SLOW_MS, askCreatedAfterGiveUp, generationReducer, initialGen, isGenerationEvent, type GenState } from "../lib/generation";
+import type { GenState } from "../lib/generation";
 import { MUSING_MS, canMuse, clip, deskStateOf, matchMembers, musingAt, musingsOf, pickSpeakers, reactionOf, type DeskState, type Helper } from "../lib/packWorkspace";
-import { Link, navigate } from "../lib/router";
+import { Link } from "../lib/router";
+import { useAskGeneration } from "../lib/useAskGeneration";
 import { ArrowUpIcon } from "../ui/icons";
 import { useWorkspace, useWorkspaceEvent } from "../workspace";
 import { TEMPLATE_LABEL } from "../lib/packLabels";
@@ -140,69 +140,12 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
     [library],
   );
 
-  // --- 頼む（入口と同じ畳み込み） ---
-  const [state, dispatch] = useReducer(generationReducer, initialGen);
+  // --- 頼む（入口・頼むシートと同じ生成の状態：lib/useAskGeneration.ts） ---
+  const { state, submit: send, answer, reset, formations } = useAskGeneration({ packId: p.id });
   const [text, setText] = useState("");
   const [round, setRound] = useState(0);
-  // 編成の担当の agentId は畳み込みの members に無いので、ask.formed（と引き直し）の編成をここで覚えておく
-  const [formations, setFormations] = useState<Record<string, FormationView>>({});
-  const phaseRef = useRef(state.phase);
-  phaseRef.current = state.phase;
-  const askIdRef = useRef(state.askId);
-  askIdRef.current = state.askId;
-  const generationRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const liveRef = useRef<HTMLDivElement>(null);
-
-  useWorkspaceEvent((type, data) => {
-    if (!data || typeof data !== "object") return;
-    const event = { ...(data as Record<string, unknown>), type };
-    if (!isGenerationEvent(event)) return;
-    if (event.type === "ask.formed" && (phaseRef.current === "generating" || phaseRef.current === "question")) {
-      const { askId, formation } = event;
-      setFormations((f) => ({ ...f, [askId]: formation }));
-    }
-    dispatch({ type: "event", event });
-  });
-
-  // 10 秒で「まだ考えています」、30 秒で打ち切り（作られていれば依頼のページへ）
-  useEffect(() => {
-    if (state.phase !== "generating") return;
-    let cancelled = false;
-    const generation = generationRef.current;
-    const askId = state.askId;
-    const slow = setTimeout(() => dispatch({ type: "slow" }), SLOW_MS);
-    const giveUp = setTimeout(() => {
-      void askCreatedAfterGiveUp(askId, (id) => api.ask(id)).then((id) => {
-        if (cancelled || generationRef.current !== generation || askIdRef.current !== askId) return;
-        const ph = phaseRef.current;
-        if (id !== null && (ph === "generating" || ph === "question")) navigate(`/asks/${id}`);
-        else dispatch({ type: "timeout" });
-      });
-    }, GIVE_UP_MS);
-    return () => {
-      clearTimeout(slow);
-      clearTimeout(giveUp);
-      cancelled = true;
-    };
-  }, [state.phase, state.askId]);
-
-  // 事象を取りこぼしても追いつく（4 秒ごとに依頼を引き直す）
-  useEffect(() => {
-    if ((state.phase !== "generating" && state.phase !== "question") || !state.askId) return;
-    const askId = state.askId;
-    const id = setInterval(() => {
-      api
-        .ask(askId)
-        .then((detail) => {
-          const formation = detail.formation;
-          if (formation) setFormations((f) => ({ ...f, [askId]: formation }));
-          dispatch({ type: "detail", detail });
-        })
-        .catch(() => undefined);
-    }, 4000);
-    return () => clearInterval(id);
-  }, [state.phase, state.askId]);
 
   // 編成ができたら、進みの欄（人数・依頼のページを開く）を見える所へ（狭い画面では応援の机が増えて下に押し出される）
   useEffect(() => {
@@ -215,46 +158,23 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
   }, [state.phase, state.sentText]);
 
   const submit = useCallback(
-    async (value: string) => {
-      const t = value.trim();
-      // 生成中・質問中は重ねて送らない
-      if (!t || phaseRef.current === "generating" || phaseRef.current === "question") return;
-      askNoticePermission();
-      generationRef.current += 1;
+    (value: string) => {
+      // 生成中・質問中は重ねて送らない（送れなかったら何もしない）
+      if (!send(value)) return;
       // 返事を待たずに、ここで全員が反応する（submit で phase が generating になり、机が running になる）
       setRound((r) => r + 1);
       setText("");
-      dispatch({ type: "submit", text: t });
       // 送るボタンは止まり、例のチップは消えるので、フォーカスを入力欄に置いておく（body に落とさない）
       inputRef.current?.focus();
-      try {
-        const { ask } = await api.createAsk(t, undefined, { packId: p.id });
-        dispatch({ type: "accepted", ask });
-      } catch (e) {
-        dispatch({ type: "error", message: describeError(e) });
-      }
     },
-    [p.id],
-  );
-
-  const answer = useCallback(
-    async (a: { choiceId: string } | { text: string }) => {
-      if (!state.askId) return;
-      dispatch({ type: "answered" });
-      try {
-        await api.answerAsk(state.askId, a);
-      } catch (e) {
-        dispatch({ type: "error", message: describeError(e) });
-      }
-    },
-    [state.askId],
+    [send],
   );
 
   // 編成を見せたあとの [閉じる]（押したボタンは消えるので、フォーカスは入力欄へ）
   const closeProgress = useCallback(() => {
-    dispatch({ type: "reset" });
+    reset();
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, []);
+  }, [reset]);
 
   // --- 編成：机に当たる担当と応援 ---
   const { joined, helpers } = useMemo(() => {

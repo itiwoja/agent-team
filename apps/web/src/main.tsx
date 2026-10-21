@@ -2,11 +2,14 @@ import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, 
 import { createRoot } from "react-dom/client";
 import { api, onUnauthorized, type Me, type SessionState } from "./api";
 import { AppHeader } from "./components/AppHeader";
+import { AskComposerSheet } from "./components/AskComposerSheet";
 import { Notices } from "./components/Notices";
 import { JUDGE_TOKEN_NOTE } from "./lib/format";
 import { installHistory, Link, navigate, takePendingScroll, useRoute, type Route } from "./lib/router";
 import { restoreWhenTall } from "./lib/scrollMemory";
 import { backOf, titleOf } from "./lib/screen";
+import { ENTER_ASK_MS } from "./lib/generation";
+import { useAskGeneration } from "./lib/useAskGeneration";
 import { composeTitle, useScreenTitleOverride } from "./lib/title";
 import { useViewportHeight } from "./lib/viewport";
 import { Agents } from "./screens/Agents";
@@ -193,10 +196,15 @@ function screenKeyOf(route: Route): string {
 
 function Screens() {
   const route = useRoute();
-  const { counts } = useWorkspace();
+  const { counts, online, killSwitchEngaged } = useWorkspace();
   const titleOverride = useScreenTitleOverride();
   useViewportHeight();
-  useSlashToAsk();
+  // 全画面共通の「頼む」シート（<main key> の外に持つので、画面を移っても生成は続く）
+  const [askSheetOpen, setAskSheetOpen] = useState(false);
+  const openAskSheet = useCallback(() => setAskSheetOpen(true), []);
+  const closeAskSheet = useCallback(() => setAskSheetOpen(false), []);
+  const gen = useAskGeneration();
+  useSlashToAsk(openAskSheet);
   const mainRef = useRef<HTMLElement>(null);
   const screenKey = screenKeyOf(route);
   const firstScreen = useRef(true);
@@ -221,6 +229,24 @@ function Screens() {
       now: () => performance.now(),
     });
   }, [screenKey]);
+
+  // 画面を移ったらシートは閉じる（生成は続く）
+  useEffect(() => setAskSheetOpen(false), [screenKey]);
+
+  // 編成ができたら、少し見せて依頼のページへ移る。作れなかった・質問が来たときは、閉じていてもシートを開く
+  const { phase, askId } = gen.state;
+  const { reset } = gen;
+  useEffect(() => {
+    if (phase !== "shown" || !askId) return;
+    const id = setTimeout(() => {
+      navigate(`/asks/${askId}`);
+      reset();
+    }, ENTER_ASK_MS);
+    return () => clearTimeout(id);
+  }, [phase, askId, reset]);
+  useEffect(() => {
+    if (phase === "failed" || phase === "question") setAskSheetOpen(true);
+  }, [phase]);
 
   // 画面を移ったら main にフォーカスを移す（スクリーンリーダーに移ったことを伝える）。最初の描画では動かさない
   useEffect(() => {
@@ -249,16 +275,24 @@ function Screens() {
           {route.name === "notFound" && <NotFound />}
         </div>
       </main>
+      {route.name !== "home" && (
+        <button type="button" className="ask-fab" onClick={openAskSheet} aria-haspopup="dialog" aria-keyshortcuts="/">
+          <span aria-hidden="true">＋</span> 頼む
+        </button>
+      )}
+      {askSheetOpen && (
+        <AskComposerSheet gen={gen} onAskPage={route.name === "ask"} disabled={!online || killSwitchEngaged} onClose={closeAskSheet} />
+      )}
       <Notices />
     </div>
   );
 }
 
 /**
- * 「/」でどの画面からでも入力欄へ（入口でなければ入口へ移ってから）。入力中・修飾キーつき・シートやメニューが開いている間は動かさない。
+ * 「/」でどの画面からでも頼む入力欄へ（入口では #ask-input、それ以外の画面では「頼む」シート）。入力中・修飾キーつき・シートやメニューが開いている間は動かさない。
  * 画面を移ったときの main へのフォーカス（上の effect）より後に入れるため、入口へ移ったときは次の描画を待つ
  */
-function useSlashToAsk() {
+function useSlashToAsk(openSheet: () => void) {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.defaultPrevented) return;
@@ -266,16 +300,14 @@ function useSlashToAsk() {
       if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
       if (document.querySelector('[aria-modal="true"]')) return;
       e.preventDefault();
-      const focusInput = () => document.getElementById("ask-input")?.focus();
-      if (document.getElementById("ask-input")) return focusInput();
-      // 入口で生成中など、入力欄が出ていないときは何もしない（同じ画面を履歴に積まない）
-      if (location.pathname === "/") return;
-      navigate("/");
-      setTimeout(focusInput, 60);
+      const input = document.getElementById("ask-input");
+      if (input) return input.focus();
+      // 入口で生成中など、入力欄が出ていないときは何もしない。入口以外の画面ではシートを開く
+      if (location.pathname !== "/") openSheet();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, []);
+  }, [openSheet]);
 }
 
 function NotFound() {

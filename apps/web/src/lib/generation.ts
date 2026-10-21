@@ -1,11 +1,12 @@
 // SCR-020 の生成中の状態（畳み込み）。依頼を作る（API-072）と、SSE の ask.*（と、取りこぼしに備えた GET /asks/:id）から
-// 画面の状態を決める。時間（10 秒・30 秒・3 秒）はフックが timer で dispatch する。
+// 画面の状態を決める。時間（10 秒・30 秒・見せ終わり）はフックが timer で dispatch する。
 import type { AskDetail, AskEvent, AskQuestionView, AskSummary, FormationView } from "../api";
 import { shapeLineOf } from "./shape";
 
 export const SLOW_MS = 10_000; // 「まだ考えています」
 export const GIVE_UP_MS = 30_000; // 打ち切り（A-98）
-export const SHOW_MS = 3_000; // 作り終えた編成を見せる時間（A-97）
+export const SHOW_MS = 3_000; // 作り終えた編成を見せる時間（A-97。パックの作業場など、その場に残る画面向け）
+export const ENTER_ASK_MS = 2_000; // 入口・頼むシート：編成を見せてから依頼のページへ移るまで
 export const DEFAULT_FAILURE = "うまく決められませんでした。言い方を変えてみてください";
 /** 30 秒の打ち切り。依頼の言い方のせいではない（Gemini の混雑）ので、言い方を変えるよう促さない（サーバーの timeout と同じ文） */
 export const TIMEOUT_FAILURE = "Gemini が混み合っていて、時間内に決められませんでした。もう一度送ってください";

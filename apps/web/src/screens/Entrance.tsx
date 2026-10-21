@@ -1,14 +1,13 @@
-// SCR-020：任せる（`/`）。真ん中の1文・例文・入力欄だけ（件数はヘッダー右、カレンダーの接続はメニュー）。頼むと「エージェント生成中…」→ 担当が1行ずつ現れる → 3秒で戻る
-import { useCallback, useEffect, useReducer, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
-import { api, describeError } from "../api";
+// SCR-020：任せる（`/`）。真ん中の1文・例文・入力欄だけ（件数はヘッダー右、カレンダーの接続はメニュー）。頼むと「エージェント生成中…」→ 担当が1行ずつ現れる → 依頼のページ（/asks/:id）へ移る
+import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
 import { Avatar } from "../components/Avatar";
-import { askNoticePermission } from "../components/Notices";
-import { GIVE_UP_MS, SHOW_MS, SLOW_MS, askCreatedAfterGiveUp, generationReducer, initialGen, isGenerationEvent, type GenState } from "../lib/generation";
+import { ENTER_ASK_MS, type GenState } from "../lib/generation";
 import { readDraft, writeDraft } from "../lib/draft";
 import { pickExamples, readPrefill, readPrepared } from "../lib/prefill";
 import { Link, navigate, replaceUrl } from "../lib/router";
 import { ArrowUpIcon } from "../ui/icons";
-import { useWorkspace, useWorkspaceEvent } from "../workspace";
+import { useAskGeneration } from "../lib/useAskGeneration";
+import { useWorkspace } from "../workspace";
 
 /** 入力欄の例文（A-96：固定の候補 10 個。毎回入れ替える） */
 const EXAMPLES = [
@@ -26,7 +25,7 @@ const EXAMPLES = [
 
 export function Entrance() {
   const { killSwitchEngaged, online } = useWorkspace();
-  const [state, dispatch] = useReducer(generationReducer, initialGen);
+  const { state, submit: send, answer, reset } = useAskGeneration();
   // 書きかけの文はほかの画面へ移っても残す（lib/draft.ts。送ったら消える）
   const [text, setText] = useState(readDraft);
   useEffect(() => writeDraft(text), [text]);
@@ -40,11 +39,6 @@ export function Entrance() {
   const [connectNote, setConnectNote] = useState<{ text: string; error: boolean } | null>(null);
   // 審査用のトークンで入った直後（`/?prepared=askId`。D-118）：用意した依頼が待っていることを知らせる（開くか閉じるまで残す）
   const [prepared, setPrepared] = useState<string | null>(null);
-  const phaseRef = useRef(state.phase);
-  phaseRef.current = state.phase;
-  const askIdRef = useRef(state.askId);
-  askIdRef.current = state.askId;
-  const generationRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // `/?text=…` で開かれたら、その文を入力欄に入れてフォーカスし、URL を `/` に戻す（送りはしない）
@@ -81,49 +75,6 @@ export function Entrance() {
     return () => clearTimeout(id);
   }, [connectNote]);
 
-  // 依頼の事象（ask.*）。生成に関わる5種だけ畳み込む（ask.answered などは依頼のページ向けなので通さない）
-  useWorkspaceEvent((type, data) => {
-    if (!data || typeof data !== "object") return;
-    const event = { ...(data as Record<string, unknown>), type };
-    if (!isGenerationEvent(event)) return;
-    dispatch({ type: "event", event });
-  });
-
-  // 10 秒・30 秒（生成中のあいだだけ。質問に答えている間は数えない）
-  useEffect(() => {
-    if (state.phase !== "generating") return;
-    let cancelled = false;
-    const generation = generationRef.current;
-    const askId = state.askId;
-    const slow = setTimeout(() => dispatch({ type: "slow" }), SLOW_MS);
-    // 打ち切りの後も依頼はサーバーで作られ続けることがある。依頼の ID が分かっていて作られていれば、失敗にせず依頼のページへ進む
-    const giveUp = setTimeout(() => {
-      void askCreatedAfterGiveUp(askId, (id) => api.ask(id)).then((id) => {
-        if (cancelled || generationRef.current !== generation || askIdRef.current !== askId) return;
-        const p = phaseRef.current;
-        if (id !== null && (p === "generating" || p === "question")) navigate(`/asks/${id}`);
-        else dispatch({ type: "timeout" });
-      });
-    }, GIVE_UP_MS);
-    return () => {
-      clearTimeout(slow);
-      clearTimeout(giveUp);
-      cancelled = true;
-    };
-  }, [state.phase, state.askId]);
-
-  // 事象を取りこぼしても追いつく（4 秒ごとに依頼を引き直す）
-  useEffect(() => {
-    if ((state.phase !== "generating" && state.phase !== "question") || !state.askId) return;
-    const id = setInterval(() => {
-      api
-        .ask(state.askId!)
-        .then((detail) => dispatch({ type: "detail", detail }))
-        .catch(() => undefined);
-    }, 4000);
-    return () => clearInterval(id);
-  }, [state.phase, state.askId]);
-
   // 送った入力欄は生成中に消える。消えた要素からは blur が来ないので、送ったときのフォーカスで paused が立ったまま残る。
   // 編成を見せるときに、いまフォーカスが本当に入口の中にあるかで決め直す（無ければ 3 秒で戻る）
   const rootRef = useRef<HTMLDivElement>(null);
@@ -133,49 +84,25 @@ export function Entrance() {
     setPaused(active !== null && active !== document.body && rootRef.current?.contains(active) === true);
   }, [state.phase]);
 
-  // 作り終えた編成は 3 秒見せて入口に戻る（読んでいる間・触っている間は止める）
+  // 作り終えた編成を少し見せて、依頼のページへ移る（読んでいる間・触っている間は止める）
   useEffect(() => {
-    if (state.phase !== "shown" || paused) return;
-    const id = setTimeout(() => dispatch({ type: "reset" }), SHOW_MS);
+    if (state.phase !== "shown" || paused || !state.askId) return;
+    const askId = state.askId;
+    const id = setTimeout(() => {
+      navigate(`/asks/${askId}`);
+      reset();
+    }, ENTER_ASK_MS);
     return () => clearTimeout(id);
-  }, [state.phase, paused]);
+  }, [state.phase, state.askId, paused, reset]);
 
   // 作れなかったら、送った文を入力欄に戻す
   useEffect(() => {
     if (state.phase === "failed") setText(state.sentText);
   }, [state.phase, state.sentText]);
 
-  const submit = useCallback(
-    async (value: string) => {
-      const t = value.trim();
-      if (!t) return;
-      // 終わったら知らせる（タブが裏にあるときのブラウザの通知）。頼んだ操作に合わせて1度だけ許可を聞く
-      askNoticePermission();
-      generationRef.current += 1;
-      setText("");
-      dispatch({ type: "submit", text: t });
-      try {
-        const { ask } = await api.createAsk(t);
-        dispatch({ type: "accepted", ask });
-      } catch (e) {
-        dispatch({ type: "error", message: describeError(e) });
-      }
-    },
-    [],
-  );
-
-  const answer = useCallback(
-    async (a: { choiceId: string } | { text: string }) => {
-      if (!state.askId) return;
-      dispatch({ type: "answered" });
-      try {
-        await api.answerAsk(state.askId, a);
-      } catch (e) {
-        dispatch({ type: "error", message: describeError(e) });
-      }
-    },
-    [state.askId],
-  );
+  const submit = (value: string) => {
+    if (send(value)) setText("");
+  };
 
   const disabled = killSwitchEngaged || !online;
   const idle = state.phase === "idle" || state.phase === "failed";
