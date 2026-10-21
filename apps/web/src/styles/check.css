@@ -563,3 +563,58 @@
   position: absolute;
   inset: -2px 0;
 }
+
+/* 見てほしいものシート（ヘッダーの件数の印から開く）。スマホは下から、広い画面は右から */
+.check-sheet {
+  max-height: 88dvh;
+  overflow: hidden;
+}
+.check-sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.check-sheet-head .sheet-title:focus {
+  outline: none;
+}
+.check-sheet-count {
+  font-weight: 400;
+  color: var(--muted);
+}
+.check-sheet-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.check-sheet-empty {
+  margin: 12px 0;
+}
+.check-sheet-all {
+  flex: none;
+}
+/* 0件のときの入口は控えめに */
+.appheader-check.is-quiet {
+  color: var(--muted);
+}
+@media (min-width: 768px) {
+  .check-sheet {
+    inset: 0 0 0 auto;
+    left: auto;
+    width: 420px;
+    max-width: 100vw;
+    max-height: none;
+    margin: 0;
+    border-radius: 24px 0 0 24px;
+    padding-top: calc(env(safe-area-inset-top) + 16px);
+    animation: check-sheet-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+  .check-sheet .sheet-grip {
+    display: none;
+  }
+}
+@keyframes check-sheet-in {
+  from {
+    transform: translateX(100%);
+  }
+}

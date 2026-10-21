@@ -1,5 +1,5 @@
 // AppHeader：左は ≡（メニュー：依頼・チェック・エージェント・パック）、真ん中はひとつ上へ戻る矢印（行き先は lib/screen.ts の backOf。入口自体では出さない）。
-// 右は見てほしいものがあるときだけ、件数の印つきのチェックへの入口（チェックの画面自身では出さない）。無いときは左と同じ幅の空きにして、真ん中を中央に保つ。
+// 右は「見てほしいもの」シートを開くボタン（件数の印つき。0件のときは控えめに出す）。チェックの画面自身では出さず、左と同じ幅の空きにして真ん中を中央に保つ。
 // 全部止めている間は帯で知らせる。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AskSummary } from "../api";
@@ -10,6 +10,7 @@ import { Link, useRoute } from "../lib/router";
 import { trapTab } from "../ui/trapTab";
 import { connectHref } from "./GoogleCalendarLine";
 import { GithubMenuSection } from "./GithubLine";
+import { CheckSheet } from "./CheckSheet";
 import { RestartSheet } from "./RestartSheet";
 import { AgentsIcon, BackIcon, CalendarIcon, CheckIcon, Chevron, CloseIcon, ComposeIcon, MenuIcon, PacksIcon, TasksIcon } from "../ui/icons";
 import { useWorkspace } from "../workspace";
@@ -20,6 +21,8 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
   const attention = counts?.attention ?? 0;
   const [menuOpen, setMenuOpen] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const checkBtnRef = useRef<HTMLButtonElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
   const headerRef = useRef<HTMLElement>(null);
   const appOf = () => headerRef.current?.closest<HTMLElement>(".app") ?? null;
@@ -29,6 +32,28 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
     const app = appOf();
     if (app) app.inert = false;
     menuBtnRef.current?.focus();
+  }, []);
+
+  // 画面を移ったら見てほしいものシートを閉じる（/check に入ったときもここで閉じる）
+  useEffect(() => {
+    setSheetOpen(false);
+  }, [route]);
+  // シートが開いている間も背後を外す
+  useEffect(() => {
+    if (!sheetOpen) return;
+    const app = appOf();
+    if (!app) return;
+    app.inert = true;
+    return () => {
+      app.inert = false;
+    };
+  }, [sheetOpen]);
+  const closeSheet = useCallback(() => {
+    setSheetOpen(false);
+    // inert のままだとフォーカスが戻らないので、先に外す
+    const app = appOf();
+    if (app) app.inert = false;
+    checkBtnRef.current?.focus();
   }, []);
 
   // メニューが開いている間、背後（header と main）を Tab・クリック・読み上げから外す。メニュー自体は body に出す
@@ -64,13 +89,23 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
             </Link>
           )}
         </div>
-        {attention > 0 && route.name !== "check" ? (
-          <Link to="/check" className="icon-btn appheader-check" aria-label={`見てほしいもの ${attention}件`}>
+        {route.name !== "check" ? (
+          <button
+            type="button"
+            ref={checkBtnRef}
+            className={attention > 0 ? "icon-btn appheader-check" : "icon-btn appheader-check is-quiet"}
+            aria-label={attention > 0 ? `見てほしいもの ${attention}件` : "見てほしいもの"}
+            aria-haspopup="dialog"
+            aria-expanded={sheetOpen}
+            onClick={() => setSheetOpen((v) => !v)}
+          >
             <CheckIcon size={22} />
-            <span className={counts?.hasApproval ? "appheader-badge is-gate" : "appheader-badge"} aria-hidden="true">
-              {attention > 99 ? "99+" : attention}
-            </span>
-          </Link>
+            {attention > 0 && (
+              <span className={counts?.hasApproval ? "appheader-badge is-gate" : "appheader-badge"} aria-hidden="true">
+                {attention > 99 ? "99+" : attention}
+              </span>
+            )}
+          </button>
         ) : (
           <span className="appheader-spacer" aria-hidden="true" />
         )}
@@ -86,6 +121,7 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
         </p>
       )}
       {menuOpen && createPortal(<Menu attention={counts?.attention ?? 0} onClose={closeMenu} onRestart={() => setRestartOpen(true)} />, document.body)}
+      {sheetOpen && createPortal(<CheckSheet onClose={closeSheet} />, document.body)}
       {restartOpen && <RestartSheet onClose={() => setRestartOpen(false)} />}
     </>
   );
