@@ -3,7 +3,7 @@
 import type { Db, SessionCtx, TaskRow, Uuid } from "@open-team/db";
 import { insertAsk, insertAskMember } from "@open-team/db/app";
 import { getTask } from "@open-team/db/edge";
-import { getAsk, getLatestLiveRun, insertAskMessage, insertAskTask, insertLiveRun, listMembers, listRunTasks } from "@open-team/db/asks";
+import { getAsk, getLatestLiveRun, insertAskMessage, insertAskTask, insertLiveRun, insertPendingReply, listMembers, listPendingReplies, listRunTasks } from "@open-team/db/asks";
 import { useTestDb } from "@open-team/db/testing";
 import { LlmError, ScriptedLlmClient, type ScriptedResponder } from "@open-team/llm";
 import type { AgentDefinitionInput } from "@open-team/kernel";
@@ -12,7 +12,7 @@ import { seedAgent, startRehearsalWorld, T0, type RehearsalWorld, type SeededAge
 import { composeRunAnswer, storedAnswerView } from "./answer.ts";
 import { createFollowupsAfterTerminal } from "./followup.ts";
 import { asksOnTaskSettled, asksOnTasksTerminated, runAsksTick, STALE_TASK_MS } from "./hooks.ts";
-import { resumeAsk, resetAskStopForTest, settleDrivingRuns, settleFollowups, startAskRun, startWhenRoom, stopStartingAskTasks, type AskRunDeps } from "./run.ts";
+import { queueReply, resumeAsk, resetAskStopForTest, settleDrivingRuns, settleFollowups, startAskRun, startQueuedReply, startWhenRoom, stopStartingAskTasks, type AskRunDeps } from "./run.ts";
 import { buildAskDetail, listMessages } from "./view.ts";
 
 const T = useTestDb();
@@ -326,6 +326,73 @@ describe("返事（API-077）と履歴（turns）", () => {
     expect(detail.answer?.conclusion).toBe("Bの結果");
     // 返事の実行の段は、動いた窓口だけを出す（A を「待っています」と見せない）
     expect(detail.stages.map((s) => [s.agentName, s.state])).toEqual([["B", "done"]]);
+  });
+});
+
+describe("順番待ちの返事（動いている間の返事）", () => {
+  it("動いている間の返事は順番待ちになり、終わると自動で返事の実行が始まる（本文は返事の文として窓口に渡る）", async () => {
+    const { w, ask } = await setup("chain", ["A", "B"]);
+    const { llm, seen } = script({ A: "report", B: "report" });
+    const deps = runDeps(w, llm);
+    const first = (await startAskRun(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" }))!;
+    // 実行はまだ動いている：返事は順番待ち
+    const queued = await queueReply(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, text: "もう少し詳しく" });
+    expect(queued).not.toBeNull();
+    const detailBefore = (await buildAskDetail(w.db, w.ws.ctx, ask.id))!;
+    expect(detailBefore.pendingReplies.map((x) => x.text)).toEqual(["もう少し詳しく"]);
+    await first.done;
+    await settleDrivingRuns(10_000);
+
+    expect(await listPendingReplies(w.db, w.ws.ctx, ask.id)).toEqual([]);
+    const detail = (await buildAskDetail(w.db, w.ws.ctx, ask.id))!;
+    expect(detail.pendingReplies).toEqual([]);
+    expect(detail.turns.map((t) => [t.runNo, t.kind, t.text, t.status])).toEqual([
+      [1, "ask", "依頼の文", "done"],
+      [2, "reply", "もう少し詳しく", "done"],
+    ]);
+    expect(seen.get("B")).toHaveLength(2);
+    expect(seen.get("B")![1]).toContain("もう少し詳しく");
+    const audits = await w.db.query<{ event_type: string }>("SELECT event_type FROM audit_logs WHERE workspace_id = $1 AND event_type LIKE 'ask.reply.%' ORDER BY seq", [w.ws.workspaceId]);
+    expect(audits.rows.map((x) => x.event_type)).toEqual(["ask.reply.queued", "ask.reply.started"]);
+  });
+
+  it("動いている実行がなければ順番待ちに入れない（null）。複数たまったら古い順に1つずつ始まる", async () => {
+    const { w, ask } = await setup("chain", ["A", "B"]);
+    const { llm, seen } = script({ A: "report", B: "report" });
+    const deps = runDeps(w, llm);
+    await (await startAskRun(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" }))!.done;
+    expect(await queueReply(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, text: "x" })).toBeNull();
+
+    const second = (await startAskRun(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "manual", reply: "二回目" }))!;
+    await queueReply(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, text: "三回目" });
+    await queueReply(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, text: "四回目" });
+    await second.done;
+    await settleDrivingRuns(10_000);
+    const detail = (await buildAskDetail(w.db, w.ws.ctx, ask.id))!;
+    expect(detail.turns.map((t) => [t.runNo, t.text])).toEqual([
+      [1, "依頼の文"],
+      [2, "二回目"],
+      [3, "三回目"],
+      [4, "四回目"],
+    ]);
+    expect(detail.pendingReplies).toEqual([]);
+    expect(seen.get("B")).toHaveLength(4);
+  });
+
+  it("二重に始まらない：直接の呼び出しと tick が同時に来ても、1つの返事は1回の実行になる（取りこぼしを拾う）", async () => {
+    const { w, ask } = await setup("chain", ["A", "B"]);
+    const { llm } = script({ A: "report", B: "report" });
+    const deps = runDeps(w, llm);
+    await (await startAskRun(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" }))!.done;
+    // 取りこぼし：実行は終わっているのに返事が残っている
+    await w.db.transaction((tx) => insertPendingReply(tx, w.ws.ctx, ask.id, { text: "取りこぼし", requesterId: w.ws.userId, now: T0 }));
+    const started = await Promise.all([startQueuedReply(deps, w.ws.ctx, ask.id), startQueuedReply(deps, w.ws.ctx, ask.id), runAsksTick(deps, new Date(T0.getTime() + 60_000))]);
+    await Promise.all(started.flatMap((r) => (r !== null && "done" in r ? [r.done] : [])));
+    await settleDrivingRuns(10_000);
+    const runs = await w.db.query<{ run_no: number }>("SELECT run_no FROM ask_runs WHERE ask_id = $1 AND mode = 'live' ORDER BY run_no", [ask.id]);
+    expect(runs.rows.map((x) => x.run_no)).toEqual([1, 2]);
+    expect(await listPendingReplies(w.db, w.ws.ctx, ask.id)).toEqual([]);
+    expect((await buildAskDetail(w.db, w.ws.ctx, ask.id))!.turns.map((t) => t.text)).toEqual(["依頼の文", "取りこぼし"]);
   });
 });
 

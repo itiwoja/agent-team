@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AskDetail, AskTurnView } from "../api";
-import { noAnswerText, showsRequest, turnLabel, turnsOf } from "./turns";
+import { noAnswerText, pendingReplyLabel, replyAvailability, replySentNote, showsRequest, turnLabel, turnsOf } from "./turns";
 
 const turn = (over: Partial<AskTurnView>): AskTurnView => ({
   runId: "r1",
@@ -45,5 +45,25 @@ describe("頼んだことの行", () => {
     expect(noAnswerText("done")).toBeNull();
     expect(noAnswerText("failed")).toBe("回答はありません（止まりました）");
     expect(noAnswerText("waiting_input")).toBe("途中で止まっています");
+  });
+});
+
+describe("返事欄の出し方", () => {
+  const detailOf = (over: { shape?: string; status?: string; turns?: AskTurnView[] }) =>
+    ({ ask: { text: "在庫を見て発注して", shape: over.shape ?? "single", status: over.status ?? "done" }, run: null, answer: null, turns: over.turns ?? [turn({})] }) as unknown as Pick<AskDetail, "ask" | "run" | "answer" | "turns">;
+  it("回答が出た後は出す。動いている間も出す（順番待ちになる）", () => {
+    expect(replyAvailability(detailOf({}))).toEqual({ show: true, queues: false });
+    expect(replyAvailability(detailOf({ status: "running", turns: [turn({ status: "running" })] }))).toEqual({ show: true, queues: true });
+  });
+  it("並列・生成中・失敗・やめた・再開待ち・実行がまだないときは出さない", () => {
+    expect(replyAvailability(detailOf({ shape: "parallel" })).show).toBe(false);
+    for (const status of ["generating", "failed", "cancelled", "waiting_input"]) expect(replyAvailability(detailOf({ status })).show).toBe(false);
+    expect(replyAvailability(detailOf({ turns: [] })).show).toBe(false);
+  });
+  it("順番待ちの文と送った後の知らせ", () => {
+    expect(pendingReplyLabel("もう少し詳しく")).toBe("順番待ち：もう少し詳しく");
+    expect(replySentNote({ queued: true })).toMatch(/順番待ち/);
+    expect(replySentNote({})).toBeNull();
+    expect(replySentNote(undefined)).toBeNull();
   });
 });

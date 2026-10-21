@@ -634,6 +634,12 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+/* 順番待ちの返事：まだ始まっていないので、面を塗らず枠線だけにする */
+.turn-queued .turn-ask-text {
+  background: var(--surface);
+  color: var(--text);
+  border: 1px dashed var(--line);
+}
 .turn-none {
   margin: 0;
   font-size: 14px;

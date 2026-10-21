@@ -335,6 +335,10 @@ export const AgentQuestionViewSchema = z.object({
 });
 export type AgentQuestionView = z.infer<typeof AgentQuestionViewSchema>;
 
+/** 順番待ちの返事（動いている間に送った返事。実行が終わると古い順に始まる）。本文は伏せ字にしたあとのもの */
+export const PendingReplyViewSchema = z.object({ id: Uuid, text: z.string(), createdAt: Iso });
+export type PendingReplyView = z.infer<typeof PendingReplyViewSchema>;
+
 /** API-075：SCR-021 の表示用ビュー */
 export const AskDetailResponseSchema = z.object({
   ask: AskSummarySchema,
@@ -355,6 +359,8 @@ export const AskDetailResponseSchema = z.object({
   pendingIntents: z.array(PendingIntentViewSchema),
   /** 担当が答えを待っている質問（ask_user。まだ答えていないものだけ） */
   agentQuestions: z.array(AgentQuestionViewSchema),
+  /** 順番待ちの返事（まだ始まっていないもの。古い順） */
+  pendingReplies: z.array(PendingReplyViewSchema),
   rehearsal: AskRehearsalViewSchema.nullable(),
   /** 順番の失敗のとき：[やり直す] [ここまでで終える] を出す（API-074）。止まった担当の名前と理由 */
   resume: z.object({ agentName: z.string(), reason: z.string() }).nullable(),
@@ -369,7 +375,11 @@ export const ListAsksResponseSchema = z.object({ asks: z.array(AskSummarySchema)
 export type ListAsksResponse = z.infer<typeof ListAsksResponseSchema>;
 
 /** API-072（201）・073（200）・077（202）の応答：依頼。生成・実行の結果は SSE で届く */
-export const AskAcceptedResponseSchema = z.object({ ask: AskSummarySchema });
+export const AskAcceptedResponseSchema = z.object({
+  ask: AskSummarySchema,
+  /** API-077 のみ：動いている間の返事は順番待ちになった（true）。終わると自動で始まる */
+  queued: z.boolean().optional(),
+});
 export type AskAcceptedResponse = z.infer<typeof AskAcceptedResponseSchema>;
 
 /** API-074 の応答 */
@@ -409,6 +419,7 @@ export const ASK_EVENT_TYPES = [
   "ask.answer.updated",
   "ask.message.posted",
   "ask.agent_question",
+  "ask.reply.queue",
 ] as const;
 export type AskEventType = (typeof ASK_EVENT_TYPES)[number];
 
@@ -425,4 +436,6 @@ export type AskEventData =
   | { type: "ask.answer.updated"; askId: string; runId: string; answer: AskAnswerView }
   | { type: "ask.message.posted"; askId: string; message: AskMessageView }
   /** 担当からの質問が出た（posted）・答えた（answered）・待ちを終えた（expired） */
-  | { type: "ask.agent_question"; askId: string; questionId: string; status: "posted" | "answered" | "expired" };
+  | { type: "ask.agent_question"; askId: string; questionId: string; status: "posted" | "answered" | "expired" }
+  /** 順番待ちの返事が入った（queued）・始まった（started）。画面は取り直して会話の末尾を直す */
+  | { type: "ask.reply.queue"; askId: string; replyId: string; status: "queued" | "started" };

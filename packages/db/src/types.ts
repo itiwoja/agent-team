@@ -382,6 +382,17 @@ export interface PackInstallRow {
   created_at: Date;
 }
 
+/** ask_pending_replies（0020）：順番待ちの返事（動いている間に送った返事。実行が終わったら古い順に始める） */
+export interface AskPendingReplyRow {
+  id: Uuid;
+  workspace_id: Uuid;
+  ask_id: Uuid;
+  text: string;
+  requester_id: Uuid;
+  created_at: Date;
+  consumed_at: Date | null;
+}
+
 /** agent_questions（0011）：動いている担当から利用者への質問（ask_user） */
 export interface AgentQuestionRow {
   id: Uuid;
@@ -1165,6 +1176,7 @@ export const WORKSPACE_TABLES = [
   "usage_records",
   "ask_messages",
   "agent_questions",
+  "ask_pending_replies",
   "sandbox_sessions",
   "sandbox_commands",
   "agent_workspace_snapshots",

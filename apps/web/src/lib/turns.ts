@@ -50,3 +50,28 @@ export function noAnswerText(status: AskTurnView["status"]): string | null {
       return null;
   }
 }
+
+/**
+ * 返事欄（追加で頼む）の出し方。会話の下に常に出す。動いている間も送れる（順番待ちになる）。
+ * 出さないのは、並列（窓口がいない）・依頼がまだ動いていない／止まった（生成中・失敗・やめた・途中で止まって再開待ち）とき
+ */
+export function replyAvailability(detail: Pick<AskDetail, "ask" | "run" | "answer" | "turns">): { show: boolean; queues: boolean } {
+  const { ask } = detail;
+  if (ask.shape === "parallel") return { show: false, queues: false };
+  if (ask.status !== "running" && ask.status !== "done") return { show: false, queues: false };
+  const turns = turnsOf(detail);
+  if (turns.length === 0) return { show: false, queues: false };
+  // 今の実行が動いている間に送ると順番待ちになる
+  const latest = turns[turns.length - 1]!;
+  return { show: true, queues: latest.status === "running" || latest.status === "waiting_input" || ask.status === "running" };
+}
+
+/** 順番待ちの返事の1行（会話の末尾に出す） */
+export function pendingReplyLabel(text: string): string {
+  return `順番待ち：${text}`;
+}
+
+/** 返事を送った結果の1行（順番待ちに入ったときだけ知らせる。すぐ始まったときは会話にそのまま出るので不要） */
+export function replySentNote(res: { queued?: boolean } | null | undefined): string | null {
+  return res?.queued === true ? "順番待ちに入れました。いまの作業が終わると始まります" : null;
+}

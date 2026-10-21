@@ -18,7 +18,7 @@ import {
 import { acceptAsk, answerAskQuestion, maskUserText } from "../asks/create.ts";
 import { answerQuestion } from "../asks/agent-questions.ts";
 import { askSummary } from "../asks/format.ts";
-import { resumeAsk, startAskRun } from "../asks/run.ts";
+import { queueReply, resumeAsk, startAskRun } from "../asks/run.ts";
 import { buildAskDetail, listAskSummaries, listMessages } from "../asks/view.ts";
 import { idParam, readJsonBody, readQuery, requireRole, sessionOf } from "../http.ts";
 import { runIdempotent } from "../idempotency.ts";
@@ -90,17 +90,30 @@ export function askRoutes(r: ApiRouter, deps: AppDeps, over: Partial<AskRouteDep
       throw new AppError("VALIDATION_ERROR", "並列の依頼には返事できません。入口でもう一度頼んでください", { details: [{ field: "askId", reason: "窓口がありません" }] });
     }
     if (ask.status !== "running" && ask.status !== "done") throw new AppError("ASK_NOT_WAITING");
-    const previous = await getLatestLiveRun(deps.db, s, askId);
-    const started = await startAskRun(d, s, askId, {
-      requesterId: s.userId,
-      trigger: "manual",
-      reply: maskUserText(body.text),
-      ...(previous?.answer_task_id == null ? {} : { replyOf: previous.answer_task_id }),
-    });
-    if (started === null) throw new AppError("TASK_NOT_RUNNABLE", "動いている間は返事できません。終わってからもう一度送ってください");
-    void started.done;
-    const fresh = (await getAsk(deps.db, s, askId)) ?? ask;
-    return c.json({ ask: askSummary(fresh, { members: await listMembers(deps.db, s, askId) }) } satisfies AskAcceptedResponse, 202);
+    const text = maskUserText(body.text);
+    // 動いている実行（または先の順番待ち）があれば順番待ちに入れる（終わると自動で始まる）。なければそのまま始める。
+    // 始めようとした間に別の実行が始まっていたら、もう一度（順番待ちに入れる）
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const queued = await queueReply(d, s, askId, { requesterId: s.userId, text });
+      if (queued !== null) {
+        void queued.kick;
+        const fresh = (await getAsk(deps.db, s, askId)) ?? ask;
+        return c.json({ ask: askSummary(fresh, { members: await listMembers(deps.db, s, askId) }), queued: true } satisfies AskAcceptedResponse, 202);
+      }
+      const previous = await getLatestLiveRun(deps.db, s, askId);
+      const started = await startAskRun(d, s, askId, {
+        requesterId: s.userId,
+        trigger: "manual",
+        reply: text,
+        ...(previous?.answer_task_id == null ? {} : { replyOf: previous.answer_task_id }),
+      });
+      if (started !== null) {
+        void started.done;
+        const fresh = (await getAsk(deps.db, s, askId)) ?? ask;
+        return c.json({ ask: askSummary(fresh, { members: await listMembers(deps.db, s, askId) }) } satisfies AskAcceptedResponse, 202);
+      }
+    }
+    throw new AppError("TASK_NOT_RUNNABLE", "いま返事を受けられません。少し待ってからもう一度送ってください");
   });
 
   // 担当から利用者への質問（ask_user）に答える。待っている担当がそのまま受け取って続ける（もう待っていなければ 409）

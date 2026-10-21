@@ -308,6 +308,8 @@ const EVENT_LABEL: Record<string, string> = {
   "ask.answered": "依頼の答え",
   "ask.answer.updated": "答えの更新",
   "ask.resumed": "依頼の再開",
+  "ask.reply.queued": "返事の順番待ち",
+  "ask.reply.started": "順番待ちの返事の開始",
   "ask.message.posted": "チームへの伝言",
   "ask.message.rejected": "伝言の差し止め",
   "agent.created": "エージェントの作成",
@@ -448,6 +450,10 @@ function summarizeKnown(type: string, p: Payload): string | null {
       return "依頼の答えを直した";
     case "ask.resumed":
       return p.action === "retry" ? "止まった担当をやり直した" : p.action === "finish" ? "止まったところで依頼を終えた" : "止まった依頼を進めた";
+    case "ask.reply.queued":
+      return "返事を順番待ちに入れた";
+    case "ask.reply.started":
+      return "順番待ちの返事で依頼を動かした";
     case "ask.message.posted":
       return join(["チームに伝えた", label(TEAM_MESSAGE, p.kind)]);
     case "ask.message.rejected":

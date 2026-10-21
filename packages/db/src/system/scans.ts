@@ -161,6 +161,25 @@ export async function scanActiveAskRuns(q: Queryable, limit = 50): Promise<Array
   return r.rows.map((x) => ({ workspaceId: x.workspace_id, workspaceKind: x.kind, id: x.id, askId: x.ask_id, createdBy: x.created_by }));
 }
 
+/**
+ * 順番待ちの返事があって、動いている実行がない依頼（実行が終わったあとの取りこぼし・再起動の後の拾い直し）。
+ * 依頼が running・done のものだけ。Kill Switch・削除予約は除く。古い返事が先
+ */
+export async function scanAsksWithPendingReplies(q: Queryable, limit = 50): Promise<Array<ScanHit & { askId: Uuid }>> {
+  const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; ask_id: Uuid }>(
+    `SELECT p.workspace_id, w.kind, p.ask_id
+       FROM ask_pending_replies p
+       JOIN asks a ON a.workspace_id = p.workspace_id AND a.id = p.ask_id
+       JOIN workspaces w ON w.id = p.workspace_id
+      WHERE p.consumed_at IS NULL AND a.status IN ('running','done') AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM ask_runs r WHERE r.workspace_id = p.workspace_id AND r.ask_id = p.ask_id AND r.mode = 'live' AND r.status IN ('running','waiting_input'))
+      GROUP BY p.workspace_id, w.kind, p.ask_id
+      ORDER BY min(p.created_at) LIMIT $1`,
+    [limit],
+  );
+  return r.rows.map((x) => ({ workspaceId: x.workspace_id, workspaceKind: x.kind, id: x.ask_id, askId: x.ask_id }));
+}
+
 /** tick が拾った依頼の実行に、拾った時刻を付ける（次の走査で後回しにするため：scanActiveAskRuns） */
 export async function markAskRunsScanned(q: Queryable, runIds: readonly Uuid[], now: Date): Promise<void> {
   if (runIds.length === 0) return;

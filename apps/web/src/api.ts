@@ -396,6 +396,19 @@ export interface PackView {
   installedAt: string | null;
 }
 
+/** 順番待ちの返事（asks/contract.ts の PendingReplyView） */
+export interface PendingReplyView {
+  id: string;
+  text: string;
+  createdAt: string;
+}
+
+/** API-077 の応答。queued が true なら順番待ち（動いている実行が終わると自動で始まる） */
+export interface ReplyAskResponse {
+  ask: AskSummary;
+  queued?: boolean;
+}
+
 export interface AskDetail {
   ask: AskSummary;
   formation: FormationView | null;
@@ -404,6 +417,8 @@ export interface AskDetail {
   answerPending: { spokespersonName: string | null } | null;
   /** 担当が答えを待っている質問（古いサーバーの応答にはない） */
   agentQuestions?: AgentQuestionView[];
+  /** 順番待ちの返事（動いている間に送ったもの。古い順。古いサーバーの応答にはない） */
+  pendingReplies?: PendingReplyView[];
   /** 頼んだこと → 回答 の履歴（古い順。最後が run・answer と同じ今の実行。古いサーバーの応答にはない） */
   turns?: AskTurnView[];
   stages: StageView[];
@@ -925,6 +940,7 @@ const EVENT_TYPES = [
   "ask.answer.updated",
   "ask.message.posted",
   "ask.agent_question",
+  "ask.reply.queue",
   "rehearsal.scenario",
   "rehearsal.run",
   "rehearsal.phase",
@@ -1026,7 +1042,7 @@ export const api = {
   /** API-076 */
   askMessages: (askId: string) => request<{ messages: AskMessageView[] }>("GET", `/asks/${askId}/messages`),
   /** API-077 */
-  replyAsk: (askId: string, text: string) => request<unknown>("POST", `/asks/${askId}/reply`, { body: { text } }),
+  replyAsk: (askId: string, text: string) => request<ReplyAskResponse>("POST", `/asks/${askId}/reply`, { body: { text } }),
   answerAgentQuestion: (askId: string, questionId: string, body: { choiceId?: string; text?: string }) =>
     request<unknown>("POST", `/asks/${askId}/questions/${questionId}/answer`, { body }),
 

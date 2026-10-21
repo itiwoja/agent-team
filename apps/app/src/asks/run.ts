@@ -21,7 +21,7 @@ import {
   type WsCtx,
 } from "@open-team/db";
 import { countActiveLiveTasks, getAgentRow, getTask } from "@open-team/db/edge";
-import { claimQueuedTask, expireQuestionsOfTask, getAsk, getPreviousReportTask, getAskRun, getLatestLiveRun, insertAskTask, insertLiveRun, listMembers, listRunTasks, markFirstMemberStarted, transitionAsk, transitionRun } from "@open-team/db/asks";
+import { claimQueuedTask, expireQuestionsOfTask, getAsk, getPreviousReportTask, getAskRun, getLatestLiveRun, hasActiveLiveRun, insertAskTask, insertLiveRun, insertPendingReply, listMembers, markPendingReplyConsumed, peekPendingReply, listRunTasks, markFirstMemberStarted, transitionAsk, transitionRun } from "@open-team/db/asks";
 import { SPEND_LIMITS, canStartWork, createEdge, failTask, haltTask, issueTaskToken, replyWebUrlHashes, userTextWebUrlHashes, type EdgeDeps, type EdgeHooks } from "@open-team/edge";
 import { taintFromInputs } from "@open-team/kernel";
 import { runTask } from "@open-team/runner";
@@ -542,6 +542,8 @@ export function driveRun(deps: AskRunDeps, ctx: WsCtx, runId: Uuid, o: { request
       await Promise.allSettled(inFlight.values());
       driving.delete(runId);
     }
+    // 順番待ちの返事があれば、次の実行として始める（動かせないときは何もしない。取りこぼしは tick が拾う）
+    if (!stopping) await startQueuedReplyAfter(deps, ctx, runId);
   })();
   return state.promise;
 }
@@ -550,6 +552,25 @@ export interface StartRunResult {
   run: AskRunRow;
   /** 実行が落ち着くまで（動かすタスクがなくなるまで）。呼び出し側は待たなくてよい（試験は待つ） */
   done: Promise<void>;
+}
+
+/** 実行を始めるトランザクションの中身（ワークスペースの行ロックの中で）。動いている実行があれば null。Kill Switch 発動中は 423 */
+async function beginRunTx(tx: Tx, ctx: WsCtx, askId: Uuid, trigger: AskRunTrigger, now: Date): Promise<AskRunRow | null> {
+  const ws = await lockWorkspace(tx, ctx);
+  if (ws === null) throw new AppError("NOT_FOUND");
+  if (ws.kill_switch_engaged) throw new AppError("KILL_SWITCH_ENGAGED");
+  const ask = await getAsk(tx, ctx, askId);
+  if (ask === null) throw new AppError("NOT_FOUND");
+  if (ask.status !== "running" && ask.status !== "done") return null;
+  const r = await insertLiveRun(tx, ctx, askId, trigger, now);
+  if (r === null) return null;
+  await appendAuditLog(tx, ctx.workspaceId, { eventType: "ask.run.started", actorType: "system", actorId: "asks", payload: { askId, askRunId: r.id, runNo: r.run_no, trigger } }, now);
+  if (ask.status === "done") {
+    // 終わった依頼に返事・手動で動かすとき：もう一度動かす
+    const moved = await transitionAsk(tx, ctx, askId, ["done"], "running", now);
+    if (moved !== null) await emitAskEvent(tx, ctx, { type: "ask.status", askId, status: "running" }, now);
+  }
+  return r;
 }
 
 /**
@@ -563,31 +584,78 @@ export async function startAskRun(
   o: { requesterId: Uuid; trigger: AskRunTrigger; reply?: string; replyOf?: Uuid },
 ): Promise<StartRunResult | null> {
   const now = deps.clock.now();
-  const run = await deps.db.transaction(async (tx) => {
-    const ws = await lockWorkspace(tx, ctx);
-    if (ws === null) throw new AppError("NOT_FOUND");
-    if (ws.kill_switch_engaged) throw new AppError("KILL_SWITCH_ENGAGED");
-    const ask = await getAsk(tx, ctx, askId);
-    if (ask === null) throw new AppError("NOT_FOUND");
-    if (ask.status !== "running" && ask.status !== "done") return null;
-    const r = await insertLiveRun(tx, ctx, askId, o.trigger, now);
-    if (r === null) return null;
-    await appendAuditLog(
-      tx,
-      ctx.workspaceId,
-      { eventType: "ask.run.started", actorType: "system", actorId: "asks", payload: { askId, askRunId: r.id, runNo: r.run_no, trigger: o.trigger } },
-      now,
-    );
-    if (ask.status === "done") {
-      // 終わった依頼に返事・手動で動かすとき：もう一度動かす
-      const moved = await transitionAsk(tx, ctx, askId, ["done"], "running", now);
-      if (moved !== null) await emitAskEvent(tx, ctx, { type: "ask.status", askId, status: "running" }, now);
-    }
-    return r;
-  });
+  const run = await deps.db.transaction((tx) => beginRunTx(tx, ctx, askId, o.trigger, now));
   if (run === null) return null;
   const done = driveRun(deps, ctx, run.id, { requesterId: o.requesterId, ...(o.reply === undefined ? {} : { reply: o.reply }), ...(o.replyOf === undefined ? {} : { replyOf: o.replyOf }) });
   return { run, done };
+}
+
+// ---- 順番待ちの返事（動いている間に送った返事。終わったら古い順に1つずつ始める） ----
+
+/**
+ * 返事を順番待ちに入れる。ワークスペースの行ロックの中で「動いている実行がある、または先に待っている返事がある」ことを確かめてから入れる
+ * （確かめと入れるのの間に実行が終わって取りこぼすのを防ぐ。実行の終わりも同じロックの中。先の返事を追い越さない）。
+ * どちらもなければ入れず null（呼び出し側がそのまま始める）。
+ * 動いている実行がなく先の返事だけが残っているとき（tick 待ち）は、すぐ始めるよう促す（kick）
+ */
+export async function queueReply(deps: AskRunDeps, ctx: WsCtx, askId: Uuid, o: { requesterId: Uuid; text: string }): Promise<{ replyId: Uuid; kick: Promise<void> } | null> {
+  const now = deps.clock.now();
+  const queued = await deps.db.transaction(async (tx) => {
+    const ws = await lockWorkspace(tx, ctx);
+    if (ws === null) throw new AppError("NOT_FOUND");
+    if (ws.kill_switch_engaged) throw new AppError("KILL_SWITCH_ENGAGED");
+    if (!(await hasActiveLiveRun(tx, ctx, askId)) && (await peekPendingReply(tx, ctx, askId)) === null) return null;
+    const row = await insertPendingReply(tx, ctx, askId, { text: o.text, requesterId: o.requesterId, now });
+    await appendAuditLog(tx, ctx.workspaceId, { eventType: "ask.reply.queued", actorType: "user", actorId: o.requesterId, payload: { askId, replyId: row.id } }, now);
+    await emitAskEvent(tx, ctx, { type: "ask.reply.queue", askId, replyId: row.id, status: "queued" }, now);
+    return row.id;
+  });
+  if (queued === null) return null;
+  const kick = startQueuedReply(deps, ctx, askId)
+    .then((r) => r?.done)
+    .catch((error) => deps.log.warn("ask.queued_reply_failed", "順番待ちの返事を始められなかった", { workspaceId: ctx.workspaceId, askId, error }));
+  return { replyId: queued, kick: kick.then(() => undefined) };
+}
+
+/**
+ * 順番待ちのいちばん古い返事で、返事の実行を始める（動いている実行がある・待ちがない・始められない依頼なら null）。
+ * 実行を作るのと消化の印は同じトランザクション（二重に始めない：insertLiveRun が動いている実行で null、印は未消化のときだけ付く）
+ */
+export async function startQueuedReply(deps: AskRunDeps, ctx: WsCtx, askId: Uuid): Promise<StartRunResult | null> {
+  const now = deps.clock.now();
+  const begun = await deps.db.transaction(async (tx) => {
+    const ws = await lockWorkspace(tx, ctx);
+    if (ws === null || ws.kill_switch_engaged) return null;
+    const pending = await peekPendingReply(tx, ctx, askId);
+    if (pending === null) return null;
+    // 直前の実行の回答（返事の元）。実行を作る前に読む
+    const previous = await getLatestLiveRun(tx, ctx, askId);
+    const run = await beginRunTx(tx, ctx, askId, "manual", now);
+    if (run === null) return null;
+    if (!(await markPendingReplyConsumed(tx, ctx, pending.id, now))) throw new Error("順番待ちの返事を消化できなかった");
+    await appendAuditLog(tx, ctx.workspaceId, { eventType: "ask.reply.started", actorType: "system", actorId: "asks", payload: { askId, askRunId: run.id, replyId: pending.id } }, now);
+    await emitAskEvent(tx, ctx, { type: "ask.reply.queue", askId, replyId: pending.id, status: "started" }, now);
+    return { run, pending, replyOf: previous?.answer_task_id ?? null };
+  });
+  if (begun === null) return null;
+  const done = driveRun(deps, ctx, begun.run.id, {
+    requesterId: begun.pending.requester_id as Uuid,
+    reply: begun.pending.text,
+    ...(begun.replyOf === null ? {} : { replyOf: begun.replyOf as Uuid }),
+  });
+  return { run: begun.run, done };
+}
+
+/** 実行が終わったあと、順番待ちの返事があれば始めて、その実行が落ち着くまで待つ（例外は投げずログに残す） */
+async function startQueuedReplyAfter(deps: AskRunDeps, ctx: WsCtx, runId: Uuid): Promise<void> {
+  try {
+    const run = await getAskRun(deps.db, ctx, runId);
+    if (run === null) return;
+    const started = await startQueuedReply(deps, ctx, run.ask_id as Uuid);
+    if (started !== null) await started.done;
+  } catch (error) {
+    deps.log.warn("ask.queued_reply_failed", "順番待ちの返事を始められなかった", { workspaceId: ctx.workspaceId, askRunId: runId, error });
+  }
 }
 
 /** 動いている実行の続きを進める（tick・承認の確定・取りこぼしの拾い直し。冪等）。動いている実行がなければ何もしない */

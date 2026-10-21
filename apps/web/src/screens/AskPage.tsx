@@ -11,7 +11,7 @@ import { SkeletonCards } from "../components/Skeleton";
 import { RehearsalSection } from "../components/Rehearsal";
 import { FIRST_VISIT_NOTE, FIRST_VISIT_SELF, formatTime, PREPARED_NOTE } from "../lib/format";
 import { noticeHeadline, noticeLead } from "../lib/notice";
-import { noAnswerText, showsRequest, turnLabel, turnsOf } from "../lib/turns";
+import { noAnswerText, pendingReplyLabel, replyAvailability, replySentNote, showsRequest, turnLabel, turnsOf } from "../lib/turns";
 import { moodOfStage } from "../lib/avatar";
 import { activityMark, stageClock } from "../lib/progress";
 import { dependencies, isWorking, stageLabel, teamCounts } from "../lib/teamActivity";
@@ -299,8 +299,10 @@ function Conversation({ detail, approvals, onReply, blocked }: { detail: AskDeta
   // 回答の主（窓口。並列・Kernel が書いた回答はまとめ役か最初の担当）
   const reporterOf = (a: AskAnswerView | null): string =>
     a?.spokesperson?.agentName ?? detail.stages.find((st) => st.isAggregator)?.agentName ?? detail.stages[0]?.agentName ?? "担当";
-  // 並列の依頼には窓口がいないので返事できない（API-077 は 400）。回答が出てから受け付ける
-  const canReply = latest?.answer !== null && latest !== null && detail.ask.shape !== "parallel";
+  // 返事欄は会話の下に常に出す（並列・生成中・止まったときを除く）。動いている間に送ると順番待ちになる
+  const reply = replyAvailability(detail);
+  const canReply = reply.show;
+  const pendingReplies = detail.pendingReplies ?? [];
   return (
     <section className="block thread" id="answer" aria-label="頼んだことと回答">
       {turns.length === 0 && <PendingCard name={spokesperson} status="running" />}
@@ -310,10 +312,24 @@ function Conversation({ detail, approvals, onReply, blocked }: { detail: AskDeta
       {(detail.agentQuestions ?? []).map((q) => (
         <AgentQuestionCard key={q.questionId} askId={detail.ask.id} q={q} onAnswered={onReply} blocked={blocked} />
       ))}
-      {canReply && latest?.answer && detail.ask.status !== "running" && (latest.answer.nextActions?.length ?? 0) > 0 && (
+      {canReply && latest?.answer && detail.ask.status !== "running" && pendingReplies.length === 0 && (latest.answer.nextActions?.length ?? 0) > 0 && (
         <NextActions askId={detail.ask.id} actions={latest.answer.nextActions ?? []} onReply={onReply} blocked={blocked} />
       )}
-      {canReply && <ReplyForm askId={detail.ask.id} onReply={onReply} blocked={blocked} />}
+      {pendingReplies.map((p) => (
+        <div key={p.id} className="turn turn-queued">
+          <div className="turn-ask">
+            <p className="turn-ask-meta">
+              <span className="turn-ask-who">あなた</span>
+              <span>
+                {" · "}
+                <time dateTime={p.createdAt}>{formatTime(p.createdAt)}</time>
+              </span>
+            </p>
+            <p className="turn-ask-text">{pendingReplyLabel(p.text)}</p>
+          </div>
+        </div>
+      ))}
+      {canReply && <ReplyForm askId={detail.ask.id} onReply={onReply} blocked={blocked} queues={reply.queues} />}
     </section>
   );
 }
@@ -555,8 +571,9 @@ function NextActions({ askId, actions, onReply, blocked }: { askId: string; acti
 }
 
 /** 追加で頼む（API-077）。送ると窓口がもう一度動き、履歴に1往復増える */
-function ReplyForm({ askId, onReply, blocked }: { askId: string; onReply: () => void; blocked: boolean }) {
+function ReplyForm({ askId, onReply, blocked, queues }: { askId: string; onReply: () => void; blocked: boolean; queues: boolean }) {
   const [text, setText] = useState("");
+  const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   return (
@@ -568,10 +585,12 @@ function ReplyForm({ askId, onReply, blocked }: { askId: string; onReply: () => 
           if (!text.trim() || busy || blocked) return;
           setBusy(true);
           setError(null);
+          setNote(null);
           api
             .replyAsk(askId, text.trim())
-            .then(() => {
+            .then((res) => {
               setText("");
+              setNote(replySentNote(res));
               onReply();
             })
             .catch((err: unknown) => setError(describeError(err)))
@@ -581,11 +600,16 @@ function ReplyForm({ askId, onReply, blocked }: { askId: string; onReply: () => 
         <label htmlFor="reply" className="sr-only">
           追加で頼むこと
         </label>
-        <input id="reply" placeholder="追加で頼む" value={text} maxLength={2000} disabled={busy || blocked} onChange={(e) => setText(e.target.value)} />
+        <input id="reply" placeholder={queues ? "追加で頼む（いまの作業のあとに始まります）" : "追加で頼む"} value={text} maxLength={2000} disabled={busy || blocked} onChange={(e) => setText(e.target.value)} />
         <button type="submit" className="btn btn-primary" disabled={blocked || !text.trim() || busy}>
           {busy ? "送っています…" : "送る"}
         </button>
       </form>
+      {note && (
+        <p className="muted" role="status">
+          {note}
+        </p>
+      )}
       {error && (
         <p className="error" role="alert">
           {error}

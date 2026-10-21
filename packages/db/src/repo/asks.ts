@@ -10,6 +10,7 @@ import type {
   AgentRow,
   AgentSnapshotRow,
   AskFailureReason,
+  AskPendingReplyRow,
   AskMemberRow,
   AskRow,
   AskRunRow,
@@ -804,4 +805,45 @@ export async function expireAgentQuestion(q: Queryable, ctx: WsCtx, questionId: 
 export async function expireQuestionsOfTask(q: Queryable, ctx: WsCtx, taskId: Uuid): Promise<number> {
   const r = await q.query("UPDATE agent_questions SET status = 'expired' WHERE workspace_id = $1 AND task_id = $2 AND status = 'open'", [ctx.workspaceId, taskId]);
   return r.rowCount;
+}
+
+// ---- 順番待ちの返事（0020。動いている間に送った返事を、実行が終わってから古い順に1つずつ始める） ----
+
+/** 順番待ちに入れる（呼ぶ側がワークスペースの行ロックの中で、動いている実行があることを確かめてから） */
+export async function insertPendingReply(tx: Tx, ctx: WsCtx, askId: Uuid, v: { text: string; requesterId: Uuid; now: Date }): Promise<AskPendingReplyRow> {
+  return one<AskPendingReplyRow>(
+    tx,
+    `INSERT INTO ask_pending_replies (workspace_id, ask_id, text, requester_id, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [ctx.workspaceId, askId, v.text, v.requesterId, v.now],
+  );
+}
+
+/** 未消化の順番待ちの返事（古い順） */
+export async function listPendingReplies(q: Queryable, ctx: WsCtx, askId: Uuid): Promise<AskPendingReplyRow[]> {
+  const r = await q.query<AskPendingReplyRow>(
+    "SELECT * FROM ask_pending_replies WHERE workspace_id = $1 AND ask_id = $2 AND consumed_at IS NULL ORDER BY created_at, id",
+    [ctx.workspaceId, askId],
+  );
+  return r.rows;
+}
+
+/** いちばん古い未消化の返事（消化はしない。ワークスペースの行ロックの中で、実行を始められたあとに markPendingReplyConsumed で印を付ける） */
+export async function peekPendingReply(q: Queryable, ctx: WsCtx, askId: Uuid): Promise<AskPendingReplyRow | null> {
+  return maybe<AskPendingReplyRow>(
+    q,
+    "SELECT * FROM ask_pending_replies WHERE workspace_id = $1 AND ask_id = $2 AND consumed_at IS NULL ORDER BY created_at, id LIMIT 1",
+    [ctx.workspaceId, askId],
+  );
+}
+
+/** 消化の印を付ける（未消化のときだけ。付けられなければ false＝ほかが先に始めた） */
+export async function markPendingReplyConsumed(tx: Tx, ctx: WsCtx, replyId: Uuid, now: Date): Promise<boolean> {
+  const r = await tx.query("UPDATE ask_pending_replies SET consumed_at = $3 WHERE workspace_id = $1 AND id = $2 AND consumed_at IS NULL", [ctx.workspaceId, replyId, now]);
+  return r.rowCount > 0;
+}
+
+/** 動いている本番の実行があるか（running・waiting_input。insertLiveRun と同じ判定） */
+export async function hasActiveLiveRun(q: Queryable, ctx: WsCtx, askId: Uuid): Promise<boolean> {
+  const r = await q.query("SELECT 1 FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND mode = 'live' AND status IN ('running','waiting_input') LIMIT 1", [ctx.workspaceId, askId]);
+  return r.rowCount > 0;
 }

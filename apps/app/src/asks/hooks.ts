@@ -14,7 +14,7 @@ import type { AppDeps, TasksTerminatedHook, TickStep } from "../deps.ts";
 import { nextScheduledRun } from "../schedule.ts";
 import { emitAskEvent } from "./events.ts";
 import { FAILURE_MESSAGES } from "./planner.ts";
-import { advanceAsk, advanceTx, cancelRunsOfHaltedTasks, driveRun, emitStepFinished, startAskRun } from "./run.ts";
+import { advanceAsk, advanceTx, cancelRunsOfHaltedTasks, driveRun, emitStepFinished, startAskRun, startQueuedReply } from "./run.ts";
 
 export const asksOnTasksTerminated: TasksTerminatedHook = async (tx, ctx, e) => {
   await cancelRunsOfHaltedTasks(tx, ctx, e.tasks, e.now);
@@ -119,6 +119,20 @@ export async function runAsksTick(deps: TickDeps, now: Date): Promise<{ schedule
     const ctx = wsCtxOf({ id: hit.workspaceId, kind: hit.workspaceKind });
     void driveRun(deps, ctx, hit.id as Uuid, { requesterId: hit.createdBy });
     dispatched += 1;
+  }
+
+  // 順番待ちの返事の拾い直し（実行が終わったあとの取りこぼし・再起動の後）。始めるのは裏で続け、tick は待たない
+  for (const hit of await system.scanAsksWithPendingReplies(deps.db, ASK_RUNS_PER_TICK)) {
+    const ctx = wsCtxOf({ id: hit.workspaceId, kind: hit.workspaceKind });
+    try {
+      const started = await startQueuedReply(deps, ctx, hit.askId);
+      if (started !== null) {
+        dispatched += 1;
+        void started.done;
+      }
+    } catch (error) {
+      deps.log.warn("asks.queued_reply_failed", "順番待ちの返事を始められなかった", { workspaceId: hit.workspaceId, askId: hit.askId, error });
+    }
   }
   return { scheduled, dispatched };
 }

@@ -96,6 +96,7 @@ export async function fullWorkspace(db: Db, kind: "guest" | "owner"): Promise<Fx
      SELECT $1, $2, $3, t.id, t.agent_id, '担当', 'どちらにしますか', '[{"id":"c1","label":"A"}]' FROM tasks t WHERE t.id = $4`,
     [W, askId, askRunId, t1.taskId],
   );
+  await db.query("INSERT INTO ask_pending_replies (workspace_id, ask_id, text, requester_id) VALUES ($1, $2, '順番待ちの返事', $3)", [W, askId, ws.userId]);
   await db.query("INSERT INTO workspace_events (workspace_id, type, data) VALUES ($1, 'check.upsert', '{}')", [W]);
   await db.query("INSERT INTO check_marks (workspace_id, item_key) VALUES ($1, $2)", [W, `answer:${askRunId}`]);
   // タスクが見た URL の集合（0016。SG-04）
