@@ -1,5 +1,5 @@
 // 全画面共通の「頼む」：入口以外の画面で、右下の「＋ 頼む」から開く入力欄のシート。
-// 送ると useAskGeneration で生成し、編成ができたら依頼のページへ移る（移る処理は呼び出し側＝Screens）。
+// 送ると useAskGeneration で生成し、入口と同じたまご→担当が生まれる見せ方（GenStage）のあと、依頼のページへ移る（移る処理は呼び出し側＝Screens）。
 // 書きかけの文は入口と同じ（lib/draft.ts）
 import { useEffect, useId, useRef, useState, type FormEvent } from "react";
 import type { GenState } from "../lib/generation";
@@ -8,6 +8,7 @@ import type { AskGeneration } from "../lib/useAskGeneration";
 import { useRestoreFocus } from "../lib/useRestoreFocus";
 import { ArrowUpIcon } from "../ui/icons";
 import { trapTab } from "../ui/trapTab";
+import { Egg, GenFormation } from "./GenStage";
 
 export function AskComposerSheet({ gen, onAskPage, disabled, onClose }: { gen: AskGeneration; onAskPage: boolean; disabled: boolean; onClose: () => void }) {
   const { state } = gen;
@@ -102,24 +103,17 @@ function Progress({ state, onAnswer }: { state: GenState; onAnswer: AskGeneratio
   return (
     <div aria-live="polite" className="ask-sheet-progress">
       {state.phase === "generating" && (
-        <>
-          <p>エージェント生成中…</p>
+        <div className="gen ask-sheet-gen">
+          <Egg />
+          <p className="ask-sheet-gen-title">エージェント生成中…</p>
           {state.slow && <p className="muted">まだ考えています</p>}
-        </>
+        </div>
       )}
       {state.phase === "question" && state.question && <SheetQuestion q={state.question} onAnswer={onAnswer} />}
       {state.phase === "shown" && (
         <>
-          <p>エージェントができました</p>
-          <ul className="ask-sheet-members">
-            {state.members.map((m) => (
-              <li key={m.key}>
-                <strong>{m.agentName}</strong>
-                <span className="muted">：{m.summary}</span>
-              </li>
-            ))}
-          </ul>
-          <p className="muted">依頼のページへ移ります</p>
+          <GenFormation state={state} heading="h2" />
+          <p className="muted ask-sheet-next">依頼のページへ移ります</p>
         </>
       )}
     </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { AskEvent, AskSummary, FormationView } from "../api";
-import { askCreatedAfterGiveUp, generationReducer as reduce, initialGen, TIMEOUT_FAILURE, isGenerationEvent, type GenAction, type GenState } from "./generation";
+import { ENTER_ASK_HOLD_MS, askCreatedAfterGiveUp, enterAskDelay, generationReducer as reduce, initialGen, TIMEOUT_FAILURE, isGenerationEvent, type GenAction, type GenState } from "./generation";
 
 const ask = (over: Partial<AskSummary> = {}): AskSummary => ({
   id: "a1",
@@ -121,5 +121,15 @@ describe("askCreatedAfterGiveUp", () => {
       throw new Error("404");
     };
     expect(await askCreatedAfterGiveUp("a1", fetchAsk)).toBeNull();
+  });
+});
+
+describe("enterAskDelay", () => {
+  it("担当が全員生まれ終わってから、読む間をおいて移る（人数が多いほど長く待つ）", () => {
+    // 最後の担当の av-pop（(n-1)*0.35s + 0.1s + 0.55s）と編成の1行の gen-in（n*0.35s + 0.4s）が終わるまで
+    for (const n of [1, 3, 6]) {
+      expect(enterAskDelay(n)).toBeGreaterThanOrEqual(n * 350 + 400 + ENTER_ASK_HOLD_MS);
+    }
+    expect(enterAskDelay(6)).toBeGreaterThan(enterAskDelay(3));
   });
 });

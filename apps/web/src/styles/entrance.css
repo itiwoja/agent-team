@@ -366,7 +366,14 @@
 .ask-sheet-progress p {
   margin: 0;
 }
-.ask-sheet-members {
-  margin: 0;
-  padding-left: 18px;
+.ask-sheet-gen {
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+}
+.ask-sheet-gen-title {
+  font-weight: 600;
+}
+.ask-sheet-next {
+  text-align: center;
 }

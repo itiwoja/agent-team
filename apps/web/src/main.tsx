@@ -8,7 +8,7 @@ import { JUDGE_TOKEN_NOTE } from "./lib/format";
 import { installHistory, Link, navigate, takePendingScroll, useRoute, type Route } from "./lib/router";
 import { restoreWhenTall } from "./lib/scrollMemory";
 import { backOf, titleOf } from "./lib/screen";
-import { ENTER_ASK_MS } from "./lib/generation";
+import { enterAskDelay } from "./lib/generation";
 import { useAskGeneration } from "./lib/useAskGeneration";
 import { composeTitle, useScreenTitleOverride } from "./lib/title";
 import { useViewportHeight } from "./lib/viewport";
@@ -233,19 +233,25 @@ function Screens() {
   // 画面を移ったらシートは閉じる（生成は続く）
   useEffect(() => setAskSheetOpen(false), [screenKey]);
 
-  // 編成ができたら、少し見せて依頼のページへ移る。作れなかった・質問が来たときは、閉じていてもシートを開く
-  const { phase, askId } = gen.state;
+  // 編成ができたら、担当が生まれるのを見せてから依頼のページへ移る。作れなかった・質問が来た・編成ができたときは、閉じていてもシートを開く
+  const { phase, askId, members } = gen.state;
   const { reset } = gen;
+  const memberCount = members.length;
   useEffect(() => {
     if (phase !== "shown" || !askId) return;
     const id = setTimeout(() => {
       navigate(`/asks/${askId}`);
       reset();
-    }, ENTER_ASK_MS);
+    }, enterAskDelay(memberCount));
     return () => clearTimeout(id);
-  }, [phase, askId, reset]);
+  }, [phase, askId, memberCount, reset]);
+  // 編成を押して先に依頼のページへ移ったら、待たずに終える（同じページを履歴に重ねない）
+  const onFormedAsk = phase === "shown" && route.name === "ask" && route.askId === askId;
   useEffect(() => {
-    if (phase === "failed" || phase === "question") setAskSheetOpen(true);
+    if (onFormedAsk) reset();
+  }, [onFormedAsk, reset]);
+  useEffect(() => {
+    if (phase === "failed" || phase === "question" || phase === "shown") setAskSheetOpen(true);
   }, [phase]);
 
   // 画面を移ったら main にフォーカスを移す（スクリーンリーダーに移ったことを伝える）。最初の描画では動かさない
