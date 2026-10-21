@@ -924,6 +924,7 @@ const EVENT_TYPES = [
   "ask.answered",
   "ask.answer.updated",
   "ask.message.posted",
+  "ask.agent_question",
   "rehearsal.scenario",
   "rehearsal.run",
   "rehearsal.phase",

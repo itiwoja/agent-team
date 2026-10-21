@@ -408,6 +408,7 @@ export const ASK_EVENT_TYPES = [
   "ask.answered",
   "ask.answer.updated",
   "ask.message.posted",
+  "ask.agent_question",
 ] as const;
 export type AskEventType = (typeof ASK_EVENT_TYPES)[number];
 
