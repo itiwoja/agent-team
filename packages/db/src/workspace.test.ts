@@ -44,7 +44,7 @@ describe("オーナーのワークスペース（D-05、G-08 の DB の部分）
   });
 });
 
-describe("ワークスペースの種類（0024）", () => {
+describe("ワークスペースの種類（0025）", () => {
   it("kind は owner だけ。2つ目のオーナー・削除予約・シードの版は作れない", async () => {
     const { db } = T();
     const a = await ensureOwnerWorkspace(db, { now: NOW });

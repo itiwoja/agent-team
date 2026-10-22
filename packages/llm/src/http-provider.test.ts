@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { HttpProviderClient, createLlmClient } from "./http-provider.ts";
-import { readLlmEnv, type LlmConfig, type LlmProvider } from "./provider-config.ts";
+import { PROVIDER_BASE_URLS, readLlmEnv, type LlmConfig, type LlmProvider } from "./provider-config.ts";
 import { LlmError, type LlmRequest } from "./types.ts";
 import { GeminiClient } from "./gemini.ts";
 import { withRetry } from "./retry.ts";
@@ -119,6 +119,20 @@ describe("provider contracts (no real API)", () => {
       expect(sent(f).max_completion_tokens).toBe(1024);
     }
     expect(c.estimateMicroUsd(req())).toBeGreaterThan(result.usage.costMicroUsd);
+  });
+  it.each(["openai", "groq", "custom"] as const)("%s calls its OpenAI-compatible endpoint with a Bearer key", async provider => {
+    const f = transport(openai());
+    const cfg = { ...config(provider), ...(provider === "custom" ? { baseUrl: "http://localhost:11434/v1/" } : {}) };
+    await new HttpProviderClient(cfg, { fetch: f }).generate(req());
+    expect(f.mock.calls[0]![0]).toBe(provider === "custom" ? "http://localhost:11434/v1/chat/completions" : `${PROVIDER_BASE_URLS[provider]}/chat/completions`);
+    expect(f.mock.calls[0]![1]!.headers).toMatchObject({ authorization: "Bearer test-secret-never-real" });
+  });
+  it("ignores baseUrl for named providers and re-checks the custom endpoint", () => {
+    const f = transport(openai());
+    expect(() => new HttpProviderClient({ ...config("custom"), baseUrl: "http://example.com/v1" }, { fetch: f })).toThrow(/LLM_BASE_URL/);
+    expect(() => new HttpProviderClient(config("custom"), { fetch: f })).toThrow(/LLM_BASE_URL/);
+    expect(new HttpProviderClient({ ...config("openai"), baseUrl: "https://evil.example/v1" }, { fetch: f }).modelIdentity("test-model")).toBe(
+      new HttpProviderClient(config("openai"), { fetch: f }).modelIdentity("test-model"));
   });
   it.each(["deepseek", "anthropic"] as const)("%s expands MCP calls and roundtrips IDs/results without gaining permissions", async provider => {
     const r = req({ tools: [{ name: "mcp_call", description: "MCP", inputSchema: {} }], mcpTools: [{ connector: "calendar", tool: "list", description: "List", classification: "read", inputSchema: { type: "object" } }] });

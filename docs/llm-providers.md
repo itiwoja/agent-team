@@ -8,8 +8,36 @@ Makase の担当編成・受け渡し・ツールの権限・承認・予算判�
 | `anthropic`（Claude） | Claude Messages（`https://api.anthropic.com/v1/messages` 固定） | `ANTHROPIC_API_KEY` |
 | `deepseek` | DeepSeek Chat Completions（`https://api.deepseek.com` 固定） | `DEEPSEEK_API_KEY` |
 | `openrouter` | OpenRouter Chat Completions（`https://openrouter.ai/api/v1` 固定） | `OPENROUTER_API_KEY` |
+| `openai` | OpenAI Chat Completions（`https://api.openai.com/v1` 固定） | `OPENAI_API_KEY` |
+| `xai` | xAI（Grok）（`https://api.x.ai/v1` 固定） | `XAI_API_KEY` |
+| `groq` | Groq（`https://api.groq.com/openai/v1` 固定） | `GROQ_API_KEY` |
+| `mistral` | Mistral（`https://api.mistral.ai/v1` 固定） | `MISTRAL_API_KEY` |
+| `together` | Together AI（`https://api.together.xyz/v1` 固定） | `TOGETHER_API_KEY` |
+| `fireworks` | Fireworks AI（`https://api.fireworks.ai/inference/v1` 固定） | `FIREWORKS_API_KEY` |
+| `cerebras` | Cerebras（`https://api.cerebras.ai/v1` 固定） | `CEREBRAS_API_KEY` |
+| `moonshot` | Moonshot（Kimi）（`https://api.moonshot.ai/v1` 固定） | `MOONSHOT_API_KEY` |
+| `zai` | Z.ai（GLM）（`https://api.z.ai/api/paas/v4` 固定） | `ZAI_API_KEY` |
+| `qwen` | Alibaba Cloud Model Studio（Qwen、国際版）（`https://dashscope-intl.aliyuncs.com/compatible-mode/v1` 固定） | `DASHSCOPE_API_KEY` |
+| `custom` | 上にない OpenAI 互換 API（`LLM_BASE_URL` で指定） | `LLM_API_KEY` |
 
-接続先は固定です。利用者が変えられる接続先の設定はありません（キーの送り先を限るため）。`openai` と `openai-compatible` は廃止しました。
+名前のある提供元の接続先は固定です（キーの送り先を限るため。`LLM_BASE_URL` を設定しても無視します）。一覧にない API キーは `custom` で使えます。`openai-compatible` は `custom` に置き換えました。
+
+### 一覧にない API（custom）
+
+OpenAI 互換の Chat Completions（`POST {LLM_BASE_URL}/chat/completions`、`Authorization: Bearer`）を受ける API なら、キーの種類を問わず使えます。ローカルの Ollama・LM Studio・vLLM なども対象です。
+
+```dotenv
+LLM_PROVIDER=custom
+LLM_BASE_URL=https://api.example.com/v1
+LLM_API_KEY=
+LLM_MODEL_AGENT=YOUR_MODEL_ID
+LLM_MODELS_JSON={"YOUR_MODEL_ID":{"inputPerMTokMicroUsd":1000000,"outputPerMTokMicroUsd":2000000,"tools":true,"structuredOutput":"tool","temperature":true,"reasoningEffort":false,"maxOutputTokens":8192,"contextWindow":128000}}
+```
+
+- `LLM_BASE_URL` は `https://` のみ。手元のサーバー（`localhost`・`127.0.0.1`・`[::1]`）だけ `http://` も使えます。ユーザー名・パスワード・クエリ（`?key=…`）・`#` を含む URL は拒否します（キーを URL に混ぜないため）。末尾の `/` は外します。
+- キーを使わないローカルサーバーでも `LLM_API_KEY` は必須です。任意のダミー値を入れてください。
+- 接続先は運用者がサーバーの設定で決めます。キーは指定した接続先に送られるため、信頼できる接続先だけを設定してください。
+- Gemini 以外で OpenAI 互換ではない独自形式の API（Cohere の独自 API など）は対象外です。各社が OpenAI 互換の入口を用意していればそちらを指定してください。
 
 既存のGemini設定は引き続き使えます。Gemini以外のキーを `GEMINI_API_KEY` に入れないでください。選択プロバイダーのキーだけを使用します。キーはブラウザや作業場に渡しません。ログは既知のキー・APIキーパターン・認証ヘッダーをマスクします。APIエラー本文はプロンプトやキーを含み得るため表示しません。
 
@@ -24,7 +52,7 @@ GEMINI_API_KEY=
 
 モデル省略時は従来の既定値です。既存の料金表にないGeminiモデルは拒否します。料金表の更新なしで未知モデルを無料扱いすることはありません。
 
-## Claude / DeepSeek / OpenRouter
+## Claude と OpenAI 互換の提供元
 
 `LLM_MODEL_AGENT` は必須。`LLM_MODEL_PLANNER` を省略すると同じモデルを使います。モデルIDはAPIが受け付ける正確なIDです。モデル名の前方一致や他社の価格表へのフォールバックはしません。比較用モデルは `LLM_MODELS_COMPARE` にカンマ区切りで指定できます。
 
@@ -38,7 +66,7 @@ LLM_MODEL_PLANNER=YOUR_MODEL_ID
 LLM_MODELS_JSON={"YOUR_MODEL_ID":{"inputPerMTokMicroUsd":2000000,"outputPerMTokMicroUsd":10000000,"tools":true,"structuredOutput":"tool","temperature":true,"reasoningEffort":false,"maxOutputTokens":8192,"contextWindow":200000}}
 ```
 
-DeepSeek と OpenRouter は、キーと対応モデルID・プロファイルを設定します。どちらも OpenAI 互換の Chat Completions 形式で、上限は `max_tokens` で送ります（`tokenLimitParameter` の既定）。
+DeepSeek・OpenRouter などの OpenAI 互換の提供元（`custom` を含む）は、キーと対応モデルID・プロファイルを設定します。どれも Chat Completions 形式で、上限は `max_tokens` で送ります（`tokenLimitParameter` の既定）。OpenAI の推論モデルなど `max_completion_tokens` を求めるモデルは、プロファイルで `"tokenLimitParameter":"max_completion_tokens"` を明示してください。下の DeepSeek・OpenRouter 以外も `LLM_PROVIDER` とキーの名前を表のとおりに替えれば同じ形で設定できます。
 
 ```dotenv
 LLM_PROVIDER=deepseek
@@ -58,7 +86,7 @@ LLM_MODELS_JSON={"vendor/YOUR_MODEL_ID":{"inputPerMTokMicroUsd":2000000,"outputP
 
 上の DeepSeek・OpenRouter の値も架空の例です。モデルIDは各サービスが受け付ける正確な文字列（OpenRouter は `ベンダー/モデル` 形式）にし、料金は公式の単価で置き換えてください。
 
-OpenAI互換の2社は、固定の接続先（`https://api.deepseek.com`、`https://openrouter.ai/api/v1`）の `/chat/completions` を呼びます。Claude は `https://api.anthropic.com/v1/messages` を呼びます。リダイレクトには追従しません。任意の接続先を設定する仕組みはありません（以前の `openai-compatible` と `OPENAI_COMPATIBLE_BASE_URL` は廃止）。
+OpenAI互換の提供元は、表の固定の接続先（`custom` は `LLM_BASE_URL`）の `/chat/completions` を呼びます。Claude は `https://api.anthropic.com/v1/messages` を呼びます。リダイレクトには追従しません。
 
 ## モデルプロファイル
 
@@ -91,10 +119,10 @@ Haiku 5.5は2026-10-19確認の[公式モデル資料](https://platform.claude.c
 | `structuredOutput` | `tool`：出力専用の関数を強制し、引数をJSONテキストへ変換。`json_schema`：APIのネイティブJSON Schema出力。`none`：非対応 |
 | `temperature` | temperature指定に対応するか。要求されるのにfalseなら通信前に拒否 |
 | `anthropicMode` | 任意。`haiku55-no-thinking` はClaude APIのHaiku 5.5専用。アプリのtemperatureヒントを明示的に省略し、thinking disabled、effort low（lowヒント時）またはmediumで送信。high要求は拒否 |
-| `reasoningEffort` | OpenAI互換（DeepSeek・OpenRouter）で `reasoning_effort` のlow/high指定に対応するか。既定false |
+| `reasoningEffort` | OpenAI互換（DeepSeek・OpenRouter など）で `reasoning_effort` のlow/high指定に対応するか。既定false |
 | `maxOutputTokens` | 対応する出力トークン上限 |
 | `contextWindow` | コンテキスト上限。要求本文のUTF-8バイト数＋4096の余裕＋出力上限で保守的にチェック |
-| `tokenLimitParameter` | OpenAI互換の上限パラメーター。既定 `max_tokens`（DeepSeek・OpenRouter）。`max_completion_tokens` を使うモデルだけ明示 |
+| `tokenLimitParameter` | OpenAI互換の上限パラメーター。既定 `max_tokens`。`max_completion_tokens` を使うモデル（OpenAI の推論モデルなど）だけ明示 |
 
 料金はプロバイダー・モデル・利用するコンテキスト長における**上限単価**を設定します。段階料金がある場合は利用範囲の最大単価、思考の別料金がある場合は出力単価に最大値を設定してください。自動で最新料金を取得するものではありません。設定誤りによる過少見積もりを防ぐため、運用者が料金改定時に更新してください。ゼロ・負数・不足設定は拒否します。無料のローカルモデルでも正の保守的な予算単価を設定します。
 

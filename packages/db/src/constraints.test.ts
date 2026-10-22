@@ -352,7 +352,7 @@ describe("T-14・T-21・T-22：Intent・承認。M-07・M-16・M-20", () => {
 });
 
 describe("コネクタ・ツール（MT §3.12.4）", () => {
-  it("kind は mcp_remote だけ（0023 で sim をやめた）。needs_review は pending つきか、消えた印の NULL", async () => {
+  it("kind は mcp_remote だけ（0024 で sim をやめた）。needs_review は pending つきか、消えた印の NULL", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db);
     await expectCheck(

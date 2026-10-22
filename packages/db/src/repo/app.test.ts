@@ -155,7 +155,7 @@ describe("ワークスペースの事象（SSE）", () => {
 });
 
 describe("監査ログの一覧", () => {
-  it("seq の降順・beforeSeq・0023 より前の影の行の除外（payload.enforced = false）・hasMore", async () => {
+  it("seq の降順・beforeSeq・0024 より前の影の行の除外（payload.enforced = false）・hasMore", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db, { audit: true });
     await db.transaction(async (tx) => {

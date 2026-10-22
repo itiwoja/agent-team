@@ -324,7 +324,7 @@ export async function listAuditLogs(q: Queryable, ctx: WsCtx, f: AuditListFilter
   if (f.to) add((n) => `occurred_at <= $${n}`, f.to);
   if (f.eventTypes && f.eventTypes.length > 0) add((n) => `event_type = ANY($${n}::text[])`, [...f.eventTypes]);
   if (f.taskId) add((n) => `task_id = $${n}`, f.taskId);
-  // 0023 より前の影の走行の行（payload.enforced = false）は出さない
+  // 0024 より前の影の走行の行（payload.enforced = false）は出さない
   where.push("payload->>'enforced' IS DISTINCT FROM 'false'");
   params.push(f.limit + 1);
   const r = await q.query<AuditLogRow>(
