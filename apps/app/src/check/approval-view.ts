@@ -21,31 +21,13 @@ import {
   type Rule,
   type ToolInfo,
 } from "@open-team/kernel";
-import type { ApprovalView, ArgView, Precedent, RememberView } from "./contract.ts";
-import { calendarCardOf, destinationLabel, githubCardOf, intentTitle, openReasonOf, ruleText, taintNoteOf, taintViews, unitOf, valueText } from "./reasons.ts";
+import type { ApprovalView, ArgView, RememberView } from "./contract.ts";
+import { calendarCardOf, githubCardOf, intentTitle, openReasonOf, ruleText, taintNoteOf, taintViews, unitOf, valueText } from "./reasons.ts";
 import { getGoogleConnection } from "@open-team/db";
 import { timeZoneOrDefault } from "../connectors/google.ts";
-import { precedentFor } from "./precedent.ts";
 
 // 同一 buildCheck は同じ q・workspace・now を渡す。カード間で同じ job/action の
 // 集計を共有し、別リクエスト（now が異なる）には結果を持ち越さない。
-const precedentRequests = new WeakMap<object, Map<string, Promise<Precedent | undefined>>>();
-
-function precedentForRequest(d: ApprovalViewDeps, jobId: string, action: string): Promise<Precedent | undefined> {
-  let requests = precedentRequests.get(d.q as object);
-  if (!requests) {
-    requests = new Map();
-    precedentRequests.set(d.q as object, requests);
-  }
-  const key = `${d.ctx.workspaceId}\0${d.now.getTime()}\0${jobId}\0${action}`;
-  let result = requests.get(key);
-  if (!result) {
-    result = precedentFor(d.q, d.ctx, jobId, action);
-    requests.set(key, result);
-  }
-  return result;
-}
-
 /** 値（配列は要素ごと）を単位つきで文字にする */
 function argText(action: string, path: string, value: Json): string {
   const unit = unitOf(action, path);
@@ -55,8 +37,7 @@ function argText(action: string, path: string, value: Json): string {
 
 function argViewOf(action: string, path: ArgPath, args: ApprovalBundle["intent"]["payload"]["arguments"], role: "destination" | "content" | "option"): ArgView {
   const value = extractArg(args, path);
-  const first = Array.isArray(value) ? value[0] : value;
-  return { arg: path, value, label: role === "destination" ? destinationLabel(first) : null, text: argText(action, path, value) };
+  return { arg: path, value, label: null, text: argText(action, path, value) };
 }
 
 /** ツールの確定した引数の役割（ない・読めないときは null。呼び出し側は引数を全部 destination として扱う：BR-56 の安全側） */
@@ -103,13 +84,13 @@ export function fixedHashOf(rule: Pick<Rule, "action" | "match" | "tool_hash">):
 export async function planRemember(q: Queryable, ctx: WsCtx, b: ApprovalBundle, now: Date, newRuleId: () => string): Promise<RememberPlan> {
   const none: RememberPlan = { view: NO_REMEMBER, rule: null, tool: null };
   if (b.approval.status !== "pending" || b.tool === null || b.connector === null) return none;
-  const live = !b.task.is_dry_run && b.task.rehearsal_run_id === null && !b.task.shadow;
+  const live = !b.task.is_dry_run;
   const info = toolInfoOf(b.connector, b.tool);
   let effectiveMcpWrite: "auto" | "approve" | "deny" | "handoff" = "approve";
   let rulesEnabled = false;
   let currentRuleCount = 0;
   try {
-    const p = await loadTaskPolicy(q, ctx, { id: b.task.id, job_id: b.task.job_id, agent_snapshot_id: b.task.agent_snapshot_id, rehearsal_run_id: b.task.rehearsal_run_id });
+    const p = await loadTaskPolicy(q, ctx, { id: b.task.id, job_id: b.task.job_id, agent_snapshot_id: b.task.agent_snapshot_id });
     effectiveMcpWrite = p.policy.autonomy.mcp_write;
     rulesEnabled = p.policy.rules.enabled;
     const snap = await getAgentCurrentSnapshot(q, ctx, b.task.agent_id);
@@ -141,7 +122,7 @@ export async function planRemember(q: Queryable, ctx: WsCtx, b: ApprovalBundle, 
   const fixed: ArgView[] = Object.entries(rule.match).map(([arg, value]) => ({
     arg,
     value,
-    label: argPathsByRole(info.argRoles, "destination").includes(arg) ? destinationLabel(Array.isArray(value) ? value[0] : value) : null,
+    label: null,
     text: argText(b.intent.action, arg, value),
   }));
   const freeCandidates = argPathsByRole(info.argRoles, "option");
@@ -186,7 +167,6 @@ export async function buildApprovalView(d: ApprovalViewDeps, session: Pick<Sessi
       : null;
   const github = githubCardOf(i.action, args as Readonly<Record<string, unknown>>);
   const remember = (await planRemember(d.q, d.ctx, b, d.now, d.newRuleId)).view;
-  const precedent = await precedentForRequest(d, b.task.job_id, i.action);
   const approvers = (
     await d.q.query<{ id: string; name: string | null; login: string }>("SELECT u.id, u.name, u.login FROM users u JOIN memberships m ON m.user_id = u.id WHERE m.workspace_id = $1 AND u.id = ANY($2::uuid[])", [d.ctx.workspaceId, a.approver_ids])
   ).rows.map((u) => ({ id: u.id, name: u.name ?? u.login }));
@@ -217,7 +197,6 @@ export async function buildApprovalView(d: ApprovalViewDeps, session: Pick<Sessi
     rule: { reasonCode: i.reason_code, matchedRule: i.matched_rule, text: ruleText(i.reason_code, i.decision_detail) },
     risk: { level: a.risk_level, reasons: a.risk_reasons.map((r) => ({ code: r.code, points: r.points, detail: r.detail })) },
     remember,
-    precedent,
     decidedAt: a.decided_at?.toISOString() ?? null,
     decisionComment: a.decision_comment,
   };

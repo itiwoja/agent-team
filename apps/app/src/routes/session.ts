@@ -8,7 +8,6 @@ import { z } from "zod";
 import type { AppDeps } from "../deps.ts";
 import type { EntryResponse, SessionSignedIn } from "../check/contract.ts";
 import { enter, enterAsOwner } from "../entry.ts";
-import { preparedAskIdOf } from "../guest-seed.ts";
 import { clearSessionCookie, clientIp, isLoopbackRequest, readJsonBody, sessionOf, setSessionCookie } from "../http.ts";
 import { buildWorkspaceView } from "../workspace-view.ts";
 import { deleteCookie } from "hono/cookie";
@@ -22,8 +21,6 @@ export const EntryBody = z.strictObject({ token: z.string().min(1).max(512) });
 export const LocalEntryBody = z.strictObject({});
 
 /** 入口（SCR-020）に、用意した依頼の知らせを出させる URL（入口は読んだら `/` に戻す） */
-export const preparedEntrance = (askId: string): string => `/?prepared=${encodeURIComponent(askId)}`;
-
 export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
   // EP-01（セッションも CSRF もまだない：T-22）
   r.post(
@@ -37,17 +34,9 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
         existing: c.get("session"),
       });
       if (result.kind === "wrong_token") throw new AppError("UNAUTHORIZED", "入口のトークンが違います");
-      if (result.kind === "guest_limit") {
-        throw new AppError("GUEST_LIMIT_REACHED", undefined, { details: { scope: result.scope } });
-      }
       setSessionCookie(c, deps, result.session.cookieValue);
       c.set("session", null);
-      // ゲストもオーナーも入口（SCR-020）に入る（D-118。D-69 の「用意した依頼のページに直接入る」を改める）。
-      // ゲストには用意した依頼の id を `?prepared=` で渡し、入口が「用意した依頼が待っています」の知らせを出す
-      const res: EntryResponse =
-        result.kind === "guest"
-          ? { state: "signed_in", workspaceKind: "guest", next: preparedEntrance(result.firstAskId), firstAskId: result.firstAskId, created: true }
-          : { state: "signed_in", workspaceKind: "owner", next: "/", firstAskId: null, created: false };
+      const res: EntryResponse = { state: "signed_in", workspaceKind: "owner", next: "/" };
       return c.json(res);
     },
     { auth: "none" },
@@ -70,7 +59,7 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
       });
       setSessionCookie(c, deps, result.session.cookieValue);
       c.set("session", null);
-      const res: EntryResponse = { state: "signed_in", workspaceKind: "owner", next: "/", firstAskId: null, created: false };
+      const res: EntryResponse = { state: "signed_in", workspaceKind: "owner", next: "/" };
       return c.json(res);
     },
     { auth: "none" },
@@ -83,7 +72,7 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
       const s = c.get("session");
       // 入口の画面がトークンなしで入れる（POST /entry/local）
       if (!s) return c.json({ state: "signed_out", localEntry: true });
-      const body: SessionSignedIn = { state: "signed_in", workspaceKind: s.kind, csrfToken: s.csrfToken, firstAskId: await preparedAskIdOf(deps, s) };
+      const body: SessionSignedIn = { state: "signed_in", workspaceKind: s.kind, csrfToken: s.csrfToken };
       return c.json(body);
     },
     { auth: "optional" },

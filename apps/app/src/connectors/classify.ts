@@ -1,5 +1,5 @@
 // コネクタのツールの分類（MT §3.14 の7、16 §3.6）。manifest（slug・ツールの分類・引数の役割）を、
-// gateway の同期で入った connector_tools の行に確定する。owner-setup（sim-world）と Google カレンダーの接続が同じ処理を使う
+// gateway の同期で入った connector_tools の行に確定する。Google カレンダー・GitHub の接続が同じ処理を使う
 // 決めたこと：
 // - needs_review のツールは触らない（持ち主の確認が要る。needsReview に積む）
 // - 引数の役割が入力スキーマと合わなければ ManifestError（呼び出し側が手順の名前をつけて例外にする）

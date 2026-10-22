@@ -1,6 +1,6 @@
 // app を起動する（ローカル）。足りない環境変数があっても起動し「準備中」を返す（D-47）。
 // 準備ができていれば：Kill Switch の見張り（LISTEN ot_kill_switch＋2秒の見回り）・SSE の LISTEN を張り、
-// オーナーの初期投入（G-08。冪等）を後ろで試す（gateway・sim-world がまだ起きていなければ少し待ってやり直す。
+// オーナーの初期投入（G-08。冪等）を後ろで試す（DB がまだ起きていなければ少し待ってやり直す。
 // 手で呼ぶなら POST /internal/setup/owner-workspace）。tick（毎分）とゲストの掃除（毎時）はこのプロセスのタイマーで回す
 
 import { serve } from "@hono/node-server";
@@ -18,10 +18,6 @@ const OWNER_SETUP_RETRY_DELAYS_MS = [5_000, 15_000, 60_000];
 const SHUTDOWN_SETTLE_MS = 5_000;
 
 async function setupOwnerInBackground(deps: AppDeps): Promise<void> {
-  if (!deps.env.gatewayUrl || !deps.env.simWorldUrl) {
-    deps.log.warn("owner_setup.skipped", "GATEWAY_URL・SIM_WORLD_URL がないのでオーナーの初期投入を飛ばした");
-    return;
-  }
   for (let attempt = 0; ; attempt++) {
     try {
       await ensureOwnerWorkspace(deps);

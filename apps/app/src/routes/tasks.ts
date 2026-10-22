@@ -1,7 +1,7 @@
 // API-016：POST /api/v1/tasks/{taskId}/cancel（やっていることの取り消し）。権限は依頼者本人か owner（403）、終了済みは 409 TASK_ALREADY_TERMINATED。
 // 1つのトランザクションで、タスクを cancelled（status_detail = user）・トークン失効・未実行の Intent と待っている承認を expired（task_cancelled）・
 // 監査ログ task.cancelled・SSE の事象を書き、コミットのあと動いているこのインスタンスのタスクを中断する（Kill Switch と同じ登録簿）。
-// 承認の行は消える。試し実行・リハーサル・影のタスクは別の経路（リハーサルの取り消し）なので 404 にする
+// 承認の行は消える。試し実行のタスクは取り消しの対象にしないので 404 にする
 
 import { appendAuditLog, lockWorkspace, type SessionCtx } from "@open-team/db";
 import { endTask, expireOpenIntentsOfTask, insertTaskEvent, lockTask } from "@open-team/db/edge";

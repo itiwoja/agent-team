@@ -5,13 +5,13 @@ import { SHARED_TOKEN, makeTestApp, sendInternal } from "./test-helpers.ts";
 import { runTick } from "./tick.ts";
 
 describe("POST /internal/cron/tick", () => {
-  it("T-151 証明なし ／ sa-gateway → 403、sa-app → 200 と4つの数（手順がなければ全部0）", async () => {
+  it("T-151 証明なし ／ sa-gateway → 403、sa-app → 200 と3つの数（手順がなければ全部0）", async () => {
     const t = makeTestApp(unavailableDb());
     expect((await sendInternal(t, "POST", "/internal/cron/tick", null)).status).toBe(403);
     expect((await sendInternal(t, "POST", "/internal/cron/tick", "sa-gateway")).status).toBe(403);
     const res = await sendInternal(t, "POST", "/internal/cron/tick");
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ dispatched: 0, expiredApprovals: 0, scheduled: 0, reRehearsals: 0 });
+    expect(await res.json()).toEqual({ dispatched: 0, expiredApprovals: 0, scheduled: 0 });
   });
 
   it("拒否はログ internal_auth.denied に理由（応答には出さない）", async () => {
@@ -45,13 +45,13 @@ describe("POST /internal/cron/tick", () => {
             },
           },
           { name: "dispatch", run: async () => (order.push("dispatch"), { dispatched: 3, scheduled: 1 }) },
-          { name: "rehearsal", run: async () => (order.push("rehearsal"), { reRehearsals: 1, dispatched: 1 }) },
+          { name: "dispatch2", run: async () => (order.push("dispatch2"), { dispatched: 1 }) },
         ],
       },
     });
     const res = await sendInternal(t, "POST", "/internal/cron/tick");
-    expect(await res.json()).toEqual({ dispatched: 4, expiredApprovals: 2, scheduled: 1, reRehearsals: 1 });
-    expect(order).toEqual(["expire", "broken", "dispatch", "rehearsal"]);
+    expect(await res.json()).toEqual({ dispatched: 4, expiredApprovals: 2, scheduled: 1 });
+    expect(order).toEqual(["expire", "broken", "dispatch", "dispatch2"]);
     expect(t.logs.find((r) => r.event === "tick.step_failed")).toMatchObject({ severity: "ERROR", step: "broken" });
   });
 

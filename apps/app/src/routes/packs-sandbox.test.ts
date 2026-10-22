@@ -2,10 +2,8 @@
 // - GET /packs・POST /packs/{id}/install：担当・スキル・作業場の最初のファイルができる。2度目は 409。作業場の有無が棚に出る
 // - 依頼から「作る」担当（dev-coder）が生まれ、作業場（HTTP の /sandbox/v1 を通る実行役）で書いて動かし、回答と作ったファイルのダウンロードまで
 import { issueSession } from "@open-team/db";
-import { insertWorkspacePolicyIfMissing } from "@open-team/db/app";
 import { useTestDb } from "@open-team/db/testing";
 import { createRuntime, isTrustedSkill, sandboxEdgeOf, type SandboxProvider } from "@open-team/edge";
-import { defaultWorkspacePolicy, hashCanonical, type JsonObject } from "@open-team/kernel";
 import { DEFAULT_AGENT_MODEL, LlmError, ScriptedLlmClient, type ScriptedResponder } from "@open-team/llm";
 import { httpTransport, readTarGz, runExecutor } from "@open-team/sandbox";
 import { mkdtemp } from "node:fs/promises";
@@ -15,12 +13,12 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AskDetailResponseSchema, type AskSummary } from "../asks/contract.ts";
 import { TRUSTED_SKILLS } from "../packs/catalog.ts";
 import { InstallPackResponseSchema, ListPacksResponseSchema } from "../packs/contract.ts";
-import { T0, startRehearsalWorld, type RehearsalWorld } from "../rehearsal/__fixtures__/world.ts";
-import { jsonReply } from "../rehearsal/test-helpers.ts";
+import { T0, startTestWorld, type TestWorld } from "../__fixtures__/world.ts";
+import { jsonReply } from "../test-helpers.ts";
 import { HOST, makeTestApp, send, type TestApp } from "../test-helpers.ts";
 
 const T = useTestDb();
-let world: RehearsalWorld | null = null;
+let world: TestWorld | null = null;
 afterEach(async () => {
   await world?.close();
   world = null;
@@ -50,7 +48,7 @@ function httpLoopProvider(appRef: { t: TestApp | null }): SandboxProvider & { ru
 }
 
 interface Setup {
-  w: RehearsalWorld;
+  w: TestWorld;
   t: TestApp;
   cookie: string;
   csrf: string;
@@ -61,10 +59,8 @@ interface Setup {
 }
 
 async function setup(o: { planner?: unknown[]; responder?: ScriptedResponder; sandbox?: boolean } = {}): Promise<Setup> {
-  const { db, url } = T();
-  const w = (world = await startRehearsalWorld(db, url));
-  const policy = defaultWorkspacePolicy("owner");
-  await db.transaction((tx) => insertWorkspacePolicyIfMissing(tx, w.ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now: T0 }));
+  const { db } = T();
+  const w = (world = await startTestWorld(db));
   const planner = o.planner ?? [];
   let plannerCalls = 0;
   const plannerPrompts: string[] = [];
@@ -84,7 +80,7 @@ async function setup(o: { planner?: unknown[]; responder?: ScriptedResponder; sa
   const t = makeTestApp(db, {
     deps: {
       gatewayClient: w.gatewayClient,
-      simClient: w.simClient,
+     
       llm,
       sandbox: provider,
       sandboxEdge: sandboxEdgeOf(createRuntime({ db, llm, gateway: w.gatewayClient, retry: { sleep: fast } })),

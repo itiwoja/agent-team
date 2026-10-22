@@ -21,7 +21,7 @@ async function addLogs(db: Db, workspaceId: string, n: number, f: (i: number) =>
   });
 }
 
-type Item = { seq: number; eventType: string; enforced: boolean; hash: string; prevHash: string; occurredAt: string; taskId: string | null; payload: unknown };
+type Item = { seq: number; eventType: string; hash: string; prevHash: string; occurredAt: string; taskId: string | null; payload: unknown };
 const list = async (t: TestApp, a: SignedIn, query = "") => {
   const res = await send(t, "GET", `/api/v1/workspaces/${a.workspaceId}/audit-logs${query}`, { cookie: a.cookie });
   return { status: res.status, body: (await res.json()) as { items: Item[]; nextCursor: string | null } };
@@ -49,7 +49,7 @@ describe("EP-43 一覧", () => {
     expect(seqs).toEqual(Array.from({ length: 45 }, (_, i) => 45 - i));
   });
 
-  it("行の形（hash・prevHash は16進、enforced、payload はそのまま）", async () => {
+  it("行の形（hash・prevHash は16進、payload はそのまま）", async () => {
     const { db } = T();
     const t = makeTestApp(db);
     const a = await signInOwner(t);
@@ -65,7 +65,6 @@ describe("EP-43 一覧", () => {
         payload: { kind: "owner" },
         hash: expect.stringMatching(/^[0-9a-f]{64}$/),
         prevHash: "0".repeat(64),
-        enforced: true,
       },
     ]);
   });
@@ -86,23 +85,6 @@ describe("EP-43 一覧", () => {
     expect(ranged.body.items.map((x) => x.seq)).toEqual([5, 4, 3]);
   });
 
-  it("includeShadow：既定は影の走行の行（payload.enforced = false）を除き、true なら含める（BR-67③）", async () => {
-    const { db } = T();
-    const t = makeTestApp(db);
-    const a = await signInOwner(t);
-    const shadowRow: JsonObject = { enforced: false, decision: "deny" };
-    const liveRow: JsonObject = { decision: "allow" };
-    await addLogs(db, a.workspaceId, 2, (i) => ({ payload: i === 0 ? shadowRow : liveRow }));
-    const def = await list(t, a);
-    expect(def.body.items.map((x) => x.seq)).toEqual([3, 1]);
-    const all = await list(t, a, "?includeShadow=true");
-    expect(all.body.items.map((x) => [x.seq, x.enforced])).toEqual([
-      [3, true],
-      [2, false],
-      [1, true],
-    ]);
-  });
-
   it("カーソルの形が違う ／ 知らないクエリ ／ taskId が uuid でない → 400", async () => {
     const t = makeTestApp(T().db);
     const a = await signInOwner(t);
@@ -110,7 +92,7 @@ describe("EP-43 一覧", () => {
     expect((await list(t, a, `?cursor=${encodeURIComponent(Buffer.from("abc").toString("base64"))}`)).status).toBe(400);
     expect((await list(t, a, "?unknown=1")).status).toBe(400);
     expect((await list(t, a, "?taskId=x")).status).toBe(400);
-    expect((await list(t, a, "?includeShadow=yes")).status).toBe(400);
+    expect((await list(t, a, "?includeShadow=true")).status).toBe(400);
   });
 
   it("別のワークスペース → 404、セッションなし → 401", async () => {

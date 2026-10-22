@@ -384,7 +384,7 @@ function plannerLlm(deps: CreateAskDeps, ctx: WsCtx, askId: Uuid): LlmClient {
           ...(deps.edge?.retry === undefined ? {} : { retry: deps.edge.retry }),
           ...(deps.edge?.spendLimits === undefined ? {} : { spendLimits: { ...SPEND_LIMITS, ...deps.edge.spendLimits } }),
         },
-        { workspaceId: ctx.workspaceId, workspaceKind: ctx.kind, taskId: null, agentId: null, askId, rehearsalRunId: null, purpose: "planner", phase: "planner", ...(opts.signal === undefined ? {} : { signal: opts.signal }) },
+        { workspaceId: ctx.workspaceId, workspaceKind: ctx.kind, taskId: null, agentId: null, askId, purpose: "planner", phase: "planner", ...(opts.signal === undefined ? {} : { signal: opts.signal }) },
         req,
       );
       return response;
@@ -526,7 +526,7 @@ async function assertCanAccept(tx: Tx, ctx: WsCtx, now: Date, limits: AskRunDeps
   const ws = await lockWorkspace(tx, ctx);
   if (ws === null) throw new AppError("NOT_FOUND");
   if (ws.kill_switch_engaged) throw new AppError("KILL_SWITCH_ENGAGED");
-  const r = await canStartWork(tx, ws, { rehearsalRunId: null }, now, { ...SPEND_LIMITS, ...limits?.spendLimits });
+  const r = await canStartWork(tx, ws, now, { ...SPEND_LIMITS, ...limits?.spendLimits });
   if (!r.ok && r.reason !== "concurrency" && r.reason !== "kill_switch") throw spendDeniedAppError({ scope: r.reason }, now);
 }
 

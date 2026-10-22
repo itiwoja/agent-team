@@ -5,10 +5,6 @@ import {
   fxApproval,
   fxConnector,
   fxIntent,
-  fxRehearsalCase,
-  fxRehearsalRun,
-  fxRehearsalScenario,
-  fxSimExecution,
   fxTask,
   fxWorkspace,
   useTestDb,
@@ -38,7 +34,7 @@ async function memberSession(db: Db, workspaceId: string, role: "maintainer" | "
   return { cookie: s.cookieValue, csrf: s.csrfToken, userId };
 }
 
-/** 動いているタスク・承認待ち・実行中の Intent・走っているリハーサルを用意する */
+/** 動いているタスク・承認待ち・実行中の Intent を用意する */
 async function seedActivity(db: Db, ws: FxWorkspace) {
   const conn = await fxConnector(db, ws);
   const agent = await fxAgent(db, ws);
@@ -50,17 +46,7 @@ async function seedActivity(db: Db, ws: FxWorkspace) {
   const approval = await fxApproval(db, ws, { taskId: awaiting.taskId, intentId: pending.intentId });
   const approved = await fxIntent(db, ws, { taskId: running.taskId, jobId: agent.jobId, connectorId: conn.connectorId, status: "approved" });
   const executing = await fxIntent(db, ws, { taskId: running.taskId, jobId: agent.jobId, connectorId: conn.connectorId, status: "executing" });
-  const run = await fxRehearsalRun(db, ws, { jobId: agent.jobId, status: "running" });
-  const kase = await fxRehearsalCase(db, ws, { jobId: agent.jobId });
-  const scenario = await fxRehearsalScenario(db, ws, { runId: run.runId, caseId: kase.caseId });
-  const exec = await fxSimExecution(db, ws, { rehearsalRunId: run.runId });
-  const rehearsalTask = await fxTask(db, ws, agent, {
-    status: "running",
-    rehearsalRunId: run.runId,
-    rehearsalScenarioId: scenario.scenarioId,
-    simExecutionId: exec.executionId,
-  });
-  return { agent, running, awaiting, queued, done, pending, approval, approved, executing, run, scenario, rehearsalTask };
+  return { agent, running, awaiting, queued, done, pending, approval, approved, executing };
 }
 
 async function engage(t: TestApp, a: { cookie: string; csrf: string }, workspaceId: string, body: unknown = {}, headers: Record<string, string> = {}) {
@@ -68,7 +54,7 @@ async function engage(t: TestApp, a: { cookie: string; csrf: string }, workspace
 }
 
 describe("EP-27 発動", () => {
-  it("T-100・SO-KS-01 動いているタスク（リハーサルも）を halted(kill_switch)・トークン失効、承認待ちと未実行の Intent を expired、executing は触らない、走行を cancelled、監査ログ・SSE の事象", async () => {
+  it("T-100・SO-KS-01 動いているタスクを halted(kill_switch)・トークン失効、承認待ちと未実行の Intent を expired、executing は触らない、監査ログ・SSE の事象", async () => {
     const { db } = T();
     const t = makeTestApp(db);
     const a = await signInOwner(t);
@@ -81,7 +67,7 @@ describe("EP-27 発動", () => {
     const body = (await res.json()) as { engaged: boolean; engagedAt: string; affectedTaskIds: string[] };
     expect(body.engaged).toBe(true);
     expect(body.engagedAt).toBe(T0.toISOString());
-    expect(body.affectedTaskIds).toEqual([x.running.taskId, x.awaiting.taskId, x.queued.taskId, x.rehearsalTask.taskId].sort());
+    expect(body.affectedTaskIds).toEqual([x.running.taskId, x.awaiting.taskId, x.queued.taskId].sort());
 
     const tasks = await db.query<{ id: string; status: string; halt_reason: string | null; task_token_hash: Buffer | null; finished_at: Date | null }>(
       "SELECT id, status, halt_reason, task_token_hash, finished_at FROM tasks WHERE workspace_id = $1",
@@ -103,11 +89,6 @@ describe("EP-27 発動", () => {
     expect(byId.get(x.approved.intentId)).toMatchObject({ status: "expired", expire_reason: "kill_switch" });
     expect(byId.get(x.executing.intentId)).toMatchObject({ status: "executing", expire_reason: null });
     expect((await db.query<{ status: string }>("SELECT status FROM approvals WHERE id = $1", [x.approval.approvalId])).rows[0]?.status).toBe("expired");
-    expect((await db.query<{ status: string }>("SELECT status FROM rehearsal_runs WHERE id = $1", [x.run.runId])).rows[0]?.status).toBe("cancelled");
-    expect(
-      (await db.query<{ status: string; abort_reason: string }>("SELECT status, abort_reason FROM rehearsal_scenarios WHERE id = $1", [x.scenario.scenarioId])).rows[0],
-    ).toEqual({ status: "cancelled", abort_reason: "kill_switch" });
-
     const ws2 = await db.query<{ kill_switch_engaged: boolean; kill_switch_engaged_by: string; kill_switch_reason: string }>(
       "SELECT kill_switch_engaged, kill_switch_engaged_by, kill_switch_reason FROM workspaces WHERE id = $1",
       [a.workspaceId],
@@ -220,9 +201,7 @@ describe("EP-27 発動", () => {
     expect(seen).toHaveLength(1);
     expect(seen[0]?.cause).toBe("kill_switch");
     const running = seen[0]?.tasks.find((h) => h.id === x.running.taskId);
-    expect(running).toMatchObject({ previousStatus: "running", rehearsalRunId: null, jobId: x.agent.jobId, shadow: false });
-    const rehearsal = seen[0]?.tasks.find((h) => h.id === x.rehearsalTask.taskId);
-    expect(rehearsal?.rehearsalRunId).toBe(x.run.runId);
+    expect(running).toMatchObject({ previousStatus: "running", jobId: x.agent.jobId });
   });
 
   it("hook が失敗したら発動ごと戻る（タスクも Kill Switch もそのまま）", async () => {

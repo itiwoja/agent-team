@@ -2,9 +2,7 @@
 // 画面に出す固定の文（段の状態・手が要るもの・汚染の印・形の1行）はここで作って返し、画面はそのまま出す
 
 import type { AskRow, AskRunRow, Queryable, TaskRow, WsCtx } from "@open-team/db";
-import { getRehearsalRunPolicies } from "@open-team/db/edge";
 import { listTaskSnapshotSizes } from "@open-team/db/sandbox";
-import { findActiveRehearsalRun, hasBudgetStoppedRecertification, listCurrentCertificatesOfJobs, listRehearsalRuns, listRehearsalScenarios } from "@open-team/db/rehearsal";
 import {
   countAskMessages,
   type AskMessageRow,
@@ -28,7 +26,6 @@ import { handoffMark, taintReasonLine } from "@open-team/kernel";
 import type {
   AskDetailResponse,
   AskMessageView,
-  AskRehearsalView,
   AskStatus,
   AskTurnView,
   HandoffView,
@@ -42,7 +39,6 @@ import { ASK_TURN_LIMIT } from "./contract.ts";
 import { latestTaskByMember, storedAnswerView } from "./answer.ts";
 import { askSummary, formationView, reuseLineOf, stageStateOf, stopReasonOf } from "./format.ts";
 import { evaluateRun, type PlanMember } from "./plan.ts";
-import { attributionOf, selectAttributionRuns } from "../rehearsal/attribution.ts";
 
 type MemberRowN = Awaited<ReturnType<typeof listMembers>>[number];
 
@@ -64,79 +60,6 @@ export async function listAskSummaries(q: Queryable, ctx: WsCtx, o: { limit: num
     asks.push(askSummary(ask, { members, run }));
   }
   return { asks };
-}
-
-/** 失効の理由の固定文（画面にそのまま出す） */
-const REVOKE_TEXTS: Record<string, string> = {
-  widen: "権限を広げる変更があったため",
-  tool_hash: "ツールの説明が変わったため",
-  model: "モデルが変わったため",
-  case_added: "試験が追加されたため",
-  superseded: "新しい合格証に切り替わったため",
-};
-
-/** 担当の合計。同じ走行（依頼の走行は担当ごとに1枚ずつ出す：D-101）の合格証は同じ試験で出すので、その走行の試験の数は1回だけ数える */
-function caseCountOf(certs: ReadonlyArray<{ case_count: number; rehearsal_run_id?: string }>): number {
-  const perRun = new Map<string, number>();
-  certs.forEach((c, i) => perRun.set(c.rehearsal_run_id ?? `#${i}`, Math.max(perRun.get(c.rehearsal_run_id ?? `#${i}`) ?? 0, c.case_count)));
-  return [...perRun.values()].reduce((n, v) => n + v, 0);
-}
-
-/** 担当の仕事ごとの現行の合格証を、依頼の1つの状態にまとめる：失効が1枚でもあれば revoked（理由はその1枚）、出していない担当があれば none、全担当が有効なら valid */
-export function certificateOfJobs(
-  certs: ReadonlyArray<{ revoked_at: Date | null; revoke_reason: string | null; case_count: number; issued_at: Date; rehearsal_run_id?: string }>,
-  jobCount: number,
-): { state: "valid" | "revoked" | "none"; revokeReason: AskRehearsalView["certificateRevokeReason"]; caseCount: number | null; issuedAt: string | null } {
-  if (certs.length === 0) return { state: "none", revokeReason: null, caseCount: null, issuedAt: null };
-  const revoked = certs.find((c) => c.revoked_at !== null);
-  const state = revoked !== undefined ? "revoked" : certs.length < jobCount ? "none" : "valid";
-  const latest = certs.reduce((a, c) => (c.issued_at > a ? c.issued_at : a), certs[0]!.issued_at);
-  return {
-    state,
-    revokeReason: revoked === undefined ? null : ((revoked.revoke_reason ?? "superseded") as AskRehearsalView["certificateRevokeReason"]),
-    caseCount: caseCountOf(certs),
-    issuedAt: latest.toISOString(),
-  };
-}
-
-async function rehearsalOf(q: Queryable, ctx: WsCtx, ask: AskRow): Promise<AskRehearsalView | null> {
-  // リハーサルは順番（chain）の編成全体で1回（D-71）。ほかの形は担当の仕事ごとなのでここには出さない
-  if (ask.shape !== "chain") return null;
-  const allRuns = await listRehearsalRuns(q, ctx, { subject: { askId: ask.id }, limit: 100, withMemberRecertify: true });
-  const { primary: run, previous, recertify, userCases } = selectAttributionRuns(allRuns, ask.id);
-  if (run === null) return null;
-  const members = await listMembers(q, ctx, ask.id);
-  const jobIds = [...new Set(members.map((m) => m.job_id))];
-  const cert = certificateOfJobs(await listCurrentCertificatesOfJobs(q, ctx, jobIds), jobIds.length);
-  // 切れた合格証の自動の再リハーサルは担当の仕事ごとの走行（re-rehearse.ts）なので、依頼の走行の一覧には出ない。ここで拾う
-  const recertifying = (await Promise.all(jobIds.map((jobId) => findActiveRehearsalRun(q, ctx, { jobId })))).some((r) => r !== null);
-  // 切れたあとの再リハーサルが費用の上限で止まった（翌日にやり直す：D-107）。走っている間・切れていない間は false
-  const recertifyStoppedByBudget = cert.state === "revoked" && !recertifying && (await hasBudgetStoppedRecertification(q, ctx, jobIds));
-  // 規則の貢献。ガードの照合は実効ポリシーが1つ（仕事が1つ）のときだけ（ガードの番号 guards[i] は仕事ごとなので、複数の仕事では照合しない）
-  const policies = await getRehearsalRunPolicies(q, ctx, run.id);
-  const onePolicy = policies !== null && Object.keys(policies).length === 1 ? Object.values(policies)[0] : undefined;
-  // 画面と同じ集合：主走行、自分の悪い日、仕事ごとの再リハーサル。
-  // 再試験中は表示中の前回結果と同様に前走行を集計対象にする。
-  const displayedRunIds = previous !== null ? [previous.id] : [run.id, ...userCases.map((r) => r.id), ...recertify.map((r) => r.id)];
-  const attributionRows = (await Promise.all(displayedRunIds.map((id) => listRehearsalScenarios(q, ctx, id)))).flat();
-  const attribution = attributionOf(attributionRows, onePolicy?.policy.guards);
-  return {
-    runId: run.id,
-    status: run.status,
-    certificate: cert.state === "valid" ? "valid" : "none",
-    certificateState: cert.state,
-    certificateRevokeReason: cert.revokeReason,
-    certificateRevokeText: cert.revokeReason === null ? null : (REVOKE_TEXTS[cert.revokeReason] ?? null),
-    certificateCaseCount: cert.caseCount,
-    certificateIssuedAt: cert.issuedAt,
-    recertifying,
-    recertifyStoppedByBudget,
-    preventedDamageJpy: run.prevented_damage_jpy,
-    damageJpy: run.damage_jpy,
-    attribution,
-    createdAt: run.created_at.toISOString(),
-    finishedAt: run.finished_at?.toISOString() ?? null,
-  };
 }
 
 function stageViews(
@@ -312,7 +235,6 @@ export async function buildAskDetail(q: Queryable, ctx: WsCtx, askId: string): P
         createdAt: x.created_at.toISOString(),
       })),
     pendingReplies: (await listPendingReplies(q, ctx, askId)).map((x) => ({ id: x.id, text: x.text, createdAt: x.created_at.toISOString() })),
-    rehearsal: await rehearsalOf(q, ctx, ask),
     resume,
     messageCount: await countAskMessages(q, ctx, askId),
     planner: await plannerUsageOf(q, ctx, askId),

@@ -2,7 +2,6 @@
 // LLM に書かせない（読ませたいものを LLM が言い換えないように）。知らないツール・理由には、事実だけの汎用の文を使う
 
 import type { DecisionDetail, DirectTaintSource, JsonObject, TaintSource, TaintState } from "@open-team/kernel";
-import { SHOP_BASELINE } from "@open-team/sim-core";
 import { KNOWN_CONNECTORS } from "../connectors/known.ts";
 import { isProtectedBranch } from "@open-team/github-core";
 import type { CalendarCard, GithubCard, OpenReason, TaintSourceView } from "./contract.ts";
@@ -19,9 +18,6 @@ export function splitAction(action: string): { slug: string; tool: string } | nu
 }
 
 const INTENT_TITLE: Readonly<Record<string, string>> = {
-  "supplier.place_order": "仕入れ先に発注を送る",
-  "mail.send": "メールを送る",
-  "bank.register_payee": "振込先を登録する",
   "gcal.create_event": "予定を登録する",
   "gcal.delete_event": "予定を削除する",
   "github.push_commit": "GitHub にコミットを積む",
@@ -101,13 +97,6 @@ export function calendarCardOf(action: string, args: Readonly<Record<string, unk
 
 const numText = (v: unknown): string => (typeof v === "number" && Number.isFinite(v) ? v.toLocaleString("ja-JP") : String(v));
 
-/** 宛先の表示名（既知の仕入れ先の ID・メールアドレスだけ。分からなければ null：LLM の名前は入れない：D-31） */
-export function destinationLabel(value: unknown): string | null {
-  if (typeof value !== "string") return null;
-  const s = SHOP_BASELINE.suppliers.find((x) => x.id === value || x.email === value);
-  return s?.name ?? null;
-}
-
 /** 引数の値の表示用の文字列（文字列はそのまま、他は JSON） */
 export function valueText(v: unknown): string {
   if (typeof v === "string") return v;
@@ -153,8 +142,6 @@ export function ruleText(reasonCode: string, detail: DecisionDetail | null): str
       return "上限を超えているため、確認が必要です";
     case "unknown_outcome_pending":
       return "前の書き込みの結果が分からないため、確認が必要です";
-    case "certificate_missing":
-      return "安全チェックがまだなので、確認が必要です";
     case "tool_needs_review":
       return "ツールの説明が変わったため、確認が必要です";
     case "rule_matched":

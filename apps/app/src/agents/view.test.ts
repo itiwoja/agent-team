@@ -29,7 +29,7 @@ function agent(over: Partial<AgentRow> = {}): AgentRow {
 }
 
 function row(over: Partial<AgentListRow> = {}): AgentListRow {
-  return { agent: agent(), jobCount: 2, askCount: 2, taskCount: 3, lastActiveAt: new Date(T.getTime() + 60_000), running: false, awaitingApproval: false, reuseCount: 0, bornAskId: null, allowedRuleCount: 0, tightenedCount: 0, skillCount: 0, ...over };
+  return { agent: agent(), jobCount: 2, askCount: 2, taskCount: 3, lastActiveAt: new Date(T.getTime() + 60_000), running: false, awaitingApproval: false, reuseCount: 0, bornAskId: null, allowedRuleCount: 0, skillCount: 0, ...over };
 }
 
 const ask = (askId: string, at: Date, over: Partial<AgentAskRow> = {}): AgentAskRow => ({
@@ -83,9 +83,9 @@ describe("libraryItem", () => {
 
 describe("growthLineOf", () => {
   it("0 でない項目だけを順に並べ、全部 0 なら null", () => {
-    expect(growthLineOf({ reuseCount: 4, allowedRuleCount: 2, tightenedCount: 1, skillCount: 3 })).toBe("使い回し 4回 · 以後も許可にした 2回 · 権限を絞った 1回 · スキル 3件");
-    expect(growthLineOf({ reuseCount: 0, allowedRuleCount: 2, tightenedCount: 0, skillCount: 1 })).toBe("以後も許可にした 2回 · スキル 1件");
-    expect(growthLineOf({ reuseCount: 0, allowedRuleCount: 0, tightenedCount: 0, skillCount: 0 })).toBeNull();
+    expect(growthLineOf({ reuseCount: 4, allowedRuleCount: 2, skillCount: 3 })).toBe("使い回し 4回 · 以後も許可にした 2回 · スキル 3件");
+    expect(growthLineOf({ reuseCount: 0, allowedRuleCount: 2, skillCount: 1 })).toBe("以後も許可にした 2回 · スキル 1件");
+    expect(growthLineOf({ reuseCount: 0, allowedRuleCount: 0, skillCount: 0 })).toBeNull();
   });
   it("bornAskId は行の値（全期間）を優先する", () => {
     const born = "00000000-0000-4000-8000-000000000b99";

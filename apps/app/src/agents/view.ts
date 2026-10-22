@@ -72,7 +72,6 @@ export function growthLineOf(g: AgentGrowth): string | null {
   const parts = [
     g.reuseCount > 0 ? `使い回し ${g.reuseCount}回` : null,
     g.allowedRuleCount > 0 ? `以後も許可にした ${g.allowedRuleCount}回` : null,
-    g.tightenedCount > 0 ? `権限を絞った ${g.tightenedCount}回` : null,
     g.skillCount > 0 ? `スキル ${g.skillCount}件` : null,
   ].filter((x): x is string => x !== null);
   return parts.length === 0 ? null : parts.join(" · ");
@@ -109,7 +108,7 @@ export function libraryItem(
 ): AgentLibraryItem {
   const a = row.agent;
   const activity = activityOf(row);
-  const growth: AgentGrowth = { reuseCount: row.reuseCount, allowedRuleCount: row.allowedRuleCount, tightenedCount: row.tightenedCount, skillCount: row.skillCount };
+  const growth: AgentGrowth = { reuseCount: row.reuseCount, allowedRuleCount: row.allowedRuleCount, skillCount: row.skillCount };
   const born = [...asks].reverse().find((x) => x.is_new) ?? null;
   return {
     id: a.id,

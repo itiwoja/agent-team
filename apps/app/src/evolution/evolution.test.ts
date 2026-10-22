@@ -7,8 +7,7 @@ import { skillDigest } from "@open-team/edge";
 import { defaultWorkspacePolicy, hashCanonical, type JsonObject } from "@open-team/kernel";
 import { ScriptedLlmClient, type ScriptedReply } from "@open-team/llm";
 import { describe, expect, it } from "vitest";
-import { jsonReply } from "../rehearsal/test-helpers.ts";
-import { T0, makeTestApp } from "../test-helpers.ts";
+import { T0, jsonReply, makeTestApp } from "../test-helpers.ts";
 import { decideSkillProposalAction, restoreEvolutionItemAction } from "./actions.ts";
 import { learnSkillsStep } from "./learn.ts";
 import { createPruneStep } from "./prune.ts";
@@ -32,7 +31,8 @@ async function setup(replies: ScriptedReply[] = []) {
   const { db } = T();
   const ws = await fxWorkspace(db, { kind: "owner", audit: true });
   const agent = await fxAgent(db, ws);
-  const policy = defaultWorkspacePolicy("owner");
+  // fxAgent の担当は supplier を付与している（ワークスペースで有効でないと定義を組み直せない）
+  const policy = defaultWorkspacePolicy("owner", ["supplier"]);
   await db.transaction((tx) => insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now: T0 }));
   const llm = new ScriptedLlmClient(replies);
   const t = makeTestApp(db, { deps: { llm }, env: { gemini: { apiKey: undefined, agentModel: "gemini-2.5-flash", plannerModel: "gemini-2.5-flash", compareModels: [] } } });

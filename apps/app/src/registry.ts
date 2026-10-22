@@ -1,5 +1,5 @@
 // 動いている仕事の登録簿と Kill Switch の見張り（SO §3.15 の「止まり方」、NFR-012 の p95 10秒、G-02）
-// 0-H のタスク・依頼の生成・リハーサルは app のインスタンスの中のリクエストで動き、どのインスタンスかは分からない。
+// 0-H のタスク・依頼の生成は app のインスタンスの中のリクエストで動き、どのインスタンスかは分からない。
 // 1. 各インスタンスは LISTEN ot_kill_switch を1本持ち、通知（payload はワークスペースの ID）で登録簿のそのワークスペースを中断する
 // 2. 通知が落ちたときの見回り：登録のあるワークスペースごとに2秒おきに Kill Switch と終了状態を読み、当たったものを中断する
 // 3. ループは LLM・ツールを呼ぶたびに decide() の手順1でも止まる（ここの外）
@@ -9,8 +9,8 @@ import { system, wsCtxOf, type Db, type Listener, type Uuid } from "@open-team/d
 import { findStoppedTasks } from "@open-team/db/app";
 import type { Logger } from "@open-team/platform";
 
-/** 何を走らせているか（タスク＝EP-46、依頼の生成・リハーサルの走行＝G-02 の内部のリクエスト） */
-export type RunningKind = "task" | "ask_generate" | "rehearsal_run";
+/** 何を走らせているか（タスク＝EP-46、依頼の生成＝G-02 の内部のリクエスト） */
+export type RunningKind = "task" | "ask_generate";
 /** 止めた理由（SO §3.15 の reason に、終了状態・終わりの処理を足した） */
 export type StopCause = "kill_switch" | "task_terminated" | "reset" | "cleanup" | "shutdown";
 

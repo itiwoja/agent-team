@@ -3,7 +3,7 @@ import { fxWorkspace, useTestDb } from "@open-team/db/testing";
 import { issueSession } from "@open-team/db";
 import { describe, expect, it } from "vitest";
 import { matchEntryToken } from "./entry.ts";
-import { GUEST_TOKEN, HOST, ORIGIN, OWNER_TOKEN, T0, makeTestApp, send, sessionCookieOf, signInOwner, type TestApp } from "./test-helpers.ts";
+import { HOST, ORIGIN, OWNER_TOKEN, T0, makeTestApp, send, sessionCookieOf, signInOwner, type TestApp } from "./test-helpers.ts";
 
 const T = useTestDb();
 const DAY = 24 * 60 * 60 * 1000;
@@ -15,7 +15,7 @@ describe("EP-01 入口", () => {
     const t = makeTestApp(T().db);
     const res = await send(t, "POST", "/api/v1/entry", { body: { token: OWNER_TOKEN } });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ state: "signed_in", workspaceKind: "owner", next: "/", firstAskId: null, created: false });
+    expect(await res.json()).toEqual({ state: "signed_in", workspaceKind: "owner", next: "/" });
     const sc = res.headers.get("set-cookie") ?? "";
     expect(sc).toMatch(/^ot_session=[A-Za-z0-9_-]{43};/);
     for (const attr of ["HttpOnly", "Secure", "SameSite=Lax", "Path=/", "Max-Age=604800"]) expect(sc).toContain(attr);
@@ -107,25 +107,6 @@ describe("EP-01 入口", () => {
     expect(t.sleeps).toEqual([]);
   });
 
-  it("審査用のトークンで sim-world に届かない → 503 SIM_WORLD_UNAVAILABLE。Cookie は出さず、作りかけのゲストのワークスペースは削除予約になる（SO §3.5）", async () => {
-    const { db } = T();
-    const t = makeTestApp(db);
-    const res = await send(t, "POST", "/api/v1/entry", { body: { token: GUEST_TOKEN } });
-    expect(res.status).toBe(503);
-    expect(await errCode(res)).toBe("SIM_WORLD_UNAVAILABLE");
-    expect(res.headers.get("set-cookie")).toBeNull();
-    const ws = (await db.query<{ kind: string; delete_requested_at: Date | null }>("SELECT kind, delete_requested_at FROM workspaces")).rows;
-    expect(ws).toHaveLength(1);
-    expect(ws[0]?.kind).toBe("guest");
-    expect(ws[0]?.delete_requested_at).not.toBeNull();
-    expect((await db.query<{ n: number }>("SELECT count(*) AS n FROM sessions")).rows[0]?.n).toBe(0);
-  });
-
-  it("GUEST_ENTRY_TOKEN がない環境で、ゲスト用と同じ文字列はただの違うトークン（401）", async () => {
-    const t = makeTestApp(T().db, { env: { guestToken: undefined } });
-    expect((await send(t, "POST", "/api/v1/entry", { body: { token: GUEST_TOKEN } })).status).toBe(401);
-  });
-
   it("SO-ENT-10 有効な Cookie を持ったまま入り直す → 前のセッションは失効（同じ Cookie は signed_out）", async () => {
     const t = makeTestApp(T().db);
     const a = await signInOwner(t);
@@ -139,26 +120,26 @@ describe("EP-01 入口", () => {
 });
 
 describe("SO-ENT-12 トークンの照合", () => {
-  it("一致しても・しなくても、オーナー用とゲスト用の2つの比較を必ず両方行う", () => {
-    for (const token of [OWNER_TOKEN, GUEST_TOKEN, "wrong"]) {
+  it("一致しても・しなくても、比較を必ず1回行う", () => {
+    for (const token of [OWNER_TOKEN, "wrong"]) {
       const calls: string[] = [];
-      const r = matchEntryToken(token, { owner: OWNER_TOKEN, guest: GUEST_TOKEN }, (a, b) => {
+      const r = matchEntryToken(token, OWNER_TOKEN, (a, b) => {
         calls.push(b);
         return a === b;
       });
-      expect(calls).toEqual([OWNER_TOKEN, GUEST_TOKEN]);
-      expect(r).toEqual({ isOwner: token === OWNER_TOKEN, isGuest: token === GUEST_TOKEN });
+      expect(calls).toEqual([OWNER_TOKEN]);
+      expect(r).toBe(token === OWNER_TOKEN);
     }
   });
 
-  it("設定されていないトークンも比べる（回数をそろえる）が、一致にはしない", () => {
+  it("設定されていないトークンも比べる（時間をそろえる）が、一致にはしない", () => {
     let n = 0;
-    const r = matchEntryToken("\u0000open-team:unset-entry-token\u0000", { owner: OWNER_TOKEN, guest: undefined }, (a, b) => {
+    const r = matchEntryToken("\u0000open-team:unset-entry-token\u0000", undefined, (a, b) => {
       n++;
       return a === b;
     });
-    expect(n).toBe(2);
-    expect(r).toEqual({ isOwner: false, isGuest: false });
+    expect(n).toBe(1);
+    expect(r).toBe(false);
   });
 });
 
@@ -168,7 +149,7 @@ describe("EP-02 セッション・ローリング", () => {
     expect(await (await send(t, "GET", "/api/v1/session")).json()).toEqual({ state: "signed_out", localEntry: true });
     const a = await signInOwner(t);
     const res = await send(t, "GET", "/api/v1/session", { cookie: a.cookie });
-    expect(await res.json()).toEqual({ state: "signed_in", workspaceKind: "owner", csrfToken: a.csrf, firstAskId: null });
+    expect(await res.json()).toEqual({ state: "signed_in", workspaceKind: "owner", csrfToken: a.csrf });
     expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
@@ -340,7 +321,7 @@ describe("ローカルのトークンなしの入口（POST /entry/local）", ()
     for (const addr of ["127.0.0.1", "::1", "::ffff:127.0.0.1"]) {
       const res = await sendFrom(t, addr);
       expect(res.status).toBe(200);
-      expect(await res.json()).toEqual({ state: "signed_in", workspaceKind: "owner", next: "/", firstAskId: null, created: false });
+      expect(await res.json()).toEqual({ state: "signed_in", workspaceKind: "owner", next: "/" });
       const cookie = sessionCookieOf(res);
       const me = (await (await send(t, "GET", "/api/v1/me", { cookie })).json()) as { workspace: { id: string } };
       expect(me.workspace.id).toBe(owner.workspaceId);

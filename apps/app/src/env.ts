@@ -2,7 +2,7 @@
 // 名前だけを missing に積み、値は応答にもログにも出さない。読み方の共通は @open-team/platform の EnvReader。
 // 決めたこと：
 // - DATABASE_URL は必須（セッションを DB に置いたため）
-// - GATEWAY_URL・SIM_WORLD_URL・INTERNAL_SHARED_TOKEN・GEMINI_API_KEY は任意（なければオーナーの初期投入・内部の呼び出し・LLM が止まるだけ）
+// - GATEWAY_URL・INTERNAL_SHARED_TOKEN・GEMINI_API_KEY は任意（なければオーナーの初期投入・内部の呼び出し・LLM が止まるだけ）
 // - PLATFORM_CEILINGS_VERSION は必須にしない（M-59：Hard Ceiling の版はコードの定数）
 
 import { readLlmEnv, providerModelIdentity, type GeminiEnv, type LlmConfig } from "@open-team/llm";
@@ -46,8 +46,6 @@ export interface AppEnv {
   webDist: string | undefined;
   /** PHASE0_ACCESS_TOKEN（オーナーの入口：D-06） */
   ownerToken: string | undefined;
-  /** GUEST_ENTRY_TOKEN（審査用の入口。0-H のこの段階は準備中の扱い） */
-  guestToken: string | undefined;
   /** SESSION_COOKIE_SECRET（IP の HMAC の鍵にも使う：AS 8-33、SO I-11） */
   cookieSecret: string | undefined;
   /** COOKIE_SECURE（既定 true。http の LAN などで使うときだけ "false"） */
@@ -57,14 +55,11 @@ export interface AppEnv {
   databaseUrlMaint: string | undefined;
   appBaseUrl: string | undefined;
   gatewayUrl: string | undefined;
-  simWorldUrl: string | undefined;
   /** サービス間の認証（INTERNAL_SHARED_TOKEN） */
   serviceAuth: ServiceAuthConfig;
   gemini: GeminiEnv;
   /** Active provider. gemini retains model routing fields for legacy callers/tests. */
   llm?: LlmConfig;
-  /** GUEST_RETEST_MODE：用意した依頼の再試験を台本で再現する（replay。既定）か、本物の Gemini で走らせる（gemini）か（D-101・D-104） */
-  guestRetestMode: "replay" | "gemini";
   commitSha: string | undefined;
   /** Google カレンダーの連携（任意。揃っていれば「つなぐ」を出す） */
   googleConnect: GoogleConnectEnv | undefined;
@@ -112,12 +107,10 @@ export function readAppEnv(source: EnvSource = process.env): EnvCheck<AppEnv> {
   const cookieSecret = r.secret("SESSION_COOKIE_SECRET", { required: true });
   const databaseUrl = r.string("DATABASE_URL", { required: true, pattern: /^postgres(ql)?:\/\// });
 
-  const guestToken = r.secret("GUEST_ENTRY_TOKEN");
   const databaseUrlMaint = r.string("DATABASE_URL_MAINT", { pattern: /^postgres(ql)?:\/\// });
   const appBaseUrl = r.url("APP_BASE_URL");
   const serviceAuth: ServiceAuthConfig = r.has(LOCAL_SHARED_TOKEN) ? readServiceAuthEnv(r) : { sharedToken: undefined };
   const gatewayUrl = r.url("GATEWAY_URL");
-  const simWorldUrl = r.url("SIM_WORLD_URL");
   const llm = readLlmEnv(source as NodeJS.ProcessEnv);
   const gemini: GeminiEnv = { apiKey: llm.apiKey, agentModel: llm.agentModel, plannerModel: llm.plannerModel, compareModels: llm.compareModels };
   const commitSha = r.string("COMMIT_SHA", { pattern: /^[0-9a-f]{7,40}$/ });
@@ -127,18 +120,15 @@ export function readAppEnv(source: EnvSource = process.env): EnvCheck<AppEnv> {
     port: r.port(),
     webDist: r.string("WEB_DIST"),
     ownerToken,
-    guestToken,
     cookieSecret,
     cookieSecure: source.COOKIE_SECURE !== "false",
     databaseUrl,
     databaseUrlMaint,
     appBaseUrl,
     gatewayUrl,
-    simWorldUrl,
     serviceAuth,
     gemini,
     llm,
-    guestRetestMode: source.GUEST_RETEST_MODE?.trim() === "gemini" ? "gemini" : "replay",
     commitSha,
     googleConnect: readGoogleConnectEnv(source, appBaseUrl),
     githubConnect: readGithubConnectEnv(source, appBaseUrl),

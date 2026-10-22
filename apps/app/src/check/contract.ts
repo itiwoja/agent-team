@@ -1,7 +1,7 @@
 // 承認・チェック・counts・セッションの応答の契約（フロント apps/web が合わせる1か所。zod のスキーマと型）
 // 06 ask-and-check.md（SCR-019）・09_api/approvals.md（API-017・019）・tasks.md（API-016）・15 §ゲストのワークスペース
 // - ここは「応答の形」だけ。文言は reasons.ts が reasonCode から固定の文で作る（LLM に書かせない）
-// - 行のキー（item key）は '<種類>:<UUID>'。報告は check_marks のキーと同じ（answer / rehearsal / incident_added / task、育つ：skill_proposal / evolution）。
+// - 行のキー（item key）は '<種類>:<UUID>'。報告は check_marks のキーと同じ（answer / task、育つ：skill_proposal / evolution）。
 //   承認は approval:<approvalId>、質問は ask_question:<askId> / unknown_outcome:<intentId>
 // - 時刻はすべて ISO 8601（UTC）。金額・数量は表示用の文字列を持たず、値のまま出す（画面が整える）。ただし「理由の文」は文で返す
 // - SSE（EP-45 /workspaces/:id/stream）の事象は CHECK_EVENT_TYPES：check.upsert（行が増えた・変わった）、check.remove（行が消えた）、
@@ -30,7 +30,7 @@ export const OpenReason = z.object({
 });
 export type OpenReason = z.infer<typeof OpenReason>;
 
-/** 引数の1項目（宛先・中身・その他）。label は表示名（既知の仕入れ先の名前など。なければ null） */
+/** 引数の1項目（宛先・中身・その他）。label は表示名（今は出さないので null） */
 export const ArgView = z.object({ arg: z.string(), value: z.unknown(), label: z.string().nullable(), text: z.string() });
 export type ArgView = z.infer<typeof ArgView>;
 
@@ -93,15 +93,6 @@ export const RememberView = z.object({
 });
 export type RememberView = z.infer<typeof RememberView>;
 
-/** 送る前の確認に出す前例（同じ仕事・同じ action のリハーサル）。text は precedent.ts が決めた文。前例が0件なら行に付けない */
-export const Precedent = z.object({
-  trials: z.number().int(),
-  /** 影（統制なし）で承認したときの損害の最大。影を走らせていない試験しかなければ null */
-  maxShadowDamageJpy: z.number().nullable(),
-  text: z.string(),
-});
-export type Precedent = z.infer<typeof Precedent>;
-
 export const ApprovalView = z.object({
   id: Id,
   status: z.enum(APPROVAL_STATUSES),
@@ -139,8 +130,6 @@ export const ApprovalView = z.object({
   rule: z.object({ reasonCode: z.string(), matchedRule: z.string().nullable(), text: z.string() }),
   risk: z.object({ level: z.enum(["low", "medium", "high"]), reasons: z.array(z.object({ code: z.string(), points: z.number(), detail: z.string().nullable() })) }),
   remember: RememberView,
-  /** 同じ仕事・同じ action のリハーサルの前例（任意。0件なら付けない） */
-  precedent: Precedent.optional(),
   /** 決定済みのとき */
   decidedAt: Iso.nullable(),
   decisionComment: z.string().nullable(),
@@ -194,8 +183,6 @@ export const DecisionResponse = z.object({
   rule: RuleView.nullable(),
   /** approve のとき（reject は null） */
   execution: ExecutionView.nullable(),
-  /** 却下を回帰の試験にしたとき、報告の行に出す文（BR-80）。しなかったら null */
-  incidentLine: z.string().nullable(),
 });
 export type DecisionResponse = z.infer<typeof DecisionResponse>;
 
@@ -233,7 +220,7 @@ export const QuestionItem = z.object({
   intentId: Id.nullable(),
 });
 
-export const REPORT_KINDS = ["answer", "rehearsal", "incident_added", "task", "evolution"] as const;
+export const REPORT_KINDS = ["answer", "task", "evolution"] as const;
 export const ReportItem = z.object({
   ...ItemBase,
   kind: z.literal("report"),
@@ -247,7 +234,7 @@ export const ReportItem = z.object({
   lines: z.array(z.string()),
   /** 「この依頼のページ」（SCR-021）へのリンク用 */
   /** agentId：担当のページ（/agents#<agentId>）へ移る行（evolution）だけ。ほかは null */
-  link: z.object({ askId: Id.nullable(), rehearsalRunId: Id.nullable(), agentId: Id.nullable() }),
+  link: z.object({ askId: Id.nullable(), agentId: Id.nullable() }),
   /** 回答の報告のとき、その回答が答えた「頼んだこと」（返事の実行は返事の文。秘密情報はマスク済み）。ほかの報告は null */
   request: z.string().nullable(),
 });
@@ -337,26 +324,18 @@ export const CheckCountsEvent = CheckCounts;
 
 // ---- セッション（EP-01 の応答の拡張。EP-02 の signed_in にも同じ項目） ----
 
-/**
- * POST /api/v1/entry の応答。ゲスト（審査員）は firstAskId に用意した依頼の ID が入り、next は /asks/<firstAskId>（D-69）。
- * オーナーと、Cookie で戻ったとき（既存のセッション）は firstAskId = null・next = "/"（A-102）
- */
+/** POST /api/v1/entry の応答（next は "/"：A-102） */
 export const EntryResponse = z.object({
   state: z.literal("signed_in"),
   workspaceKind: z.enum(["owner", "guest"]),
   next: z.string(),
-  /** 最初に開く依頼（SCR-021）。ゲストを作ったときだけ */
-  firstAskId: Id.nullable(),
-  /** ゲストを今作った（デモ用のデータを入れた）か */
-  created: z.boolean(),
 });
 export type EntryResponse = z.infer<typeof EntryResponse>;
 
-/** GET /api/v1/session（signed_in）。firstAskId は入口の直後だけでなく、用意した依頼の ID を常に返す（画面の「最初の依頼へ」用） */
+/** GET /api/v1/session（signed_in） */
 export const SessionSignedIn = z.object({
   state: z.literal("signed_in"),
   workspaceKind: z.enum(["owner", "guest"]),
   csrfToken: z.string(),
-  firstAskId: Id.nullable(),
 });
 export type SessionSignedIn = z.infer<typeof SessionSignedIn>;

@@ -1,15 +1,12 @@
 // 依頼のページの「やったこと」（担当の段の進み具合）。policy_decisions の tool_call を、決まった文の1行にする。
 // LLM の文は入れない（ツールの名詞は manifest、結果は Kernel の判定から作る：D-59 と同じ考え）
 
-import { BRIEF_CONNECTORS, REPO_CONNECTORS } from "@open-team/sim-core";
 import { KNOWN_CONNECTORS } from "../connectors/known.ts";
 import type { ToolActivityRow } from "@open-team/db/asks";
 import type { StageActivityView } from "./contract.ts";
 
 /** 段ごとに返す件数（新しいものから） */
 export const ACTIVITY_PER_TASK = 6;
-
-const CONNECTORS = [...KNOWN_CONNECTORS, ...BRIEF_CONNECTORS, ...REPO_CONNECTORS];
 
 /** MCP 以外のツール（runner の ToolName）の言い方 */
 const BUILTIN_LABELS: Readonly<Record<string, string>> = {
@@ -31,12 +28,12 @@ const BUILTIN_LABELS: Readonly<Record<string, string>> = {
   run_command: "コマンドを動かす",
 };
 
-/** 'mcp.supplier.place_order' → 「発注」。manifest にないツールはツール名のまま、MCP 以外は固定の言い方 */
+/** 'mcp.gcal.create_event' → manifest の操作名。manifest にないツールはツール名のまま、MCP 以外は固定の言い方 */
 export function activityLabel(action: string | null): string {
   if (action === null) return "ツールの呼び出し";
   const m = /^mcp\.([a-z0-9][a-z0-9-]*)\.(.+)$/.exec(action);
   if (m === null) return BUILTIN_LABELS[action] ?? action;
-  const tool = CONNECTORS.find((c) => c.slug === m[1])?.tools.find((t) => t.name === m[2]);
+  const tool = KNOWN_CONNECTORS.find((c) => c.slug === m[1])?.tools.find((t) => t.name === m[2]);
   return tool?.actionNoun ?? m[2]!;
 }
 
