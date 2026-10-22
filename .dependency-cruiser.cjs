@@ -203,18 +203,15 @@ const PURE = "^packages/(kernel|sim-core|oracles|rehearsal|runner)/";
 const PURE_BUILTINS = "^(node:)?(crypto|util|util/types|assert|assert/strict|buffer|string_decoder|url|querystring|punycode|path|path/posix|path/win32|events)$";
 
 // D-52：runner から届いてはいけないもの
-const DB_CLIENTS = [npm("pg", "pg-[\\w.-]+", "postgres", "@google-cloud/cloud-sql-connector"), workspace("db")];
-const LLM_CLIENTS = [npm("@google/genai", "@google-cloud/vertexai", "@google-cloud/aiplatform"), workspace("llm", "edge")];
+const DB_CLIENTS = [npm("pg", "pg-[\\w.-]+", "postgres"), workspace("db")];
+const LLM_CLIENTS = [npm("@google/genai"), workspace("llm", "edge")];
 const GATEWAY_CLIENTS = ["^apps/gateway/", workspace("gateway[\\w-]*"), npm("@modelcontextprotocol/sdk")];
-const SECRETS = [npm("@google-cloud/secret-manager", "google-auth-library", "gcp-metadata"), workspace("platform"), "^apps/"];
+const SECRETS = [workspace("platform"), "^apps/"];
 
 // ネットワーク・外部 I/O のパッケージ（純粋なパッケージから禁止）
 const NETWORK_PACKAGES = [
   npm(
     "@google/genai",
-    "@google-cloud/[\\w.-]+",
-    "google-auth-library",
-    "gcp-metadata",
     "gaxios",
     "@modelcontextprotocol/sdk",
     "@hono/node-server",
@@ -245,7 +242,7 @@ module.exports = {
     },
     {
       name: "runner-no-llm-client",
-      comment: "D-52：packages/runner は Gemini（Vertex AI）のクライアント（@google/genai・packages/llm・packages/edge）を import しない。LLM は注入された EdgePort 経由だけ",
+      comment: "D-52：packages/runner は Gemini API のクライアント（@google/genai・packages/llm・packages/edge）を import しない。LLM は注入された EdgePort 経由だけ",
       severity: "error",
       from: { path: "^packages/runner/" },
       to: { path: LLM_CLIENTS, dependencyTypesNot: ["type-only"] },
@@ -259,7 +256,7 @@ module.exports = {
     },
     {
       name: "runner-no-secrets",
-      comment: "15:487「runner は鍵・DB に届かない」：Secret Manager・Google の認証・環境変数を読む packages/platform・apps/* を import しない",
+      comment: "15:487「runner は鍵・DB に届かない」：環境変数（鍵）を読む packages/platform・apps/* を import しない",
       severity: "error",
       from: { path: "^packages/runner/" },
       to: { path: SECRETS, dependencyTypesNot: ["type-only"] },
