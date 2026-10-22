@@ -3,7 +3,10 @@ import { createHash } from "node:crypto";
 import { readGeminiEnv, type GeminiEnv } from "./models.ts";
 import type { PriceEntry } from "./pricing.ts";
 
-export type LlmProvider = "gemini" | "anthropic" | "deepseek" | "openrouter";
+/** 接続先が固定の OpenAI 互換（Chat Completions）の提供元 */
+export const OPENAI_COMPATIBLE_PROVIDERS = ["openai", "deepseek", "openrouter", "xai", "groq", "mistral", "together", "fireworks", "cerebras", "moonshot", "zai", "qwen"] as const;
+/** custom は運用者が接続先（LLM_BASE_URL）を決める OpenAI 互換。上の一覧にない API キーはこれで使う */
+export type LlmProvider = "gemini" | "anthropic" | (typeof OPENAI_COMPATIBLE_PROVIDERS)[number] | "custom";
 const positive = z.number().int().positive().max(1_000_000_000);
 /** Rates are administrator-supplied upper bounds in micro USD / million tokens. */
 export const ModelProfileSchema = z.object({
@@ -16,7 +19,7 @@ export const ModelProfileSchema = z.object({
   reasoningEffort: z.boolean().default(false),
   maxOutputTokens: positive,
   contextWindow: positive,
-  // DeepSeek と OpenRouter（OpenAI 互換）はどちらも max_tokens を受ける
+  // OpenAI 互換の多くは max_tokens を受ける（OpenAI の推論モデルなどは max_completion_tokens を明示）
   tokenLimitParameter: z.enum(["max_completion_tokens", "max_tokens"]).default("max_tokens"),
 }).strict();
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
@@ -33,14 +36,44 @@ export class LlmConfigurationError extends Error {
 }
 const value = (s: string | undefined): string | undefined => s?.trim() || undefined;
 export const PROVIDER_KEY_NAMES: Record<LlmProvider, string> = {
-  gemini: "GEMINI_API_KEY", anthropic: "ANTHROPIC_API_KEY", deepseek: "DEEPSEEK_API_KEY", openrouter: "OPENROUTER_API_KEY",
+  gemini: "GEMINI_API_KEY", anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", deepseek: "DEEPSEEK_API_KEY", openrouter: "OPENROUTER_API_KEY",
+  xai: "XAI_API_KEY", groq: "GROQ_API_KEY", mistral: "MISTRAL_API_KEY", together: "TOGETHER_API_KEY", fireworks: "FIREWORKS_API_KEY",
+  cerebras: "CEREBRAS_API_KEY", moonshot: "MOONSHOT_API_KEY", zai: "ZAI_API_KEY", qwen: "DASHSCOPE_API_KEY", custom: "LLM_API_KEY",
 };
 
-/** OpenAI 互換の接続先は固定（利用者は変えられない。鍵の送り先を限る）。Claude は HTTP アダプターの固定 URL を使う */
+/** 名前のある OpenAI 互換の接続先は固定（利用者は変えられない。鍵の送り先を限る）。Claude は HTTP アダプターの固定 URL を使う */
 export const PROVIDER_BASE_URLS: Partial<Record<LlmProvider, string>> = {
+  openai: "https://api.openai.com/v1",
   deepseek: "https://api.deepseek.com",
   openrouter: "https://openrouter.ai/api/v1",
+  xai: "https://api.x.ai/v1",
+  groq: "https://api.groq.com/openai/v1",
+  mistral: "https://api.mistral.ai/v1",
+  together: "https://api.together.xyz/v1",
+  fireworks: "https://api.fireworks.ai/inference/v1",
+  cerebras: "https://api.cerebras.ai/v1",
+  moonshot: "https://api.moonshot.ai/v1",
+  zai: "https://api.z.ai/api/paas/v4",
+  qwen: "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
 };
+
+const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
+/**
+ * custom の接続先（LLM_BASE_URL）。https のみ（手元のサーバー localhost・127.0.0.1・[::1] は http も可）。
+ * 鍵を URL に混ぜないよう、ユーザー名・パスワード・クエリ・フラグメントは拒否する。末尾の / は外す
+ */
+export function customBaseUrl(raw: string | undefined): string {
+  let url: URL;
+  try { url = new URL(raw ?? ""); } catch { throw new LlmConfigurationError("LLM_PROVIDER=custom には LLM_BASE_URL（https://…/v1 など）が必要です"); }
+  const secure = url.protocol === "https:" || (url.protocol === "http:" && LOOPBACK_HOSTS.has(url.hostname));
+  if (!secure || url.username || url.password || url.search || url.hash) throw new LlmConfigurationError("LLM_BASE_URL は https（手元のサーバーのみ http 可）で、認証情報・クエリを含めないでください");
+  return url.href.replace(/\/+$/, "");
+}
+
+/** provider の接続先。custom だけ設定値を検査して使う。Claude と Gemini は undefined（アダプター側の固定 URL） */
+export function providerBaseUrl(provider: LlmProvider, customUrl: string | undefined): string | undefined {
+  return provider === "custom" ? customBaseUrl(customUrl) : PROVIDER_BASE_URLS[provider];
+}
 
 export function readLlmEnv(source: NodeJS.ProcessEnv = process.env): LlmConfig {
   const raw = value(source.LLM_PROVIDER) ?? "gemini";
@@ -66,7 +99,7 @@ export function readLlmEnv(source: NodeJS.ProcessEnv = process.env): LlmConfig {
     if (!Object.hasOwn(profiles, model)) throw new LlmConfigurationError("選択モデルが LLM_MODELS_JSON に登録されていません");
   }
   return { provider, apiKey: value(source[PROVIDER_KEY_NAMES[provider]]), agentModel, plannerModel, compareModels, profiles, ...budgetConfig,
-    baseUrl: PROVIDER_BASE_URLS[provider],
+    baseUrl: providerBaseUrl(provider, value(source.LLM_BASE_URL)),
   };
 }
 
