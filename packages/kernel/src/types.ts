@@ -219,7 +219,7 @@ export type DirectTaintSource =
   /** 作業場（サンドボックス）でコマンドを動かした出力（入れたパッケージ・書いたコードの出力は外から来た内容と同じに扱う） */
   | { kind: "sandbox_run"; at: IsoDateTime }
   /**
-   * load_skill で読んだスキルの本文が、運営のパックの本文と一致しなかった（カタログにない・書き換えられた：SG-05）。
+   * load_skill で読んだスキルの本文が、運営のパックの本文または人が承認した中身と一致しなかった（カタログにない・書き換えられた：SG-05）。
    * name・packId は DB の値（信用できないので表示の文には入れない）
    */
   | { kind: "skill"; name: string; packId: string | null; at: IsoDateTime };

@@ -1,8 +1,10 @@
 // スキルの信頼の判定（SG-05）。スキルを信頼された手順書として扱うか、外から来た内容として扱うかを決める。
-// - 信頼するのは「運営のパックの定数（app の packs/catalog.ts）と同じ中身」のスキルだけ：
-//   DB の行の (pack_id, name) でカタログの同じパックの同じ名前のスキルを引き、(名前, 説明, 本文) の SHA-256 が一致したとき。
-//   名前と説明もシステムプロンプトの「# 使えるスキル」の区画に入るので、本文と一緒に照合する。
-// - それ以外（pack_id がない・カタログにない・どれかが書き換えられた）は、システムプロンプトの区画に出さず（context.ts）、
+// - 信頼するのは次の2つだけ。名前と説明もシステムプロンプトの「# 使えるスキル」の区画に入るので、本文と一緒に照合する：
+//   1. origin = 'pack'：運営のパックの定数（app の packs/catalog.ts）と同じ中身。
+//      DB の行の (pack_id, name) でカタログの同じパックの同じ名前のスキルを引き、(名前, 説明, 本文) の SHA-256 が一致したとき。
+//   2. origin = 'learned'（育ったスキル）：人が承認した中身と同じ。approved_digest が NULL でなく、今の (名前, 説明, 本文) の SHA-256 と一致したとき
+//      （承認後に書き換えられたら一致しなくなる）。
+// - それ以外（pack_id がない・カタログにない・承認した中身と違う・どれかが書き換えられた）は、システムプロンプトの区画に出さず（context.ts）、
 //   load_skill で読んだら <untrusted> で包み、読んだタスクを skill で汚染する（sandbox.ts）。
 // - パックの版は見ない：agent_skills の行は版を持たず（入れたときの版は pack_installs にだけある）、カタログは今の版の本文しか持たない。
 //   カタログの本文が変われば、前の版で入れたスキルは一致しなくなり、包まれる側に倒れる（厳しい側）。
@@ -37,8 +39,13 @@ export function trustedSkillDigestsOf(
   return out;
 }
 
-/** DB のスキルの行が、運営のパックの定数と同じ中身（名前・説明・本文）か */
-export function isTrustedSkill(trusted: TrustedSkillDigests, skill: { pack_id: string | null; name: string; description: string; body: string }): boolean {
+/** DB のスキルの行が、運営のパックの定数または人が承認した中身と同じ（名前・説明・本文）か */
+export function isTrustedSkill(
+  trusted: TrustedSkillDigests,
+  skill: { pack_id: string | null; name: string; description: string; body: string; origin?: "pack" | "learned"; approved_digest?: string | null },
+): boolean {
+  // 育ったスキルは、人が承認したときの中身と一致するものだけ（カタログは見ない）。origin の省略は pack
+  if (skill.origin === "learned") return typeof skill.approved_digest === "string" && skill.approved_digest === skillDigest(skill);
   if (skill.pack_id === null) return false;
   const want = trusted.get(skillTrustKey(skill.pack_id, skill.name));
   return want !== undefined && want === skillDigest(skill);

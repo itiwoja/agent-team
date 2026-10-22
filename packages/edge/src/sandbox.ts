@@ -13,6 +13,7 @@ import { EdgeError, toolErrorText, type ToolCallResult } from "@open-team/runner
 import { sleepMs } from "@open-team/llm";
 import { maskSecrets } from "@open-team/platform";
 import { appendAuditLog, lockWorkspace, system, wsCtxOf, type PolicyDecisionRow, type SandboxCommandRow, type SandboxSessionRow, type SandboxTool, type TaskRow, type Uuid, type WsCtx } from "@open-team/db";
+import { touchSkillUsed } from "@open-team/db/evolution";
 import { getTask, lockTask, setTaskTaint, touchTaskHeartbeat } from "@open-team/db/edge";
 import {
   claimNextSandboxCommand,
@@ -239,8 +240,8 @@ async function commitTaskTaint(rt: EdgeRuntime, ctx: WsCtx, taskId: Uuid, next: 
 }
 
 /**
- * load_skill：担当自身のスキルを名前で読む（パックで入った手順書。外へは出ない）。
- * 運営のパックの定数と同じ中身（(pack_id, 名前) の (名前, 説明, 本文) の SHA-256 が一致：skill-trust.ts）なら信頼された手順書として渡す。
+ * load_skill：担当自身のスキルを名前で読む（パックで入った手順書・承認した育ったスキル。外へは出ない）。
+ * 運営のパックの定数または承認した中身と同じ（(名前, 説明, 本文) の SHA-256 が一致：skill-trust.ts）なら信頼された手順書として渡す。
  * それ以外（カタログにない・書き換えられた）は <untrusted> で包み、読んだタスクを skill で汚染する（コミットしてから返す：SG-05）
  */
 export async function loadSkill(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row: PolicyDecisionRow): Promise<ToolCallResult> {
@@ -252,6 +253,14 @@ export async function loadSkill(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row:
     // 一覧に出すのは信頼できるスキルの名前だけ（DB の名前を包まずに返さない：SG-05）。探した名前は担当が書いたもの
     const names = skills.filter((s) => isTrustedSkill(rt.trustedSkills, s)).map((s) => s.name);
     return { kind: "text", text: `スキル「${name}」はありません。使えるスキル：${names.join("、") || "（なし）"}` };
+  }
+  // 本番のタスクで読んだら使った時刻を残す（信頼されたかどうかは問わない。記録の失敗でタスクは止めない）
+  if (!task.is_dry_run && task.rehearsal_run_id === null && !task.shadow) {
+    try {
+      await touchSkillUsed(rt.db, ctx, hit.id, rt.clock.now());
+    } catch (e) {
+      rt.log.warn("skill.touch_failed", "スキルの使った時刻を残せなかった", { workspaceId: ctx.workspaceId, taskId: task.id, skillId: hit.id, error: e });
+    }
   }
   const body = maskSecrets(hit.body, rt.knownSecrets);
   if (isTrustedSkill(rt.trustedSkills, hit)) return { kind: "text", text: `# スキル「${hit.name}」\n\n${body}` };
