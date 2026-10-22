@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@open-team/kernel": "workspace:*",
     "hono": "^4.13.11"
   },
   "devDependencies": {

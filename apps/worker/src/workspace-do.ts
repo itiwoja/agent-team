@@ -1,26 +1,21 @@
 // ワークスペースごとの Durable Object（docs/cloudflare-design.md）。ワークスペースの状態をすべて自分の SQLite に持つ。
-// 中の処理は1本の流れで進むので、読んで判断して書く処理は transactionSync の中に書けば、行のロック（Postgres の M-21）は要らない。
-// スキーマは作られたとき・起き直したときに blockConcurrencyWhile の中で MIGRATIONS を順に当てる（当てた版は schema_migrations に残す）
+// 中の処理は1本の流れで進むので、読んで判断して書く処理は db.transaction の中に書けば、行のロック（Postgres の M-21）は要らない。
+// スキーマ（db/schema.ts）は作られたとき・起き直したときに blockConcurrencyWhile の中で MIGRATIONS を順に当てる（当てた版は schema_migrations に残す）。
+// 表の読み書きは db/repo/*.ts の同期の関数（WsDb を受け取る）
 
 import { DurableObject } from "cloudflare:workers";
+import { MIGRATIONS } from "./db/schema.ts";
+import { wsDbOf, type WsDb } from "./db/sqlite.ts";
+import { initWorkspace } from "./db/workspace.ts";
 
-/** 番号の順に当てる。当てたあとの中身は書き換えない（直すときは新しい番号を足す） */
-export const MIGRATIONS: ReadonlyArray<{ version: number; name: string; sql: string }> = [
-  {
-    version: 1,
-    name: "init",
-    sql: `CREATE TABLE workspace_meta (
-            id              INTEGER PRIMARY KEY CHECK (id = 1),
-            workspace_id    TEXT    NOT NULL,
-            owner_user_id   TEXT    NOT NULL,
-            created_at      TEXT    NOT NULL
-          )`,
-  },
-];
+export { MIGRATIONS };
 
 export class WorkspaceDO extends DurableObject<Env> {
+  private readonly db: WsDb;
+
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
+    this.db = wsDbOf(ctx.storage);
     ctx.blockConcurrencyWhile(async () => {
       this.migrate();
     });
@@ -45,13 +40,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   /** 初めてならワークスペースの持ち主を入れる（2回目以降は何もしない。違う持ち主なら例外） */
   init(workspaceId: string, ownerUserId: string): void {
-    const sql = this.ctx.storage.sql;
-    const row = sql.exec<{ workspace_id: string; owner_user_id: string }>("SELECT workspace_id, owner_user_id FROM workspace_meta WHERE id = 1").toArray()[0];
-    if (row === undefined) {
-      sql.exec("INSERT INTO workspace_meta (id, workspace_id, owner_user_id, created_at) VALUES (1, ?, ?, ?)", workspaceId, ownerUserId, new Date().toISOString());
-      return;
-    }
-    if (row.workspace_id !== workspaceId || row.owner_user_id !== ownerUserId) throw new Error("ワークスペースの持ち主が違う");
+    initWorkspace(this.db, { workspaceId, ownerUserId, now: new Date() });
   }
 
   /** 当てたスキーマの版（新しい順の先頭。なければ 0） */
