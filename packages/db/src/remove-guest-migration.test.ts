@@ -1,5 +1,5 @@
-// 0024（ゲストのワークスペースをやめる）の試験。0023 まで流したデータベースに、全部の表に行のあるオーナーとゲストを入れてから
-// 0024 を流す。ゲストの行は ON DELETE CASCADE で全部の表から消え（監査ログも）、ゲストの利用者も消え、オーナーは残る
+// 0025（ゲストのワークスペースをやめる）の試験。0024 まで流したデータベースに、全部の表に行のあるオーナーとゲストを入れてから
+// 0025 を流す。ゲストの行は ON DELETE CASCADE で全部の表から消え（監査ログも）、ゲストの利用者も消え、オーナーは残る
 import { copyFile, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,12 +30,12 @@ import { appendAuditLog } from "./audit.ts";
 const T = useTestDb({ migrate: false });
 const NOW = new Date("2026-10-12T09:00:00.000Z");
 
-/** 0023 まで流す */
-async function migrateTo0023(url: string): Promise<void> {
-  const dir = await mkdtemp(join(tmpdir(), "ot-mig-0023-"));
+/** 0024 まで流す */
+async function migrateTo0024(url: string): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "ot-mig-0024-"));
   try {
     for (const m of await loadMigrations(MIGRATIONS_DIR)) {
-      if (m.version <= "0023") await copyFile(join(MIGRATIONS_DIR, m.file), join(dir, m.file));
+      if (m.version <= "0024") await copyFile(join(MIGRATIONS_DIR, m.file), join(dir, m.file));
     }
     await runMigrations(url, { dir, roles: false });
   } finally {
@@ -43,8 +43,8 @@ async function migrateTo0023(url: string): Promise<void> {
   }
 }
 
-/** 0023 の形のゲストのワークスペース（利用者・所属・監査ログの起点） */
-async function guestWorkspace0023(db: Db): Promise<FxWorkspace> {
+/** 0024 の形のゲストのワークスペース（利用者・所属・監査ログの起点） */
+async function guestWorkspace0024(db: Db): Promise<FxWorkspace> {
   return db.transaction(async (tx) => {
     const user = (await tx.query<{ id: string }>("INSERT INTO users (login) VALUES ('guest-abcdefgh') RETURNING id")).rows[0]!.id;
     const ws = (
@@ -162,18 +162,18 @@ async function counts(db: Db, workspaceId: string): Promise<Record<string, numbe
   return out;
 }
 
-describe("0024 ゲストのワークスペースをやめる", () => {
+describe("0025 ゲストのワークスペースをやめる", () => {
   it("ゲストは全部の表から消え（監査ログも）、ゲストの利用者も消え、オーナーは残る。kind は owner だけになる", async () => {
     const { db, url } = T();
-    await migrateTo0023(url);
+    await migrateTo0024(url);
     const owner = await fill(db, await fxWorkspace(db, { audit: true }));
-    const guest = await fill(db, await guestWorkspace0023(db));
+    const guest = await fill(db, await guestWorkspace0024(db));
     const before = await counts(db, guest.workspaceId);
     for (const [table, n] of Object.entries(before)) expect(n, `${table} に行がある`).toBeGreaterThan(0);
     const ownerBefore = await counts(db, owner.workspaceId);
 
     const r = await runMigrations(url, { roles: false });
-    expect(r.applied).toContain("0024");
+    expect(r.applied).toContain("0025");
 
     const after = await counts(db, guest.workspaceId);
     for (const [table, n] of Object.entries(after)) expect(n, `${table} が消える`).toBe(0);
@@ -197,9 +197,9 @@ describe("0024 ゲストのワークスペースをやめる", () => {
 
   it("ゲストがなくても流せる", async () => {
     const { db, url } = T();
-    await migrateTo0023(url);
+    await migrateTo0024(url);
     const owner = await fxWorkspace(db, { audit: true });
-    expect((await runMigrations(url, { roles: false })).applied).toContain("0024");
+    expect((await runMigrations(url, { roles: false })).applied).toContain("0025");
     expect((await db.query<{ n: number }>("SELECT count(*) AS n FROM audit_logs WHERE workspace_id = $1", [owner.workspaceId])).rows[0]?.n).toBe(1);
   });
 });

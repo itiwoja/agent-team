@@ -89,7 +89,7 @@ BEGIN
     RETURN;
   END IF;
   GRANT USAGE ON SCHEMA public TO ot_retention;
-  -- ゲストの掃除（0024 で廃止）のために付けていた権限を外す（冪等。付いていなければ何もしない）
+  -- ゲストの掃除（0025 で廃止）のために付けていた権限を外す（冪等。付いていなければ何もしない）
   REVOKE USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public FROM ot_retention;
   REVOKE SELECT ON public.workspaces, public.memberships, public.users, public.sessions, public.tasks, public.action_intents,
     public.approvals, public.audit_logs FROM ot_retention;
