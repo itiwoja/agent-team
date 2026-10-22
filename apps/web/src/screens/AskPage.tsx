@@ -1,4 +1,5 @@
-// SCR-021：依頼（`/asks/:askId`）。頼んだ文・回答・担当の段（渡したもの・やり取り）・送る前の確認・安全チェックの結果
+// SCR-021：依頼（`/asks/:askId`）。上から「あなたの番（止まった担当・送る前の確認）」→「回答」→「担当」→「安全チェック」。
+// 担当と安全チェックは1行にたたみ、いま動いているときだけ開いておく（読む量をいま要るものに絞る）
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, ApiError, describeError, taskFilesUrl, type AgentQuestionView, type ApprovalItem, type AskAnswerView, type AskDetail, type AskMessageView, type AskRehearsalView, type AskTurnView, type StageActivity, type StageView } from "../api";
 import { Avatar } from "../components/Avatar";
@@ -184,21 +185,9 @@ export function AskPage({ askId }: { askId: string }) {
             </Link>
           </p>
         )}
-        {formation && (
-          <p>
-            <a href="#rehearsal" className={`rehearsal-pill is-${rehearsalTone(detail.rehearsal)}`}>
-              安全チェック：{askHeadLine(detail.rehearsal, detail.rehearsal ? rehearsalActive(detail.rehearsal) : false)} <Chevron dir="right" size={14} />
-            </a>
-          </p>
-        )}
       </header>
 
-      <Stages detail={detail} messages={messages} stale={Boolean(error) || !online} />
-      {ask.status === "failed" ? (
-        <FailedCard text={ask.text} reason={ask.failure?.reason ?? null} message={ask.failure?.message ?? "作れませんでした"} />
-      ) : (
-        <Conversation detail={detail} approvals={visible.length} onReply={() => load()} blocked={killSwitchEngaged || !online} />
-      )}
+      {/* あなたの番：止まった担当のやり直し・送る前の確認。あれば回答より先に */}
       {detail.resume && <Resume askId={askId} resume={detail.resume} onDone={() => load()} blocked={killSwitchEngaged || !online} />}
 
       {approvalsError ? (
@@ -220,11 +209,24 @@ export function AskPage({ askId }: { askId: string }) {
         )
       )}
 
-      {/* 編成ができずに失敗した依頼には、練習させる担当がいない */}
+      {ask.status === "failed" ? (
+        <FailedCard text={ask.text} reason={ask.failure?.reason ?? null} message={ask.failure?.message ?? "作れませんでした"} />
+      ) : (
+        <Conversation detail={detail} approvals={visible.length} onReply={() => load()} blocked={killSwitchEngaged || !online} stopped={detail.resume !== null} />
+      )}
+
+      <Stages detail={detail} messages={messages} stale={Boolean(error) || !online} />
+
+      {/* 編成ができずに失敗した依頼には、練習させる担当がいない。区画は1行にたたみ、試している間だけ開く */}
       {formation && (
-        <div id="rehearsal">
+        <details className="fold rehearsal-fold" id="rehearsal" open={detail.rehearsal ? rehearsalActive(detail.rehearsal) : false}>
+          <summary className="fold-summary">
+            <h2 className="fold-title">安全チェック</h2>
+            <span className={`fold-note is-${rehearsalTone(detail.rehearsal)}`}>{askHeadLine(detail.rehearsal, detail.rehearsal ? rehearsalActive(detail.rehearsal) : false)}</span>
+            <Chevron />
+          </summary>
           <RehearsalSection askId={askId} summary={detail.rehearsal} />
-        </div>
+        </details>
       )}
     </div>
   );
@@ -291,7 +293,7 @@ function FailedCard({ text, reason, message }: { text: string; reason: string | 
  * 頼んだこと → 回答 を古い順に並べる（返事のたびに1往復増える）。最後（今の実行）だけ全文を出し、前のものは1行に畳んで開ける。
  * 最初の依頼の文は見出しにあるので繰り返さず、返事の文は右寄せの面で「あなた」の発言として出す（どの文への回答かが分かるように）
  */
-function Conversation({ detail, approvals, onReply, blocked }: { detail: AskDetail; approvals: number; onReply: () => void; blocked: boolean }) {
+function Conversation({ detail, approvals, onReply, blocked, stopped }: { detail: AskDetail; approvals: number; onReply: () => void; blocked: boolean; stopped: boolean }) {
   const turns = turnsOf(detail);
   const last = turns.length - 1;
   const latest = turns[last] ?? null;
@@ -305,9 +307,9 @@ function Conversation({ detail, approvals, onReply, blocked }: { detail: AskDeta
   const pendingReplies = detail.pendingReplies ?? [];
   return (
     <section className="block thread" id="answer" aria-label="頼んだことと回答">
-      {turns.length === 0 && <PendingCard name={spokesperson} status="running" />}
+      {turns.length === 0 && !stopped && <PendingCard name={spokesperson} status="running" />}
       {turns.map((t, i) => (
-        <Turn key={t.runId} t={t} latest={i === last} detail={detail} approvals={approvals} reporter={reporterOf(t.answer)} spokesperson={spokesperson} />
+        <Turn key={t.runId} t={t} latest={i === last} detail={detail} approvals={approvals} reporter={reporterOf(t.answer)} spokesperson={spokesperson} stopped={stopped} />
       ))}
       {(detail.agentQuestions ?? []).map((q) => (
         <AgentQuestionCard key={q.questionId} askId={detail.ask.id} q={q} onAnswered={onReply} blocked={blocked} />
@@ -334,9 +336,11 @@ function Conversation({ detail, approvals, onReply, blocked }: { detail: AskDeta
   );
 }
 
-function Turn({ t, latest, detail, approvals, reporter, spokesperson }: { t: AskTurnView; latest: boolean; detail: AskDetail; approvals: number; reporter: string; spokesperson: string | null }) {
+function Turn({ t, latest, detail, approvals, reporter, spokesperson, stopped }: { t: AskTurnView; latest: boolean; detail: AskDetail; approvals: number; reporter: string; spokesperson: string | null; stopped: boolean }) {
   const [open, setOpen] = useState(false);
   const label = turnLabel(t, detail.ask.trigger?.label ?? null);
+  // 定期の実行が止まったとき：文のない「あなた · 定期の実行」の行だけが残るので、止まった担当のカード（Resume）に任せて出さない
+  if (stopped && latest && t.answer === null && t.kind === "schedule") return null;
   return (
     <div className={latest ? "turn is-latest" : "turn"}>
       {showsRequest(t, detail.ask.text) && (
@@ -355,7 +359,8 @@ function Turn({ t, latest, detail, approvals, reporter, spokesperson }: { t: Ask
       )}
       {t.answer === null ? (
         latest ? (
-          <PendingCard name={spokesperson} status={t.status} />
+          // 止まった担当のカード（Resume）が同じことを言うので、重ねて出さない
+          stopped ? null : <PendingCard name={spokesperson} status={t.status} />
         ) : (
           <p className="muted turn-none">{noAnswerText(t.status) ?? "回答はありません"}</p>
         )
@@ -657,9 +662,21 @@ export function Stages({ detail, messages, stale = false }: { detail: AskDetail;
   const stages = useMemo(() => [...detail.stages].sort((a, b) => (a.isAggregator === b.isAggregator ? (a.position ?? 0) - (b.position ?? 0) : a.isAggregator ? 1 : -1)), [detail.stages]);
   if (stages.length === 0) return null;
   const counts = teamCounts(stages);
+  const working = counts.working > 0 && !stale;
+  const line = stale ? "最後に取得した状態" : counts.working > 1 ? `${counts.working}人が同時に作業中` : counts.working === 1 ? "1人が作業中" : counts.stopped > 0 ? "止まった担当がいます" : counts.done === stages.length ? `${stages.length}人 · 完了` : `${stages.length}人`;
   return (
+    <details className="fold team-fold" open={working || stale} key={detail.run?.runId ?? "pending"}>
+      <summary className="fold-summary">
+        <h2 className="fold-title">担当</h2>
+        <span className="fold-note" aria-live="polite">{line}</span>
+        <span className="fold-faces" aria-hidden="true">
+          {stages.slice(0, 5).map((s) => (
+            <Avatar key={s.memberId} name={s.agentName} mood={moodOfStage(s.state === "running" && !isWorking(s) ? "waiting" : s.state)} size={26} />
+          ))}
+        </span>
+        <Chevron />
+      </summary>
     <section className={`block stages team-board team-simple${counts.working > 1 && !stale ? " is-parallel" : ""}`} aria-label="チームの活動">
-      <h2 className="team-simple-title" aria-live="polite">{stale ? "最後に取得した状態" : counts.working > 1 ? `${counts.working}人が同時に作業中` : counts.working === 1 ? "1人が作業中" : counts.done === stages.length ? "作業が完了しました" : "チームの状況"}</h2>
       {stale && <p role="status" className="team-reason">更新できていません。</p>}
       <MobileTeam key={`mobile-${detail.run?.runId ?? "pending"}`} detail={detail} stages={stages} stale={stale} />
       <ol className="plain stage-list team-desktop">
@@ -681,6 +698,7 @@ export function Stages({ detail, messages, stale = false }: { detail: AskDetail;
         {messages.length > 0 && <div className="team-transfers"><h3>担当間のやり取り</h3><ul className="plain exchange">{threadMessages(messages).map(({message:m,replies})=><li key={m.id}><p>{m.fromAgentName}「{m.body}」{m.tainted && "（外部の内容を含む）"}</p>{replies.map(r=><p key={r.id}>{r.fromAgentName}「{r.body}」</p>)}</li>)}</ul></div>}
       </details>
     </section>
+    </details>
   );
 }
 

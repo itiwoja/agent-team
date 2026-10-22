@@ -763,112 +763,112 @@ function ApprovalRow({
       {a.calendar && <CalendarCardView card={a.calendar} />}
       {a.github && <GithubCardView card={a.github} />}
       {a.canDecide && <CheckPrecedent precedent={a.precedent} />}
-      {open && (
-        <div className="row-detail" id={detailId}>
-          <Detail item={item} />
-          {a.canDecide && !rejecting && !remembering && (
-            <div className="detail-actions">
+        {a.canDecide && !rejecting && !remembering && (
+          <div className="detail-actions">
+            <button
+              type="button"
+              className="link quiet"
+              onClick={() => setRejecting(true)}
+              disabled={blocked || busy}
+            >
+              送らない
+            </button>
+            {a.remember.offered && (
               <button
                 type="button"
                 className="link quiet"
-                onClick={() => setRejecting(true)}
+                onClick={() => setRemembering(true)}
+                disabled={blocked || busy}
+              >
+                以後も許可
+              </button>
+            )}
+          </div>
+        )}
+        {rejecting && (
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void decide({
+                decision: "reject",
+                ...(comment.trim() ? { comment: comment.trim() } : {}),
+              });
+            }}
+          >
+            <label htmlFor={`${detailId}-why`}>理由（任意）</label>
+            <input
+              id={`${detailId}-why`}
+              value={comment}
+              maxLength={1000}
+              onChange={(e) => setComment(e.target.value)}
+              autoFocus
+            />
+            <div className="inline-actions">
+              <button
+                type="submit"
+                className="btn btn-primary"
                 disabled={blocked || busy}
               >
                 送らない
               </button>
-              {a.remember.offered && (
-                <button
-                  type="button"
-                  className="link quiet"
-                  onClick={() => setRemembering(true)}
-                  disabled={blocked || busy}
-                >
-                  以後も許可
-                </button>
-              )}
+              <button
+                type="button"
+                className="link quiet"
+                onClick={() => setRejecting(false)}
+              >
+                やめる
+              </button>
             </div>
-          )}
-          {rejecting && (
-            <form
-              className="inline-form"
-              onSubmit={(e) => {
-                e.preventDefault();
-                void decide({
-                  decision: "reject",
-                  ...(comment.trim() ? { comment: comment.trim() } : {}),
-                });
-              }}
-            >
-              <label htmlFor={`${detailId}-why`}>理由（任意）</label>
-              <input
-                id={`${detailId}-why`}
-                value={comment}
-                maxLength={1000}
-                onChange={(e) => setComment(e.target.value)}
-                autoFocus
-              />
-              <div className="inline-actions">
-                <button
-                  type="submit"
-                  className="btn btn-primary"
-                  disabled={blocked || busy}
-                >
-                  送らない
-                </button>
-                <button
-                  type="button"
-                  className="link quiet"
-                  onClick={() => setRejecting(false)}
-                >
-                  やめる
-                </button>
-              </div>
-            </form>
-          )}
-          {remembering && a.remember.fixedHash && (
-            <div className="inline-form">
-              <p className="row-title">この内容で固定して許可しますか？</p>
-              <ul className="plain">
-                {a.remember.fixed.map((f) => (
-                  <li key={f.arg}>
-                    <span className="muted">{argLabel(f.arg)}</span>{" "}
-                    {f.label ? `${f.label}（${f.text}）` : f.text}
-                  </li>
-                ))}
-              </ul>
-              <p className="muted small">
-                次からは、これと同じ送り先・内容なら確認なしで送ります。
+          </form>
+        )}
+        {remembering && a.remember.fixedHash && (
+          <div className="inline-form">
+            <p className="row-title">この内容で固定して許可しますか？</p>
+            <ul className="plain">
+              {a.remember.fixed.map((f) => (
+                <li key={f.arg}>
+                  <span className="muted">{argLabel(f.arg)}</span>{" "}
+                  {f.label ? `${f.label}（${f.text}）` : f.text}
+                </li>
+              ))}
+            </ul>
+            <p className="muted small">
+              次からは、これと同じ送り先・内容なら確認なしで送ります。
+            </p>
+            {a.remember.taintedOrigin && (
+              <p className="small" role="note">
+                外部の内容を読んだ後の書き込みです。宛先と内容を確かめてから許可してください
               </p>
-              {a.remember.taintedOrigin && (
-                <p className="small" role="note">
-                  外部の内容を読んだ後の書き込みです。宛先と内容を確かめてから許可してください
-                </p>
-              )}
-              <div className="inline-actions">
-                <button
-                  type="button"
-                  className="btn btn-primary"
-                  disabled={blocked || busy}
-                  onClick={() =>
-                    void decide({
-                      decision: "approve",
-                      remember: true,
-                      rememberFixedHash: a.remember.fixedHash ?? "",
-                    })
-                  }
-                >
-                  許可する
-                </button>
-                <button
-                  type="button"
-                  className="link quiet"
-                  onClick={() => setRemembering(false)}
-                >
-                  やめる
-                </button>
-              </div>
+            )}
+            <div className="inline-actions">
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={blocked || busy}
+                onClick={() =>
+                  void decide({
+                    decision: "approve",
+                    remember: true,
+                    rememberFixedHash: a.remember.fixedHash ?? "",
+                  })
+                }
+              >
+                許可する
+              </button>
+              <button
+                type="button"
+                className="link quiet"
+                onClick={() => setRemembering(false)}
+              >
+                やめる
+              </button>
             </div>
-          )}
+          </div>
+        )}
+      {open && (
+        <div className="row-detail" id={detailId}>
+          <Detail item={item} />
         </div>
       )}
       {entry?.status === "failed" && entry.error && (
@@ -885,7 +885,7 @@ function ApprovalRow({
   );
 }
 
-/** SCR-007 の中身：宛先・中身・その他・汚染・ルールによる判定 */
+/** SCR-007 の中身：宛先・中身・その他・汚染・ルールによる判定（開いたときだけ。送る・送らないの操作は開かなくても押せる） */
 function Detail({ item }: { item: ApprovalItem }) {
   const a = item.approval;
   const section = (title: string, rows: typeof a.destination) =>

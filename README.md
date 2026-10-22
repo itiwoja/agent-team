@@ -43,6 +43,7 @@ flowchart LR
 | [docs/architecture.md](docs/architecture.md) | サービス構成・信頼の境界 |
 | [docs/safety.md](docs/safety.md) | 統制（Kernel）・安全チェック（リハーサル）の仕組み |
 | [docs/development.md](docs/development.md) | ローカルでの起動・テスト・計測 |
+| [docs/ui-design.md](docs/ui-design.md) | 画面の設計（言葉・並び・たたみ方の決まり） |
 | [docs/measurements/](docs/measurements/) | 本物の Gemini で測った結果 |
 
 ## 技術

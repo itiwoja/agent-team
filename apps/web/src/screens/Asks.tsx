@@ -83,16 +83,13 @@ export function Asks({ q: initialQ = "", status: initialStatus = null }: { q?: s
             </span>
           )}
         </h1>
-        <Link to="/" className="btn btn-primary asks-new">
-          新しく頼む
-        </Link>
       </div>
 
       {asks.length === 0 ? (
         <div className="done-empty asks-empty">
           <p className="muted">まだ何も頼んでいません。入口で一言頼むと、ここに並びます</p>
           <Link to="/" className="btn">
-            任せるへ
+            入口へ
           </Link>
         </div>
       ) : (

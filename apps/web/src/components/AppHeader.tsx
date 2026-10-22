@@ -1,5 +1,5 @@
-// AppHeader：左は ≡（メニュー：依頼・チェック・エージェント・パック）、真ん中はひとつ上へ戻る矢印（行き先は lib/screen.ts の backOf。入口自体では出さない）。
-// 右は「見てほしいもの」シートを開くボタン（件数の印つき。0件のときは控えめに出す）。チェックの画面自身では出さず、左と同じ幅の空きにして真ん中を中央に保つ。
+// AppHeader：左は ≡（メニュー：入口・依頼・チェック・担当・パック）、真ん中はひとつ上へ戻る矢印（行き先は lib/screen.ts の backOf。入口自体では出さない）。
+// 右はチェックのシートを開くボタン（件数の印つき。0件のときは控えめに出す）。チェックの画面自身では出さず、左と同じ幅の空きにして真ん中を中央に保つ。
 // 全部止めている間は帯で知らせる。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AskSummary } from "../api";
@@ -94,7 +94,7 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
             type="button"
             ref={checkBtnRef}
             className={attention > 0 ? "icon-btn appheader-check" : "icon-btn appheader-check is-quiet"}
-            aria-label={attention > 0 ? `見てほしいもの ${attention}件` : "見てほしいもの"}
+            aria-label={attention > 0 ? `チェック ${attention}件` : "チェック"}
             aria-haspopup="dialog"
             aria-expanded={sheetOpen}
             onClick={() => setSheetOpen((v) => !v)}
@@ -197,29 +197,10 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
             <CloseIcon />
           </button>
         </div>
-        {workspace.guest && (
-          <p className="drawer-note muted small">
-            ゲスト・あと{workspace.guest.daysLeft}日
-            <br />
-            今日使える AI の費用：あと ${Number(remainingUsd).toFixed(2)}
-          </p>
-        )}
-        {workspace.guest && (
-          <button
-            type="button"
-            className="btn btn-ghost drawer-restart"
-            onClick={() => {
-              onClose();
-              onRestart();
-            }}
-          >
-            最初からやり直す
-          </button>
-        )}
         <nav className="drawer-nav" aria-label="画面">
           <Link to="/" className={"drawer-item" + (route.name === "home" ? " is-current" : "")} aria-current={cur("home")} onClick={onClose}>
             <ComposeIcon />
-            <span>任せる</span>
+            <span>入口</span>
           </Link>
           <Link to="/asks" className={"drawer-item" + (route.name === "asks" ? " is-current" : "")} aria-current={cur("asks")} onClick={onClose}>
             <TasksIcon />
@@ -237,7 +218,7 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
           {/* 済んだもの（/done）はメニューに出さない。チェックの末尾の「済んだもの」から開く */}
           <Link to="/agents" className={"drawer-item" + (route.name === "agents" ? " is-current" : "")} aria-current={cur("agents")} onClick={onClose}>
             <AgentsIcon />
-            <span>エージェント</span>
+            <span>担当</span>
           </Link>
           {/* パック（D-116）：エージェント・スキル・スクリプトの詰め合わせを入れる棚 */}
           <Link to="/packs" className={"drawer-item" + (route.name === "packs" || route.name === "pack" ? " is-current" : "")} aria-current={cur("packs")} onClick={onClose}>
@@ -273,7 +254,31 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
             </section>
           )}
         </nav>
-        {/* つなぐ入口（入口の画面からは外した。カレンダーの依頼を出したときは依頼の画面にも出る） */}
+        {/* つなぐ・設定：ふだんは使わないので、たたんでおく（カレンダーの依頼を出したときは依頼の画面にも案内が出る） */}
+        <details className="drawer-more">
+          <summary>
+            <span>つなぐ・設定</span>
+            <Chevron size={14} />
+          </summary>
+        {workspace.guest && (
+          <p className="drawer-note muted small">
+            ゲスト・あと{workspace.guest.daysLeft}日
+            <br />
+            今日使える AI の費用：あと ${Number(remainingUsd).toFixed(2)}
+          </p>
+        )}
+        {workspace.guest && (
+          <button
+            type="button"
+            className="btn btn-ghost drawer-restart"
+            onClick={() => {
+              onClose();
+              onRestart();
+            }}
+          >
+            最初からやり直す
+          </button>
+        )}
         {google.available && !google.connected && (
           <a className="drawer-item" href={connectHref()}>
             <CalendarIcon />
@@ -290,6 +295,7 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
           </div>
         )}
         <GithubMenuSection />
+        </details>
         <div className="drawer-foot">
           <button type="button" className="btn btn-ghost" onClick={() => void signOut()}>
             出る

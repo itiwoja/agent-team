@@ -326,6 +326,36 @@
   }
 }
 
+/* メニューの「つなぐ・設定」：ふだん使わないものをたたむ。開くと中身は今までの行のまま */
+.drawer-more {
+  border-top: 1px solid var(--line);
+  padding-top: 4px;
+}
+.drawer-more > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 44px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.drawer-more > summary::-webkit-details-marker {
+  display: none;
+}
+.drawer-more[open] > summary {
+  color: var(--text);
+}
+.drawer-more[open] > summary .chev {
+  transform: rotate(180deg);
+}
+.drawer-more > .drawer-item {
+  margin-top: 4px;
+}
+
 /* メニューの Google カレンダーの行（切断は一度だけ押せる小さな操作） */
 .drawer-gcal {
   display: grid;
