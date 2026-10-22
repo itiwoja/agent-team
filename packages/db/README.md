@@ -11,8 +11,8 @@ PostgreSQL 16 の接続・マイグレーション・行の型・監査ログ・
 | `src/migrate.ts` | 実行器と CLI | db-core |
 | `src/types.ts` | 全部の表の行の型と列挙 | db-core |
 | `src/audit.ts` | `appendAuditLog`・`verifyAuditChain`・`computeAuditHash` | db-core |
-| `src/workspace.ts`・`src/session.ts`・`src/exec-context.ts` | `WsCtx`・オーナーとゲストの作成・セッション・CSRF・実行の文脈 | db-core |
-| `src/system/*` | ワークスペースをまたぐ処理（掃除・ゲストの数・入口の試行・全体の費用・毎分の起こしの走査） | db-core |
+| `src/workspace.ts`・`src/session.ts`・`src/exec-context.ts` | `WsCtx`・オーナーのワークスペースの作成（ワークスペースはオーナーの1つだけ）・セッション・CSRF・実行の文脈 | db-core |
+| `src/system/*` | ワークスペースをまたぐ処理（古い行の掃除・入口の試行・全体の費用・毎分の起こしの走査） | db-core |
 | `src/testing.ts`（`test-database.ts`・`test-helpers.ts`・`testing-fixtures.ts`） | `@open-team/db/testing`（試験用のデータベースと行を作る道具） | db-core |
 | `src/repo/gateway.ts`・`edge.ts`・`app.ts`・`app-*.ts` | 業務の問い合わせ（`@open-team/db/gateway` など） | 各担当 |
 | `src/sim/**` | `sim` スキーマの保存（SimStore の Postgres 版。`@open-team/db/sim`） | sim-persistence |
@@ -23,10 +23,10 @@ PostgreSQL 16 の接続・マイグレーション・行の型・監査ログ・
    `WHERE id = $2 AND workspace_id = $1`。見つからなければ `null` を返す（API は 404 `NOT_FOUND`。別のワークスペースの ID でも同じ）。
 2. `WsCtx` は **セッション（`resolveSession`）・タスクのトークン・Intent の行から DB で引き直したもの** からだけ作る。
    リクエストの本文・ヘッダーの `workspace_id`・`rehearsal_run_id`・`shadow` は読まない（15:486）。行から作るときは `wsCtxOf(row)`。
-3. **ワークスペースをまたぐ処理は `src/system/*`**（`system.cleanupGuestWorkspaces` など）。業務の画面の API からは呼ばない。
+3. **ワークスペースをまたぐ処理は `src/system/*`**（`system.purgeExpiredRows` など）。業務の画面の API からは呼ばない。
    repo/*.ts にワークスペースで絞らない問い合わせを書かない（必要なら db-core に頼む）。今あるもの：
-   - 入口：`system.hashIp`・`normalizeIp`（IPv6 は /64）・`recordEntryAttempt`・`countEntryAttempts`・`recordWrongToken`・`wrongTokenDelayMs`、`system.countActiveGuestWorkspaces`
-   - 掃除：`system.cleanupGuestWorkspaces(maintDb, now, { batch, graceMs, stopWorkspace })`（`ot_retention` の接続で）・`stopWorkspaceForCleanup`・`purgeExpiredRows`・`KILL_SWITCH_CHANNEL`
+   - 入口：`system.hashIp`・`normalizeIp`（IPv6 は /64）・`recordEntryAttempt`・`countEntryAttempts`・`recordWrongToken`・`wrongTokenDelayMs`
+   - 掃除：`system.purgeExpiredRows(maintDb, now)`（24時間より古い `entry_attempts`・`idempotency_keys`・`workspace_events`。`ot_retention` の接続で）・`KILL_SWITCH_CHANNEL`
    - 費用：`system.getPlatformDayCostUsd`（全体の今日。Asia/Tokyo）・`dayRange`・`usdToMicro`・`microToUsd`
    - 毎分の起こし（EP-47）の走査：`system.scanDueAsks`・`scanExpiredApprovals`・`scanStuckExecutingIntents`・`scanQueuedTasks`・`scanQueuedRehearsalRuns`。
      **ロックを取らずに候補を返すだけ**。1件ずつ `wsCtxOf` で文脈を作り、ロックの順（下の7）で取り直して状態を確かめてから処理する
@@ -116,7 +116,7 @@ export async function expireIntent(tx: Tx, ctx: WsCtx, intentId: Uuid, now: Date
 | `ot_app` | app | 業務の表の読み書き。`audit_logs` は INSERT・SELECT だけ、`workspaces`・`users` の DELETE なし、`sim` なし |
 | `ot_gateway` | gateway | 読み取り、`action_intents`・`approvals`・`tasks`・`connectors`・`connector_tools` の UPDATE、`audit_logs`・`policy_decisions`・`task_events`・`workspace_events`・`connector_tools` の INSERT、`workspaces` は `audit_seq`・`audit_last_hash` の列だけ。DELETE なし・`sessions` は見えない |
 | `ot_sim` | sim-world | `sim` スキーマだけ（`sim.events` は UPDATE なし） |
-| `ot_retention` | app の掃除だけ（`DATABASE_URL_MAINT`。DB §2・SO の `ot_maint` と同じ役目） | `workspaces`・`users`・`sessions`・`entry_attempts`・`idempotency_keys`・`workspace_events` の DELETE と、止めるための UPDATE |
+| `ot_retention` | app の掃除だけ（`DATABASE_URL_MAINT`。DB §2・SO の `ot_maint` と同じ役目） | `entry_attempts`・`idempotency_keys`・`workspace_events` の SELECT・DELETE だけ |
 
 - ロールは NOLOGIN で作る（流す利用者に CREATEROLE があるときだけ）。ログインは `ALTER ROLE ot_app LOGIN PASSWORD '…'` か、
   ログイン用の利用者に `GRANT ot_app TO <利用者>`。
@@ -141,7 +141,7 @@ const T = useTestDb(); // 試験（it）ごとに新しいデータベース（�
 
 it("…", async () => {
   const { db, url } = T();
-  const ws = await fxWorkspace(db);          // 利用者・ワークスペース・所属（owner）
+  const ws = await fxWorkspace(db);          // 利用者・ワークスペース（オーナー）・所属（owner）
   const agent = await fxAgent(db, ws);       // エージェント・スナップショット・仕事
   const { taskId } = await fxTask(db, ws, agent);
 });
@@ -152,4 +152,6 @@ it("…", async () => {
 - マイグレーション済みの型紙のデータベースから写すので、1件 15ms ほど。最初の1回はコンテナの起動で数秒〜数十秒（`useTestDb` が beforeAll で待つ。自分で使うなら `warmUpTestDatabase` を長めの時間で）。
 - そのほか：`openTestDb()`（Db つき）・`createTestDatabase({ migrate: false })`（空）・`openRoleDb(url, "ot_gateway")`（そのロールの権限でつなぐ。権限の試験用）、
   行を作る道具 `fxWorkspace`・`fxConnector`・`fxAgent`・`fxAsk`・`fxAskRun`・`fxAskMember`・`fxTask`・`fxIntent`・`fxApproval`・`fxRehearsalRun`・`fxRehearsalCase`・`fxRehearsalScenario`・`fxSimExecution`・`fxSimSnapshot`・`fxUsage`。
+- ワークスペースはオーナーの1つだけ（`workspaces_single_owner_uq`）。分離の試験で2つ目が要るときは `fxWorkspace(db, { second: true })`
+  （その試験のデータベースの一意の索引を外して作る。本番では作れない）。
 - `@open-team/db/testing` は vitest を import する（試験からだけ使う）。

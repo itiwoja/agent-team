@@ -12,12 +12,12 @@ export interface ScanHit {
   id: Uuid;
 }
 
-/** next_run_at が来た定期の依頼（古い順）。状態での絞り込み・次の時刻の計算は呼ぶ側。削除予約のワークスペースは除く */
+/** next_run_at が来た定期の依頼（古い順）。状態での絞り込み・次の時刻の計算は呼ぶ側 */
 export async function scanDueAsks(q: Queryable, now: Date, limit = 50): Promise<Array<ScanHit & { nextRunAt: Date; status: AskStatus }>> {
   const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; next_run_at: Date; status: AskStatus }>(
     `SELECT a.workspace_id, w.kind, a.id, a.next_run_at, a.status
        FROM asks a JOIN workspaces w ON w.id = a.workspace_id
-      WHERE a.next_run_at <= $1 AND w.delete_requested_at IS NULL
+      WHERE a.next_run_at <= $1
       ORDER BY a.next_run_at, a.id LIMIT $2`,
     [now, limit],
   );
@@ -59,12 +59,12 @@ export async function scanStuckExecutingIntents(q: Queryable, updatedBefore: Dat
   return r.rows.map((x) => ({ workspaceId: x.workspace_id, workspaceKind: x.kind, id: x.id, taskId: x.task_id }));
 }
 
-/** queued のタスク（古い順）。同時実行数（BR-08）・canStartWork は呼ぶ側。Kill Switch・削除予約のワークスペースは除く */
+/** queued のタスク（古い順）。同時実行数（BR-08）・canStartWork は呼ぶ側。Kill Switch のワークスペースは除く */
 export async function scanQueuedTasks(q: Queryable, limit = 100): Promise<Array<ScanHit & { queuedAt: Date }>> {
   const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; queued_at: Date }>(
     `SELECT t.workspace_id, w.kind, t.id, t.queued_at
        FROM tasks t JOIN workspaces w ON w.id = t.workspace_id
-      WHERE t.status = 'queued' AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
+      WHERE t.status = 'queued' AND NOT w.kill_switch_engaged
       ORDER BY t.queued_at, t.id LIMIT $1`,
     [limit],
   );
@@ -72,7 +72,7 @@ export async function scanQueuedTasks(q: Queryable, limit = 100): Promise<Array<
 }
 
 /**
- * 動いている依頼の実行（running。止まった担当の拾い直し・queued のタスクを動かす・まとめ役の待ち時間：G-02）。Kill Switch・削除予約は除く。
+ * 動いている依頼の実行（running。止まった担当の拾い直し・queued のタスクを動かす・まとめ役の待ち時間：G-02）。Kill Switch は除く。
  * 拾った順は last_scanned_at の古い順（まだ拾っていないものが先）。拾ったものは markAskRunsScanned で印を付けて回す
  */
 export async function scanActiveAskRuns(q: Queryable, limit = 50): Promise<Array<ScanHit & { askId: Uuid; createdBy: Uuid }>> {
@@ -81,7 +81,7 @@ export async function scanActiveAskRuns(q: Queryable, limit = 50): Promise<Array
        FROM ask_runs r
        JOIN asks a ON a.workspace_id = r.workspace_id AND a.id = r.ask_id
        JOIN workspaces w ON w.id = r.workspace_id
-      WHERE r.status = 'running' AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
+      WHERE r.status = 'running' AND NOT w.kill_switch_engaged
       ORDER BY r.last_scanned_at ASC NULLS FIRST, r.started_at, r.id LIMIT $1`,
     [limit],
   );
@@ -90,7 +90,7 @@ export async function scanActiveAskRuns(q: Queryable, limit = 50): Promise<Array
 
 /**
  * 順番待ちの返事があって、動いている実行がない依頼（実行が終わったあとの取りこぼし・再起動の後の拾い直し）。
- * 依頼が running・done のものだけ。Kill Switch・削除予約は除く。古い返事が先
+ * 依頼が running・done のものだけ。Kill Switch は除く。古い返事が先
  */
 export async function scanAsksWithPendingReplies(q: Queryable, limit = 50): Promise<Array<ScanHit & { askId: Uuid }>> {
   const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; ask_id: Uuid }>(
@@ -98,7 +98,7 @@ export async function scanAsksWithPendingReplies(q: Queryable, limit = 50): Prom
        FROM ask_pending_replies p
        JOIN asks a ON a.workspace_id = p.workspace_id AND a.id = p.ask_id
        JOIN workspaces w ON w.id = p.workspace_id
-      WHERE p.consumed_at IS NULL AND a.status IN ('running','done') AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
+      WHERE p.consumed_at IS NULL AND a.status IN ('running','done') AND NOT w.kill_switch_engaged
         AND NOT EXISTS (SELECT 1 FROM ask_runs r WHERE r.workspace_id = p.workspace_id AND r.ask_id = p.ask_id AND r.status IN ('running','waiting_input'))
       GROUP BY p.workspace_id, w.kind, p.ask_id
       ORDER BY min(p.created_at) LIMIT $1`,
@@ -123,7 +123,7 @@ export async function scanStaleLiveTasks(q: Queryable, staleBefore: Date, limit 
     `SELECT t.workspace_id, w.kind, t.id, t.ask_id
        FROM tasks t JOIN workspaces w ON w.id = t.workspace_id
       WHERE t.status IN ('provisioning', 'running')
-        AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
+        AND NOT w.kill_switch_engaged
         AND COALESCE(t.last_heartbeat_at, t.updated_at) <= $1
       ORDER BY COALESCE(t.last_heartbeat_at, t.updated_at), t.id LIMIT $2`,
     [staleBefore, limit],
@@ -137,7 +137,7 @@ export async function scanStuckGeneratingAsks(q: Queryable, updatedBefore: Date,
     `SELECT a.workspace_id, w.kind, a.id
        FROM asks a JOIN workspaces w ON w.id = a.workspace_id
       WHERE a.status = 'generating' AND (a.question IS NULL OR a.question_answer IS NOT NULL)
-        AND a.updated_at <= $1 AND w.delete_requested_at IS NULL
+        AND a.updated_at <= $1
       ORDER BY a.updated_at, a.id LIMIT $2`,
     [updatedBefore, limit],
   );

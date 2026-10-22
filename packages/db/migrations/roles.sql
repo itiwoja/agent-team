@@ -5,7 +5,8 @@
 --   ot_app        app。業務の表の読み書き。audit_logs は INSERT・SELECT だけ、workspaces・users の DELETE なし
 --                 connector_credentials は書くだけ（refresh_token_enc は読めない。更新は revoked_at と allow_protected_write だけ）
 --   ot_gateway    gateway。読み取り＋Intent・承認・タスク・ツールの更新、監査ログ・判定の INSERT。DELETE なし
---   ot_retention  ゲストの掃除（DB §2・SO §4.6 の ot_maint と同じ役目。名前は 08ddl:111）。workspaces・users などの DELETE
+--   ot_retention  古い行の掃除（DB §2・SO §4.6 の ot_maint と同じ役目。名前は 08ddl:111）。entry_attempts・idempotency_keys・
+--                 workspace_events の DELETE だけ
 -- 表の所有者はマイグレーションを流す利用者（本番は ot_migrator）。ON DELETE CASCADE と FK の確認は所有者の権限で走る。
 
 DO $$
@@ -42,7 +43,7 @@ BEGIN
   REVOKE ALL ON public.schema_migrations FROM ot_app;
   -- 監査ログは追記だけ（BR-18。トリガーでも守る）
   REVOKE UPDATE, DELETE ON public.audit_logs FROM ot_app;
-  -- ワークスペース・利用者を消すのは掃除（ot_retention）だけ（DB I-31）
+  -- ワークスペース・利用者は消さない（DB I-31）
   REVOKE DELETE ON public.workspaces, public.users FROM ot_app;
   -- 変更しない表（トリガーでも守る）
   REVOKE UPDATE, DELETE ON public.agent_snapshots, public.workspace_policies FROM ot_app;
@@ -88,14 +89,14 @@ BEGIN
     RETURN;
   END IF;
   GRANT USAGE ON SCHEMA public TO ot_retention;
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ot_retention;
-  GRANT SELECT ON public.workspaces, public.memberships, public.users, public.sessions, public.tasks, public.action_intents,
-    public.approvals, public.audit_logs, public.entry_attempts, public.idempotency_keys, public.workspace_events TO ot_retention;
-  -- 掃除（DB §4.4）。子の表はワークスペースからの ON DELETE CASCADE（所有者の権限）で消える
-  GRANT DELETE ON public.workspaces, public.users, public.sessions, public.entry_attempts, public.idempotency_keys,
-    public.workspace_events TO ot_retention;
-  -- 止めてから消す（Kill Switch と同じ停止。SO §3.16 の2）
-  GRANT UPDATE ON public.workspaces, public.tasks, public.approvals, public.action_intents, public.sessions TO ot_retention;
-  GRANT INSERT ON public.audit_logs, public.task_events, public.workspace_events TO ot_retention;
+  -- ゲストの掃除（0024 で廃止）のために付けていた権限を外す（冪等。付いていなければ何もしない）
+  REVOKE USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public FROM ot_retention;
+  REVOKE SELECT ON public.workspaces, public.memberships, public.users, public.sessions, public.tasks, public.action_intents,
+    public.approvals, public.audit_logs FROM ot_retention;
+  REVOKE DELETE ON public.workspaces, public.users, public.sessions FROM ot_retention;
+  REVOKE UPDATE ON public.workspaces, public.tasks, public.approvals, public.action_intents, public.sessions FROM ot_retention;
+  REVOKE INSERT ON public.audit_logs, public.task_events, public.workspace_events FROM ot_retention;
+  -- 24時間より古い入口の試行・冪等性のキー・SSE の事象を消す（DB §4.4）
+  GRANT SELECT, DELETE ON public.entry_attempts, public.idempotency_keys, public.workspace_events TO ot_retention;
 END
 $$;

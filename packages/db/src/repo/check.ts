@@ -21,6 +21,7 @@ import type {
   SkillProposalRow,
   TaskRow,
   Uuid,
+  WorkspaceKind,
 } from "../types.ts";
 import type { WsCtx } from "../workspace.ts";
 
@@ -542,12 +543,12 @@ export async function applyRuleChange(
 
 export interface DueApproval {
   workspaceId: Uuid;
-  workspaceKind: "owner" | "guest";
+  workspaceKind: WorkspaceKind;
 }
 
 /** 期限が来た承認（pending で expires_at ≤ now）のあるワークスペース */
 export async function listWorkspacesWithDueApprovals(q: Queryable, now: Date, limit: number): Promise<DueApproval[]> {
-  const r = await q.query<{ workspace_id: Uuid; kind: "owner" | "guest" }>(
+  const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind }>(
     `SELECT DISTINCT a.workspace_id, w.kind
        FROM approvals a JOIN workspaces w ON w.id = a.workspace_id
       WHERE a.status = 'pending' AND a.expires_at <= $1 LIMIT $2`,
@@ -558,21 +559,21 @@ export async function listWorkspacesWithDueApprovals(q: Queryable, now: Date, li
 
 export interface StalledIntent {
   workspaceId: Uuid;
-  workspaceKind: "owner" | "guest";
+  workspaceKind: WorkspaceKind;
   intentId: Uuid;
   userId: Uuid | null;
 }
 
 /** 承認されたのに実行が始まっていない Intent（approved のまま olderThan より前から。本番のタスクの Intent だけ。Kill Switch 中のワークスペースは除く） */
 export async function listStalledApprovedIntents(q: Queryable, olderThan: Date, limit: number): Promise<StalledIntent[]> {
-  const r = await q.query<{ workspace_id: Uuid; kind: "owner" | "guest"; id: Uuid; requester_id: Uuid | null }>(
+  const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; requester_id: Uuid | null }>(
     `SELECT i.workspace_id, w.kind, i.id, t.requester_id
        FROM action_intents i
        JOIN tasks t ON t.workspace_id = i.workspace_id AND t.id = i.task_id
        JOIN workspaces w ON w.id = i.workspace_id
       WHERE i.status = 'approved' AND i.enforced AND i.updated_at < $1
         AND NOT t.is_dry_run
-        AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
+        AND NOT w.kill_switch_engaged
       ORDER BY i.updated_at LIMIT $2`,
     [olderThan, limit],
   );

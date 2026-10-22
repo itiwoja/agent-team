@@ -1,6 +1,11 @@
-// ON DELETE CASCADE の試験（db-schema.md §7.2 の T-30・T-31、15:375「ゲストの掃除はワークスペースの行を1つ消すだけ」）
+// 0024（ゲストのワークスペースをやめる）の試験。0023 まで流したデータベースに、全部の表に行のあるオーナーとゲストを入れてから
+// 0024 を流す。ゲストの行は ON DELETE CASCADE で全部の表から消え（監査ログも）、ゲストの利用者も消え、オーナーは残る
+import { copyFile, mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import type { Db } from "./client.ts";
+import { PG_ERROR, pgErrorInfo, type Db } from "./client.ts";
+import { loadMigrations, MIGRATIONS_DIR, runMigrations } from "./migrate.ts";
 import { insertGoogleCredential, upsertOAuthConnector } from "./repo/credentials.ts";
 import { issueSession } from "./session.ts";
 import { hashIp, recordEntryAttempt } from "./system/entry.ts";
@@ -16,18 +21,45 @@ import {
   fxTask,
   fxUsage,
   fxWorkspace,
-  openRoleDb,
   useTestDb,
   type FxWorkspace,
 } from "./testing.ts";
 import { WORKSPACE_TABLES } from "./types.ts";
+import { appendAuditLog } from "./audit.ts";
 
-const T = useTestDb();
+const T = useTestDb({ migrate: false });
 const NOW = new Date("2026-10-12T09:00:00.000Z");
 
-/** 全部の表に行を入れたワークスペース */
-export async function fullWorkspace(db: Db, kind: "guest" | "owner"): Promise<FxWorkspace> {
-  const ws = await fxWorkspace(db, { kind, audit: true });
+/** 0023 まで流す */
+async function migrateTo0023(url: string): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "ot-mig-0023-"));
+  try {
+    for (const m of await loadMigrations(MIGRATIONS_DIR)) {
+      if (m.version <= "0023") await copyFile(join(MIGRATIONS_DIR, m.file), join(dir, m.file));
+    }
+    await runMigrations(url, { dir, roles: false });
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+}
+
+/** 0023 の形のゲストのワークスペース（利用者・所属・監査ログの起点） */
+async function guestWorkspace0023(db: Db): Promise<FxWorkspace> {
+  return db.transaction(async (tx) => {
+    const user = (await tx.query<{ id: string }>("INSERT INTO users (login) VALUES ('guest-abcdefgh') RETURNING id")).rows[0]!.id;
+    const ws = (
+      await tx.query<{ id: string }>("INSERT INTO workspaces (kind, max_concurrent_tasks, seed_version, delete_requested_at) VALUES ('guest', 2, '2026-10-12.1', $1) RETURNING id", [NOW])
+    ).rows[0]!.id;
+    await tx.query("INSERT INTO memberships (workspace_id, user_id, role) VALUES ($1, $2, 'owner')", [ws, user]);
+    await appendAuditLog(tx, ws, { eventType: "workspace.created", actorType: "system", actorId: "app", payload: { kind: "guest" } }, NOW);
+    // WsCtx の kind は "owner" だけの型なので、試験の道具に渡すために owner と書く（道具は kind を見ない）
+    const ctx = { workspaceId: ws, kind: "owner" as const, userId: user };
+    return { workspaceId: ws, userId: user, kind: ctx.kind, ctx };
+  });
+}
+
+/** 全部の表に行を入れる */
+async function fill(db: Db, ws: FxWorkspace): Promise<FxWorkspace> {
   const W = ws.workspaceId;
   await issueSession(db, { workspaceId: W, userId: ws.userId, ipHash: null, userAgent: "UA", now: NOW });
   await recordEntryAttempt(db, { ipHash: hashIp("203.0.113.7", "test-secret-0123456789"), outcome: "guest_created", workspaceId: W, now: NOW });
@@ -130,46 +162,59 @@ async function counts(db: Db, workspaceId: string): Promise<Record<string, numbe
   return out;
 }
 
-describe("ゲストのワークスペースの削除（T-30・T-31）", () => {
-  it("T-30 全部の表に行のあるゲストを、GUC をそのワークスペースにして消すと全部0件、オーナーは残る（ot_retention の権限で）", async () => {
+describe("0024 ゲストのワークスペースをやめる", () => {
+  it("ゲストは全部の表から消え（監査ログも）、ゲストの利用者も消え、オーナーは残る。kind は owner だけになる", async () => {
     const { db, url } = T();
-    const owner = await fullWorkspace(db, "owner");
-    const guest = await fullWorkspace(db, "guest");
+    await migrateTo0023(url);
+    const owner = await fill(db, await fxWorkspace(db, { audit: true }));
+    const guest = await fill(db, await guestWorkspace0023(db));
     const before = await counts(db, guest.workspaceId);
     for (const [table, n] of Object.entries(before)) expect(n, `${table} に行がある`).toBeGreaterThan(0);
     const ownerBefore = await counts(db, owner.workspaceId);
 
-    const maint = await openRoleDb(url, "ot_retention");
-    try {
-      await maint.transaction(async (tx) => {
-        await tx.query("SELECT set_config('ot.audit_purge_workspace', $1, true)", [guest.workspaceId]);
-        const r = await tx.query("DELETE FROM workspaces WHERE id = $1 AND kind = 'guest'", [guest.workspaceId]);
-        expect(r.rowCount).toBe(1);
-      });
-    } finally {
-      await maint.close();
-    }
+    const r = await runMigrations(url, { roles: false });
+    expect(r.applied).toContain("0024");
+
     const after = await counts(db, guest.workspaceId);
     for (const [table, n] of Object.entries(after)) expect(n, `${table} が消える`).toBe(0);
     expect(await counts(db, owner.workspaceId)).toEqual(ownerBefore);
-    // 入口の試行はワークスペースが消えても残る（IP の数え方。workspace_id は NULL に）
+    const ws = await db.query<{ id: string }>("SELECT id FROM workspaces");
+    expect(ws.rows.map((x) => x.id)).toEqual([owner.workspaceId]);
+    const users = await db.query<{ id: string }>("SELECT id FROM users");
+    expect(users.rows.map((x) => x.id)).toEqual([owner.userId]);
+    // 入口の試行はワークスペースが消えても残る（workspace_id は NULL に）
     const ea = await db.query<{ n: number }>("SELECT count(*) AS n FROM entry_attempts WHERE workspace_id IS NULL");
     expect(ea.rows[0]?.n).toBe(1);
-    // GUC はトランザクションの中だけ（終わったら監査ログは消せない）
+    // GUC は流し終わったら残らない（監査ログは消せない）
     await expect(db.query("DELETE FROM audit_logs WHERE workspace_id = $1", [owner.workspaceId])).rejects.toThrow(/append-only/);
+    // ゲストは作れない
+    const e = await db.query("INSERT INTO workspaces (kind) VALUES ('guest')").then(
+      () => null,
+      (x: unknown) => x,
+    );
+    expect(pgErrorInfo(e)?.code).toBe(PG_ERROR.checkViolation);
   });
 
-  it("T-31 GUC を別のワークスペースの ID にして消すと、監査ログを消せず全部が戻る", async () => {
-    const { db } = T();
-    const a = await fullWorkspace(db, "guest");
-    const b = await fxWorkspace(db, { audit: true });
-    const before = await counts(db, a.workspaceId);
+  it("ゲストがなくても流せる", async () => {
+    const { db, url } = T();
+    await migrateTo0023(url);
+    const owner = await fxWorkspace(db, { audit: true });
+    expect((await runMigrations(url, { roles: false })).applied).toContain("0024");
+    expect((await db.query<{ n: number }>("SELECT count(*) AS n FROM audit_logs WHERE workspace_id = $1", [owner.workspaceId])).rows[0]?.n).toBe(1);
+  });
+});
+
+describe("監査ログの守り（T-31）", () => {
+  it("GUC を別のワークスペースの ID にしても、監査ログは消せない", async () => {
+    const { db, url } = T();
+    await runMigrations(url, { roles: false });
+    const a = await fxWorkspace(db, { audit: true });
+    const b = await fxWorkspace(db, { audit: true, second: true });
     await expect(
       db.transaction(async (tx) => {
         await tx.query("SELECT set_config('ot.audit_purge_workspace', $1, true)", [b.workspaceId]);
-        await tx.query("DELETE FROM workspaces WHERE id = $1", [a.workspaceId]);
+        await tx.query("DELETE FROM audit_logs WHERE workspace_id = $1", [a.workspaceId]);
       }),
     ).rejects.toThrow(/append-only/);
-    expect(await counts(db, a.workspaceId)).toEqual(before);
   });
 });

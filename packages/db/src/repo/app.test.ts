@@ -50,7 +50,7 @@ async function asApp(url: string): Promise<Db> {
 describe("Kill Switch の DB の部分", () => {
   it("engageKillSwitchTx：終了していないタスクを halted・トークン失効、承認・未実行の Intent を expired、executing は残す（ot_app の権限で通る）", async () => {
     const { db, url } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const conn = await fxConnector(db, ws);
     const agent = await fxAgent(db, ws);
     const running = await fxTask(db, ws, agent, { status: "running" });
@@ -87,7 +87,7 @@ describe("Kill Switch の DB の部分", () => {
     expect(await db.transaction((tx) => releaseKillSwitchTx(tx, ws.ctx, NOW))).toEqual({ wasEngaged: false });
     const row = await db.query("SELECT kill_switch_engaged, kill_switch_engaged_at, kill_switch_reason FROM workspaces");
     expect(row.rows[0]).toEqual({ kill_switch_engaged: false, kill_switch_engaged_at: null, kill_switch_reason: null });
-    const missing = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "guest" as const, userId: null };
+    const missing = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "owner" as const, userId: null };
     expect(await db.transaction((tx) => releaseKillSwitchTx(tx, missing, NOW))).toBeNull();
     expect(await db.transaction((tx) => engageKillSwitchTx(tx, missing, { by: null, reason: null, now: NOW }))).toBeNull();
   });
@@ -95,7 +95,7 @@ describe("Kill Switch の DB の部分", () => {
   it("findStoppedTasks：終了状態のタスクと Kill Switch。ほかのワークスペースのタスクは見ない、ワークスペースが消えていたら全部", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const agentA = await fxAgent(db, a);
     const agentB = await fxAgent(db, b);
     const live = await fxTask(db, a, agentA, { status: "running" });
@@ -103,7 +103,7 @@ describe("Kill Switch の DB の部分", () => {
     const foreign = await fxTask(db, b, agentB, { status: "failed" });
     expect(await findStoppedTasks(db, a.ctx, [live.taskId, ended.taskId, foreign.taskId])).toEqual({ killSwitchEngaged: false, terminalTaskIds: [ended.taskId] });
     expect(await findStoppedTasks(db, a.ctx, [])).toEqual({ killSwitchEngaged: false, terminalTaskIds: [] });
-    const gone = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "guest" as const, userId: null };
+    const gone = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "owner" as const, userId: null };
     expect(await findStoppedTasks(db, gone, [live.taskId])).toEqual({ killSwitchEngaged: true, terminalTaskIds: [live.taskId] });
   });
 });
@@ -112,7 +112,7 @@ describe("ワークスペースの事象（SSE）", () => {
   it("appendWorkspaceEvent は行を足し、コミットで '<ws>:<id>' を NOTIFY。読み出しはワークスペースで絞って id の昇順（ot_app の権限で通る）", async () => {
     const { db, url } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const app = await asApp(url);
     const got: string[] = [];
     const l = await db.listen(WORKSPACE_EVENTS_CHANNEL, (p) => got.push(p));
@@ -173,7 +173,7 @@ describe("冪等性のキー", () => {
   it("保存・24時間の内だけ見つかる・同じキーは上書き・ワークスペースで分かれる", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const key = "0B7B8C1E-2F2D-4B8A-9D0E-0A1B2C3D4E5F";
     await db.transaction(async (tx) => {
       await lockIdempotencyKey(tx, a.ctx, key);
@@ -193,7 +193,7 @@ describe("冪等性のキー", () => {
 describe("オーナーの初期投入に使う行", () => {
   it("insertWorkspacePolicyIfMissing：どの版もなければ v1、あれば今のものを返す（ot_app の権限で通る）", async () => {
     const { db, url } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const app = await asApp(url);
     const first = await app.transaction((tx) => insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: { version: 1, a: 1 }, policyHash: "c".repeat(64), createdBy: null, now: NOW }));
     expect(first).toMatchObject({ created: true, row: { version: 1, policy: { version: 1, a: 1 } } });
@@ -205,7 +205,7 @@ describe("オーナーの初期投入に使う行", () => {
 
   it("applyToolClassification：違うときだけ書く（2回目は false）。needs_review の行は触らない", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const c = await fxConnector(db, ws, { tools: [{ name: "place_order", classification: "unclassified" }] });
     const toolId = c.tools.place_order!.id;
     const input = { classification: "write" as const, argRoles: { supplier_id: "destination" }, scope: null, verify: "none" as const, toolHash: `sha256:${"e".repeat(64)}` as const, classifiedBy: "system:seed", now: NOW };
@@ -219,7 +219,7 @@ describe("オーナーの初期投入に使う行", () => {
 
   it("insertAgentWithSnapshot：エージェントと有効なスナップショットを作り current にする。findAgentByName は removed を除く（ot_app の権限で通る）", async () => {
     const { db, url } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const app = await asApp(url);
     const r = await app.transaction((tx) =>
       insertAgentWithSnapshot(tx, ws.ctx, {
@@ -246,8 +246,8 @@ describe("オーナーの初期投入に使う行", () => {
 describe("表示に使う行", () => {
   it("getMemberUser はそのワークスペースの所属だけ。getWorkspaceDayCostUsd はタイムゾーンの今日だけを足す", async () => {
     const { db } = T();
-    const a = await fxWorkspace(db, { kind: "owner" });
-    const b = await fxWorkspace(db);
+    const a = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     expect(await getMemberUser(db, a.ctx, a.userId)).toMatchObject({ id: a.userId, role: "owner" });
     expect(await getMemberUser(db, a.ctx, b.userId)).toBeNull();
     const agent = await fxAgent(db, a);

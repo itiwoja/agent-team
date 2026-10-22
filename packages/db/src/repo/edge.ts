@@ -56,7 +56,7 @@ export interface TaskTokenHit {
 }
 
 const WORKSPACE_COLUMNS = `id, kind, status, kill_switch_engaged, kill_switch_engaged_at, kill_switch_engaged_by, kill_switch_reason,
-  timezone, max_concurrent_tasks, audit_seq, audit_last_hash, last_seen_at, delete_requested_at, seed_version, created_at, updated_at`;
+  timezone, max_concurrent_tasks, audit_seq, audit_last_hash, last_seen_at, created_at, updated_at`;
 
 /**
  * タスクのトークン（の SHA-256）からタスクとワークスペースを引く（WsCtx を作る入口。リクエストの workspace_id は読まない：15:486）。

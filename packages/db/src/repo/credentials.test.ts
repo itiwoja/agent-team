@@ -150,7 +150,7 @@ describe("ワークスペースの分離", () => {
   it("B のワークスペースからは A の資格情報が見えず、動かせず、A のコネクタに書けない", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const idA = await gcalConnector(db, a);
     await db.transaction((tx) => insertGoogleCredential(tx, a.ctx, credential(idA, NOW)));
     const bCtx: WsCtx = b.ctx;
@@ -206,24 +206,6 @@ describe("Intent の資格情報 pin", () => {
     expect(second).toBeTruthy();
     expect(second).not.toBe(first);
     expect(await getActiveCredentialId(db, { ...ws.ctx, workspaceId: "00000000-0000-4000-8000-000000000000" as Uuid }, connectorId)).toBeNull();
-  });
-});
-
-describe("ワークスペースの削除", () => {
-  it("掃除（ot_retention）でワークスペースを消すと、資格情報もコネクタも CASCADE で消える", async () => {
-    const { db, url } = T();
-    const ws = await fxWorkspace(db);
-    const id = await gcalConnector(db, ws);
-    await db.transaction((tx) => insertGoogleCredential(tx, ws.ctx, credential(id, NOW)));
-    const maint = await openRoleDb(url, "ot_retention");
-    try {
-      const r = await maint.query("DELETE FROM workspaces WHERE id = $1 AND kind = 'guest'", [ws.workspaceId]);
-      expect(r.rowCount).toBe(1);
-    } finally {
-      await maint.close();
-    }
-    const left = await db.query<{ n: number }>("SELECT count(*)::int AS n FROM connector_credentials WHERE workspace_id = $1", [ws.workspaceId]);
-    expect(left.rows[0]?.n).toBe(0);
   });
 });
 
@@ -323,7 +305,7 @@ describe("GitHub（18 §3.3、0019）", () => {
   it("別のワークスペースからは見えず、許可も切り替えられない", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const id = await githubConnector(db, a);
     const credId = await db.transaction((tx) => insertGithubCredential(tx, a.ctx, gh(id, NOW)));
     expect(await getGithubConnection(db, b.ctx)).toBeNull();

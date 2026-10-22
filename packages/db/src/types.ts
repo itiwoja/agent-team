@@ -28,12 +28,14 @@ export type UsdDecimal = string;
 export type Jpy = number;
 
 // ===== 列挙（DDL の CHECK と同じ順） =====
-export const WORKSPACE_KINDS = ["owner", "guest"] as const;
+/** ワークスペースはオーナーの1つだけ（ゲストは 0024 で廃止） */
+export const WORKSPACE_KINDS = ["owner"] as const;
 export type WorkspaceKind = (typeof WORKSPACE_KINDS)[number];
 export const WORKSPACE_STATUSES = ["active", "suspended"] as const;
 export type WorkspaceStatus = (typeof WORKSPACE_STATUSES)[number];
 export const MEMBER_ROLES = ["owner", "maintainer", "viewer"] as const;
 export type MemberRole = (typeof MEMBER_ROLES)[number];
+/** 入口の試行の結果。guest_created・guest_reset・capacity・ip_limit は過去の行の値（ゲストは 0024 で廃止。新しくは書かない） */
 export const ENTRY_OUTCOMES = ["owner", "guest_created", "guest_reset", "wrong_token", "capacity", "ip_limit"] as const;
 export type EntryOutcome = (typeof ENTRY_OUTCOMES)[number];
 export const ACTOR_TYPES = ["user", "system", "agent"] as const;
@@ -469,8 +471,6 @@ export interface WorkspaceRow {
   audit_seq: number;
   audit_last_hash: Buffer;
   last_seen_at: Date;
-  delete_requested_at: Date | null;
-  seed_version: string | null;
   created_at: Date;
   updated_at: Date;
 }

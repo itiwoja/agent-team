@@ -72,10 +72,15 @@ describe("T-01・T-02・T-15：監査ログの守り", () => {
     await expect(db.query("TRUNCATE audit_logs CASCADE")).rejects.toThrow("audit_logs is append-only");
   });
 
-  it("T-02 GUC なしで監査ログのあるゲストのワークスペースを消すと、カスケードの削除も止まる", async () => {
+  it("T-02 GUC なしで監査ログのあるワークスペースを消すと、オーナーの守りを外してもカスケードの削除で止まる", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db, { audit: true });
-    await expect(db.query("DELETE FROM workspaces WHERE id = $1", [ws.workspaceId])).rejects.toThrow(/append-only/);
+    await expect(
+      db.transaction(async (tx) => {
+        await tx.query("ALTER TABLE workspaces DISABLE TRIGGER workspaces_guard");
+        await tx.query("DELETE FROM workspaces WHERE id = $1", [ws.workspaceId]);
+      }),
+    ).rejects.toThrow(/append-only/);
     const n = await db.query<{ n: number }>("SELECT count(*) AS n FROM workspaces WHERE id = $1", [ws.workspaceId]);
     expect(n.rows[0]?.n).toBe(1);
   });
@@ -97,29 +102,29 @@ describe("T-01・T-02・T-15：監査ログの守り", () => {
 describe("ワークスペース・セッション（T-03・T-09・T-11、SO I-28）", () => {
   it("T-03 オーナーのワークスペースは1つだけ（workspaces_single_owner_uq）", async () => {
     const { db } = T();
-    await fxWorkspace(db, { kind: "owner" });
-    await expectUnique(fxWorkspace(db, { kind: "owner" }), "workspaces_single_owner_uq");
+    await fxWorkspace(db);
+    await expectUnique(db.query("INSERT INTO workspaces (kind) VALUES ('owner')"), "workspaces_single_owner_uq");
+    await expectCheck(db.query("INSERT INTO workspaces (kind) VALUES ('guest')"), "workspaces_kind_check");
   });
 
-  it("T-09 オーナーのワークスペースに削除予約は入れられない", async () => {
+  it("T-09 ワークスペースに削除予約・シードの版は入れられない（ゲストのためだけだった列）", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
-    await expectCheck(db.query("UPDATE workspaces SET delete_requested_at = now() WHERE id = $1", [ws.workspaceId]), "workspaces_owner_never_deleted_chk");
-    await expectCheck(db.query("UPDATE workspaces SET seed_version = 'x' WHERE id = $1", [ws.workspaceId]), "workspaces_seed_only_guest_chk");
+    const ws = await fxWorkspace(db);
+    await expectCheck(db.query("UPDATE workspaces SET delete_requested_at = now() WHERE id = $1", [ws.workspaceId]), "workspaces_no_delete_request_chk");
+    await expectCheck(db.query("UPDATE workspaces SET seed_version = 'x' WHERE id = $1", [ws.workspaceId]), "workspaces_no_seed_version_chk");
   });
 
   it("I-28 オーナーのワークスペースは DELETE できず、kind は変えられない", async () => {
     const { db } = T();
-    const owner = await fxWorkspace(db, { kind: "owner" });
+    const owner = await fxWorkspace(db);
     await expect(db.query("DELETE FROM workspaces WHERE id = $1", [owner.workspaceId])).rejects.toThrow("owner workspace cannot be deleted");
-    const guest = await fxWorkspace(db);
-    await expect(db.query("UPDATE workspaces SET kind = 'owner' WHERE id = $1", [guest.workspaceId])).rejects.toThrow("workspaces.kind is immutable");
+    await expect(db.query("UPDATE workspaces SET kind = 'guest' WHERE id = $1", [owner.workspaceId])).rejects.toThrow("workspaces.kind is immutable");
   });
 
   it("T-11 メンバーでないワークスペースのセッションは作れない（sessions_membership_fk）", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     await expectFk(
       db.query(
         "INSERT INTO sessions (workspace_id, user_id, token_hash, csrf_token, expires_at) VALUES ($1, $2, $3, $4, now() + interval '1 day')",
@@ -222,7 +227,7 @@ describe("T-08・T-10・T-12・T-13・T-29：費用・スナップショット�
     await db.query("UPDATE agents SET status = 'removed' WHERE id = $1", [a.agentId]);
     await fxAgent(db, ws, { name: "仕入れ係" });
     // 別のワークスペースなら同じ名前でよい
-    const other = await fxWorkspace(db);
+    const other = await fxWorkspace(db, { second: true });
     await fxAgent(db, other, { name: "仕入れ係" });
   });
 

@@ -21,8 +21,8 @@ interface World {
   memberId: Uuid;
 }
 
-async function world(db: Db): Promise<World> {
-  const ws = await fxWorkspace(db);
+async function world(db: Db, second = false): Promise<World> {
+  const ws = await fxWorkspace(db, { second });
   const agent = await fxAgent(db, ws);
   const { askId } = await fxAsk(db, ws);
   const { askRunId } = await fxAskRun(db, ws, askId);
@@ -87,7 +87,7 @@ describe("task_web_urls（SG-04）", () => {
   it("別のワークスペースからは、同じタスクの id・同じ URL の鍵でも照らせず、写せない", async () => {
     const { db } = T();
     const a = await world(db);
-    const b = await world(db);
+    const b = await world(db, true);
     const url = "https://shared.example/x?id=1";
     const taskA = await taskWith(db, a, [url]);
     // 同じ URL を B のタスクも見ている
@@ -114,7 +114,7 @@ describe("task_web_urls（SG-04）", () => {
   it("inheritWebUrlsFrom：入力に挙げていない元（返事の前の回答のタスクなど）からも写す。別のワークスペースのタスクからは写らない", async () => {
     const { db } = T();
     const w = await world(db);
-    const other = await world(db);
+    const other = await world(db, true);
     const answer = await taskWith(db, w, ["https://answer.example/seen"]);
     const foreign = await taskWith(db, other, ["https://foreign.example/seen"]);
     const child = await newAskTask(db, w, { inheritFrom: [answer, foreign] });

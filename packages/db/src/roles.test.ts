@@ -112,18 +112,19 @@ describe("ot_gateway の出どころの照合（SG-03）", () => {
 });
 
 describe("ot_retention（掃除）", () => {
-  it("ワークスペース・利用者・入口の試行を消せる。業務の表は直接は書けない", async () => {
+  it("古い入口の試行・冪等性のキー・SSE の事象だけを消せる。ワークスペース・利用者・業務の表は消せない", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db);
     const agent = await fxAgent(db, ws);
     await asRole("ot_retention", async (m) => {
+      await m.query("DELETE FROM entry_attempts WHERE created_at < now() - interval '1 day'");
+      await m.query("DELETE FROM idempotency_keys WHERE created_at < now() - interval '1 day'");
+      await m.query("DELETE FROM workspace_events WHERE created_at < now() - interval '1 day'");
       await expectDenied(m.query("DELETE FROM agents WHERE id = $1", [agent.agentId]));
       await expectDenied(m.query("INSERT INTO users (login) VALUES ('x')"));
-      await m.query("DELETE FROM entry_attempts WHERE created_at < now() - interval '1 day'");
-      const r = await m.query("DELETE FROM workspaces WHERE id = $1 AND kind = 'guest'", [ws.workspaceId]);
-      expect(r.rowCount).toBe(1);
-      const u = await m.query("DELETE FROM users WHERE id = $1", [ws.userId]);
-      expect(u.rowCount).toBe(1);
+      await expectDenied(m.query("DELETE FROM workspaces WHERE id = $1", [ws.workspaceId]));
+      await expectDenied(m.query("DELETE FROM users WHERE id = $1", [ws.userId]));
+      await expectDenied(m.query("SELECT * FROM audit_logs"));
     });
   });
 });

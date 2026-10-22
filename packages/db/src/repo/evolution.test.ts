@@ -38,7 +38,7 @@ async function withApp<R>(fn: (app: Db) => Promise<R>): Promise<R> {
   }
 }
 async function owner(): Promise<{ ws: FxWorkspace; agent: FxAgent }> {
-  const ws = await fxWorkspace(T().db, { kind: "owner", audit: true });
+  const ws = await fxWorkspace(T().db, { audit: true });
   return { ws, agent: await fxAgent(T().db, ws) };
 }
 const DIGEST = fxHash("skill");
@@ -123,7 +123,7 @@ describe("スキルの案", () => {
 describe("成功したタスクの数え方", () => {
   it("本番の成功（報告つき）だけを数え、最後の案より後・30日以内・minTasks 件以上の担当を返す", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     const many = await fxAgent(db, ws, { name: "多い係" });
     const few = await fxAgent(db, ws, { name: "少ない係" });
     const old = await fxAgent(db, ws, { name: "古い係" });
@@ -144,12 +144,6 @@ describe("成功したタスクの数え方", () => {
     for (let i = 1; i <= 4; i++) await withReport(proposed, { status: "succeeded", now: ago(i * DAY) });
     await db.query("INSERT INTO skill_proposals (workspace_id, agent_id, status, created_at) VALUES ($1, $2, 'skipped', $3)", [ws.workspaceId, proposed.agentId, ago(2.5 * DAY)]);
 
-    const guest = await fxWorkspace(db, { kind: "guest" });
-    const ga = await fxAgent(db, guest);
-    for (let i = 1; i <= 3; i++) {
-      const { taskId } = await fxTask(db, guest, ga, { status: "succeeded", now: ago(i * DAY) });
-      await db.query("UPDATE tasks SET report = '報告', report_kind = 'normal' WHERE id = $1", [taskId]);
-    }
     const r = await withApp((app) => system.scanAgentsForSkillLearning(app, NOW, { minTasks: 3, windowMs: 30 * DAY, limit: 10 }));
     expect(r).toEqual([{ workspaceId: ws.workspaceId, agentId: many.agentId }]);
     // minTasks を下げると、2件の担当・案の後に2件ある担当も入る（失敗の1件は数えない）
@@ -185,7 +179,7 @@ describe("成功したタスクの数え方", () => {
 describe("整理の走査", () => {
   it("外す候補のスキルかルールを持つ担当だけ返す", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     const stale = await fxAgent(db, ws, { name: "古いスキル係" });
     const fresh = await fxAgent(db, ws, { name: "新しいスキル係" });
     const ruled = await fxAgent(db, ws, { name: "ルール係" });

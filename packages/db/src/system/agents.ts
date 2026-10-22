@@ -2,7 +2,7 @@
 // 1. 候補：removed でなく、最後に使われた時刻が now − 30日より前。ちょうど30日は消さない
 //    最後に使われた時刻 = 作成・更新・タスク・依頼への参加・会話のうち一番新しいもの
 // 2. 除くもの：終わっていないタスクがある／動いている依頼（generating・running・waiting_input）に入っている／
-//    定期の依頼（取り消し・失敗でないもの）に入っている／用意した依頼（seed_key）に入っている／削除予約のワークスペース
+//    定期の依頼（取り消し・失敗でないもの）に入っている／用意した依頼（seed_key）に入っている
 // 3. 消すといっても行は消さない（過去のタスクと監査ログから参照するため。agent-builder.md の BR）。status を removed にして
 //    監査ログ agent.removed を残す。1件1トランザクションで、ロックはワークスペース → エージェントの順（M-21）
 
@@ -44,7 +44,7 @@ export async function removeUnusedAgents(db: Db, now: Date, opts: { batch?: numb
   const terminal = [...TASK_TERMINAL];
   const candidates = await db.query<{ workspace_id: Uuid; id: Uuid }>(
     `SELECT a.workspace_id, a.id FROM agents a JOIN workspaces w ON w.id = a.workspace_id
-      WHERE w.delete_requested_at IS NULL AND ${UNUSED}
+      WHERE ${UNUSED}
       ORDER BY a.updated_at, a.id
       LIMIT $3`,
     [unusedBefore, terminal, opts.batch ?? AGENT_RETENTION_DEFAULTS.batch],
@@ -53,7 +53,7 @@ export async function removeUnusedAgents(db: Db, now: Date, opts: { batch?: numb
   for (const { workspace_id: workspaceId, id: agentId } of candidates.rows) {
     try {
       const done = await db.transaction(async (tx) => {
-        const ws = await tx.query("SELECT 1 FROM workspaces WHERE id = $1 AND delete_requested_at IS NULL FOR NO KEY UPDATE", [workspaceId]);
+        const ws = await tx.query("SELECT 1 FROM workspaces WHERE id = $1 FOR NO KEY UPDATE", [workspaceId]);
         if (ws.rowCount === 0) return false;
         // 候補を選んだあとに使われたら removed にしない（同じ条件で確かめ直す）
         const r = await tx.query<{ name: string }>(

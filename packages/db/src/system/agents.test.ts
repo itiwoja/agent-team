@@ -29,7 +29,7 @@ async function statusOf(db: Db, agent: FxAgent): Promise<string | undefined> {
 describe("使われないエージェントの片付け（30日）", () => {
   it("30日ちょうどは残し、1ms 過ぎたら removed にして監査ログ agent.removed を残す（行は消さない）", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     const edge = await fxAgent(db, ws, { name: "境目係" });
     const over = await fxAgent(db, ws, { name: "古い係" });
     await touch(db, edge, ago(30 * DAY));
@@ -51,7 +51,7 @@ describe("使われないエージェントの片付け（30日）", () => {
 
   it("最近のタスク・依頼への参加があれば残す", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     const tasked = await fxAgent(db, ws);
     const member = await fxAgent(db, ws);
     await fxTask(db, ws, tasked, { status: "completed", now: ago(10 * DAY) });
@@ -66,7 +66,7 @@ describe("使われないエージェントの片付け（30日）", () => {
 
   it("終わっていないタスク・動いている依頼・定期の依頼・用意した依頼に入っていれば古くても残す。取り消した定期の依頼なら片付ける", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     const running = await fxAgent(db, ws);
     await fxTask(db, ws, running, { status: "running", now: ago(60 * DAY) });
     const waiting = await fxAgent(db, ws);
@@ -86,13 +86,4 @@ describe("使われないエージェントの片付け（30日）", () => {
     expect(r.removed.map((x) => x.agentId)).toEqual([cancelled.agentId]);
   });
 
-  it("削除予約のワークスペースのエージェントは触らない（ゲストの掃除が丸ごと消す）", async () => {
-    const { db } = T();
-    const ws = await fxWorkspace(db, { deleteRequestedAt: ago(DAY), audit: true });
-    const agent = await fxAgent(db, ws);
-    await touch(db, agent, ago(60 * DAY));
-    const r = await withApp((app) => removeUnusedAgents(app, NOW));
-    expect(r.scanned).toBe(0);
-    expect(await statusOf(db, agent)).toBe("active");
-  });
 });

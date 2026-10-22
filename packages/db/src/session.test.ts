@@ -13,7 +13,6 @@ import {
   touchSession,
 } from "./session.ts";
 import { fxWorkspace, useTestDb } from "./testing.ts";
-import { requestWorkspaceDeletion } from "./workspace.ts";
 
 const T = useTestDb();
 const NOW = new Date("2026-10-12T09:00:00.000Z");
@@ -35,7 +34,7 @@ describe("発行と解決", () => {
     const ctx = await resolveSession(db, s.cookieValue, plus(1000));
     expect(ctx).toEqual({
       workspaceId: ws.workspaceId,
-      kind: "guest",
+      kind: "owner",
       userId: ws.userId,
       role: "owner",
       sessionId: s.sessionId,
@@ -67,25 +66,11 @@ describe("発行と解決", () => {
     expect(await resolveSession(db, s.cookieValue, NOW)).toBeNull();
   });
 
-  it("T-54 削除予約のワークスペースのセッションは無効（SO-SES-04）。予約で全セッションが失効する", async () => {
-    const { db } = T();
-    const ws = await fxWorkspace(db);
-    const s1 = await issueSession(db, { workspaceId: ws.workspaceId, userId: ws.userId, ipHash: null, userAgent: null, now: NOW });
-    const s2 = await issueSession(db, { workspaceId: ws.workspaceId, userId: ws.userId, ipHash: null, userAgent: null, now: NOW });
-    await db.query("UPDATE workspaces SET delete_requested_at = $2 WHERE id = $1", [ws.workspaceId, NOW]);
-    expect(await resolveSession(db, s1.cookieValue, NOW)).toBeNull();
-    await db.query("UPDATE workspaces SET delete_requested_at = NULL WHERE id = $1", [ws.workspaceId]);
-    expect(await resolveSession(db, s1.cookieValue, NOW)).not.toBeNull();
-    await db.transaction((tx) => requestWorkspaceDeletion(tx, ws.ctx, NOW));
-    const revoked = await db.query<{ n: number }>("SELECT count(*) AS n FROM sessions WHERE revoked_at IS NOT NULL");
-    expect(revoked.rows[0]?.n).toBe(2);
-    expect(await resolveSession(db, s2.cookieValue, NOW)).toBeNull();
-  });
 
   it("所属を外した・利用者を消した（deleted_at）セッションは無効。所属のないワークスペースには作れない", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const s = await issueSession(db, { workspaceId: a.workspaceId, userId: a.userId, ipHash: null, userAgent: null, now: NOW });
     await db.query("UPDATE users SET deleted_at = now() WHERE id = $1", [a.userId]);
     expect(await resolveSession(db, s.cookieValue, NOW)).toBeNull();
@@ -147,7 +132,7 @@ describe("延長（T-51・T-52、SO-SES-03）", () => {
   it("ワークスペースのセッションをすべて失効させる", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db);
-    const other = await fxWorkspace(db);
+    const other = await fxWorkspace(db, { second: true });
     await issueSession(db, { workspaceId: ws.workspaceId, userId: ws.userId, ipHash: null, userAgent: null, now: NOW });
     await issueSession(db, { workspaceId: ws.workspaceId, userId: ws.userId, ipHash: null, userAgent: null, now: NOW });
     const keep = await issueSession(db, { workspaceId: other.workspaceId, userId: other.userId, ipHash: null, userAgent: null, now: NOW });

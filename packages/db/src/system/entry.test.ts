@@ -57,8 +57,8 @@ describe("失敗が続く IP の待ち時間（SO-ENT-07・08、SO I-13）", () 
     // ほかの IP・ほかの結果は数えない
     const other = hashIp("198.51.100.1", SECRET);
     expect(await recordWrongToken(db, { ipHash: other, now: NOW })).toEqual({ failures: 1, delayMs: 0 });
-    await recordEntryAttempt(db, { ipHash: ip, outcome: "guest_created", now: NOW });
+    await recordEntryAttempt(db, { ipHash: ip, outcome: "owner", now: NOW });
     expect(await countEntryAttempts(db, { ipHash: ip, outcomes: ["wrong_token"], since: new Date(NOW.getTime() - ENTRY_LIMITS.wrongTokenWindowMs) })).toBe(6);
-    expect(await countEntryAttempts(db, { ipHash: ip, outcomes: ["wrong_token", "guest_created"], since: new Date(0) })).toBe(8);
+    expect(await countEntryAttempts(db, { ipHash: ip, outcomes: ["wrong_token", "owner"], since: new Date(0) })).toBe(8);
   });
 });

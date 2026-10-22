@@ -47,42 +47,36 @@ async function one<T extends object>(q: Queryable, text: string, params: readonl
   return row;
 }
 
-/** 利用者・ワークスペース・所属（owner）。audit: true なら workspace.created を seq 1 で足す */
+/**
+ * 利用者・ワークスペース（オーナー）・所属（owner）。audit: true なら workspace.created を seq 1 で足す。
+ * ワークスペースはオーナーの1つだけ（workspaces_single_owner_uq）。分離の試験のために2つ目を作るときは second: true：
+ * この試験のデータベースの一意の索引を外してから作る（本番では作れない。workspace_id で絞る作りを確かめるためだけ）
+ */
 export async function fxWorkspace(
   q: Db | Tx,
   o: {
-    kind?: WorkspaceKind;
     now?: Date;
     lastSeenAt?: Date;
-    deleteRequestedAt?: Date | null;
-    seedVersion?: string | null;
     login?: string;
     killSwitchEngaged?: boolean;
     maxConcurrentTasks?: number;
     audit?: boolean;
+    second?: boolean;
   } = {},
 ): Promise<FxWorkspace> {
-  const kind = o.kind ?? "guest";
+  const kind: WorkspaceKind = "owner";
   const now = o.now ?? FIXED_NOW;
   return withTransaction(q, async (tx) => {
+    if (o.second) await tx.query("DROP INDEX IF EXISTS workspaces_single_owner_uq");
     const user = await one<{ id: Uuid }>(tx, "INSERT INTO users (login, created_at, updated_at) VALUES ($1, $2, $2) RETURNING id", [
-      o.login ?? `${kind === "owner" ? "owner" : "guest"}-${rand()}`,
+      o.login ?? `owner-${rand()}`,
       now,
     ]);
     const ws = await one<{ id: Uuid }>(
       tx,
-      `INSERT INTO workspaces (kind, max_concurrent_tasks, seed_version, last_seen_at, delete_requested_at, kill_switch_engaged,
-                               kill_switch_engaged_at, created_at, updated_at)
-       VALUES ($1, $2, $3, $4, $5, $6, CASE WHEN $6 THEN $7::timestamptz END, $7, $7) RETURNING id`,
-      [
-        kind,
-        o.maxConcurrentTasks ?? (kind === "owner" ? 3 : 2),
-        kind === "guest" ? (o.seedVersion === undefined ? "2026-10-12.1" : o.seedVersion) : null,
-        o.lastSeenAt ?? now,
-        o.deleteRequestedAt ?? null,
-        o.killSwitchEngaged ?? false,
-        now,
-      ],
+      `INSERT INTO workspaces (kind, max_concurrent_tasks, last_seen_at, kill_switch_engaged, kill_switch_engaged_at, created_at, updated_at)
+       VALUES ($1, $2, $3, $4, CASE WHEN $4 THEN $5::timestamptz END, $5, $5) RETURNING id`,
+      [kind, o.maxConcurrentTasks ?? 3, o.lastSeenAt ?? now, o.killSwitchEngaged ?? false, now],
     );
     await tx.query("INSERT INTO memberships (workspace_id, user_id, role, created_at, updated_at) VALUES ($1, $2, 'owner', $3, $3)", [
       ws.id,
