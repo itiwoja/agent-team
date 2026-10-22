@@ -16,6 +16,8 @@ import type { AppEnv } from "./env.ts";
 import { asksOnTaskSettled, asksOnTasksTerminated, asksTickStep } from "./asks/hooks.ts";
 import { incidentOnTasksTerminated } from "./rehearsal/incident-hook.ts";
 import { approvalsTickStep } from "./check/tick-step.ts";
+import { learnSkillsStep } from "./evolution/learn.ts";
+import { pruneStep } from "./evolution/prune.ts";
 import { reRehearsalStep } from "./rehearsal/re-rehearse.ts";
 import { createWorkspaceEventHub, type WorkspaceEventHub } from "./events.ts";
 import { createRunningTaskRegistry, type RunningTaskRegistry } from "./registry.ts";
@@ -169,7 +171,7 @@ export function createAppDeps(env: AppEnv, missing: readonly string[], overrides
     registry: overrides.registry ?? createRunningTaskRegistry(),
     eventHub: overrides.eventHub ?? createWorkspaceEventHub({ db, log }),
     hooks: overrides.hooks ?? { tasksTerminated: [incidentOnTasksTerminated, asksOnTasksTerminated], taskSettled: [asksOnTaskSettled] },
-    tickSteps: overrides.tickSteps ?? [approvalsTickStep, reRehearsalStep, asksTickStep],
+    tickSteps: overrides.tickSteps ?? [approvalsTickStep, reRehearsalStep, asksTickStep, learnSkillsStep, pruneStep],
     sse: overrides.sse ?? DEFAULT_SSE_OPTIONS,
     sleep: overrides.sleep ?? defaultSleep,
     sandbox,

@@ -146,7 +146,7 @@ export async function loadMaterials(deps: Pick<AppDeps, "db"> & { sandbox?: AppD
   ]);
   if (policyRow === null) throw new AskPlanError("planner_error", "ワークスペースのポリシーがない");
   const policy = parseWorkspacePolicy(policyRow.policy);
-  const skillRows = await q.query<{ agent_id: string; name: string }>("SELECT agent_id, name FROM agent_skills WHERE workspace_id = $1 ORDER BY name", [ctx.workspaceId]);
+  const skillRows = await q.query<{ agent_id: string; name: string }>("SELECT agent_id, name FROM agent_skills WHERE workspace_id = $1 AND removed_at IS NULL ORDER BY name", [ctx.workspaceId]);
   const skillsByAgent = new Map<string, string[]>();
   for (const r of skillRows.rows) skillsByAgent.set(r.agent_id, [...(skillsByAgent.get(r.agent_id) ?? []), r.name]);
   const agents: PlannerAgent[] = agentRows.map(({ agent, jobCount, definition }) => ({
