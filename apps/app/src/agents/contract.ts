@@ -2,6 +2,8 @@
 // フロント（apps/web）はこのファイルの型に合わせる。固定の文（役割・状態・仕事の種類の1行）はサーバーが作って返す（LLM に書かせない）。
 // パスは /api/v1 からの相対：
 //   GET /agents                  一覧（viewer 以上。removed は出さない。最後に動いた順）
+//   POST /agents/{agentId}/skill-proposals/{proposalId}/decide   スキルの案を決める（owner・maintainer）
+//   POST /agents/{agentId}/evolution/{eventId}/restore           整理で外したものを戻す（owner・maintainer）
 
 import { z } from "zod";
 
@@ -65,6 +67,46 @@ export const AgentGrowthSchema = z.object({
 });
 export type AgentGrowth = z.infer<typeof AgentGrowthSchema>;
 
+/** 担当のスキル（外していないもの）。origin：pack＝パックから、learned＝使い込んで育って、人が ○ を押したもの */
+export const AgentSkillViewSchema = z.object({
+  id: Uuid,
+  name: z.string(),
+  description: z.string(),
+  origin: z.enum(["pack", "learned"]),
+  /** 本番のタスクで最後に読まれた時刻（まだなら null） */
+  lastUsedAt: Iso.nullable(),
+  createdAt: Iso,
+});
+export type AgentSkillView = z.infer<typeof AgentSkillViewSchema>;
+
+/** スキルの案（まだ決めていないもの）。body は Markdown の手順書 */
+export const SkillProposalViewSchema = z.object({
+  id: Uuid,
+  name: z.string(),
+  description: z.string(),
+  body: z.string(),
+  reason: z.string().nullable(),
+  createdAt: Iso,
+});
+export type SkillProposalView = z.infer<typeof SkillProposalViewSchema>;
+
+/** 整理で外したもの（スキル・ルール）。restoredAt があれば戻し済み */
+export const PrunedItemViewSchema = z.object({
+  type: z.enum(["skill", "rule"]),
+  id: z.string(),
+  label: z.string(),
+  restoredAt: Iso.nullable(),
+});
+export type PrunedItemView = z.infer<typeof PrunedItemViewSchema>;
+
+/** 整理の1回（30日以内。新しい順）。戻すときは eventId と items の (type, id) */
+export const PrunedEventViewSchema = z.object({
+  eventId: Uuid,
+  createdAt: Iso,
+  items: z.array(PrunedItemViewSchema),
+});
+export type PrunedEventView = z.infer<typeof PrunedEventViewSchema>;
+
 export const AgentLibraryItemSchema = z.object({
   id: Uuid,
   name: z.string(),
@@ -93,6 +135,12 @@ export const AgentLibraryItemSchema = z.object({
   /** 関わった依頼（新しい順、asksPerAgent 件まで） */
   asks: z.array(AgentAskViewSchema),
   jobs: z.array(AgentJobViewSchema),
+  /** スキル（外していないもの。名前の順） */
+  skills: z.array(AgentSkillViewSchema),
+  /** スキルの案（proposed のみ。新しい順） */
+  skillProposals: z.array(SkillProposalViewSchema),
+  /** 30日以内に整理で外したもの（新しい順） */
+  pruned: z.array(PrunedEventViewSchema),
 });
 export type AgentLibraryItem = z.infer<typeof AgentLibraryItemSchema>;
 
@@ -117,3 +165,25 @@ export const ResetAgentWorkspaceResponseSchema = z.object({
   resetAt: Iso,
 });
 export type ResetAgentWorkspaceResponse = z.infer<typeof ResetAgentWorkspaceResponseSchema>;
+
+// POST /agents/{agentId}/skill-proposals/{proposalId}/decide：approve で担当のスキルになる（信頼される）、reject で却下。決めた案は二度と決められない
+export const DecideSkillProposalBodySchema = z.strictObject({ decision: z.enum(["approve", "reject"]) });
+export type DecideSkillProposalBody = z.infer<typeof DecideSkillProposalBodySchema>;
+export const DecideSkillProposalResponseSchema = z.object({
+  proposalId: Uuid,
+  status: z.enum(["approved", "rejected"]),
+  /** approve のとき作ったスキルの ID（reject は null） */
+  skillId: Uuid.nullable(),
+});
+export type DecideSkillProposalResponse = z.infer<typeof DecideSkillProposalResponseSchema>;
+
+// POST /agents/{agentId}/evolution/{eventId}/restore：外したスキル・ルール1件を戻す
+export const RestoreEvolutionBodySchema = z.strictObject({ type: z.enum(["skill", "rule"]), id: z.string().min(1).max(128) });
+export type RestoreEvolutionBody = z.infer<typeof RestoreEvolutionBodySchema>;
+export const RestoreEvolutionResponseSchema = z.object({
+  eventId: Uuid,
+  type: z.enum(["skill", "rule"]),
+  id: z.string(),
+  restoredAt: Iso,
+});
+export type RestoreEvolutionResponse = z.infer<typeof RestoreEvolutionResponseSchema>;

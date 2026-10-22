@@ -3,8 +3,16 @@
 
 import type { Queryable, WsCtx } from "@open-team/db";
 import { listAgentAsks, listAgentJobs, listAgentLibrary, type AgentAskRow, type AgentJobSummaryRow, type AgentListRow } from "@open-team/db/agents";
+import { listWorkspaceActiveSkills } from "@open-team/db/check";
+import { listPendingSkillProposals, listRecentEvolutionEvents } from "@open-team/db/evolution";
+import type { AgentEvolutionEventRow, AgentSkillRow, SkillProposalRow } from "@open-team/db";
 import { FORMATION_LIMITS } from "@open-team/kernel";
-import { AGENT_LIST_LIMITS, type AgentActivityState, type AgentGrowth, type AgentAskView, type AgentJobView, type AgentLibraryItem, type AgentLibraryResponse } from "./contract.ts";
+import {
+  AGENT_LIST_LIMITS,
+  type AgentSkillView,
+  type PrunedEventView,
+  type SkillProposalView,
+  type AgentActivityState, type AgentGrowth, type AgentAskView, type AgentJobView, type AgentLibraryItem, type AgentLibraryResponse } from "./contract.ts";
 
 /** 役割の1行（agents.role → 画面の語。設定プランナーの役割の語に揃える） */
 export const ROLE_LABELS: Record<NonNullable<AgentLibraryItem["role"]>, string> = {
@@ -71,7 +79,34 @@ export function growthLineOf(g: AgentGrowth): string | null {
 }
 
 /** 一覧の1件。asks は新しい順で渡す（生まれた依頼は is_new の依頼のうちいちばん古いもの） */
-export function libraryItem(row: AgentListRow, asks: readonly AgentAskRow[], jobs: readonly AgentJobSummaryRow[]): AgentLibraryItem {
+/** 整理の記録を「外したもの」として出す期間（30日） */
+export const PRUNED_VISIBLE_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function skillView(r: AgentSkillRow): AgentSkillView {
+  return { id: r.id, name: r.name, description: r.description, origin: r.origin, lastUsedAt: r.last_used_at?.toISOString() ?? null, createdAt: r.created_at.toISOString() };
+}
+
+/** 案（proposed は name・description・body が必ずある）。本文は保存時に秘密情報のマスクを通っている前提でそのまま出す */
+export function proposalView(r: SkillProposalRow): SkillProposalView {
+  return { id: r.id, name: r.name ?? "", description: r.description ?? "", body: r.body ?? "", reason: r.reason, createdAt: r.created_at.toISOString() };
+}
+
+export function prunedView(e: AgentEvolutionEventRow): PrunedEventView {
+  return { eventId: e.id, createdAt: e.created_at.toISOString(), items: e.items.map((i) => ({ type: i.type, id: i.id, label: i.label, restoredAt: i.restoredAt })) };
+}
+
+export interface EvolutionViews {
+  skills: readonly AgentSkillView[];
+  skillProposals: readonly SkillProposalView[];
+  pruned: readonly PrunedEventView[];
+}
+
+export function libraryItem(
+  row: AgentListRow,
+  asks: readonly AgentAskRow[],
+  jobs: readonly AgentJobSummaryRow[],
+  evolution: EvolutionViews = { skills: [], skillProposals: [], pruned: [] },
+): AgentLibraryItem {
   const a = row.agent;
   const activity = activityOf(row);
   const growth: AgentGrowth = { reuseCount: row.reuseCount, allowedRuleCount: row.allowedRuleCount, tightenedCount: row.tightenedCount, skillCount: row.skillCount };
@@ -97,19 +132,45 @@ export function libraryItem(row: AgentListRow, asks: readonly AgentAskRow[], job
     growthLine: growthLineOf(growth),
     asks: asks.map(askView),
     jobs: jobs.map(jobView),
+    skills: [...evolution.skills],
+    skillProposals: [...evolution.skillProposals],
+    pruned: [...evolution.pruned],
   };
 }
 
-export async function buildAgentLibrary(q: Queryable, ctx: WsCtx): Promise<AgentLibraryResponse> {
+/** 担当ごとに問い合わせず、ワークスペース単位で3回引いて担当に配る */
+export async function buildAgentLibrary(q: Queryable, ctx: WsCtx, now: Date = new Date()): Promise<AgentLibraryResponse> {
   const rows = await listAgentLibrary(q, ctx);
   const ids = rows.map((r) => r.agent.id);
-  const [asks, jobs] = await Promise.all([listAgentAsks(q, ctx, ids, AGENT_LIST_LIMITS.asksPerAgent), listAgentJobs(q, ctx, ids)]);
+  const [asks, jobs, skills, proposals, events] = await Promise.all([
+    listAgentAsks(q, ctx, ids, AGENT_LIST_LIMITS.asksPerAgent),
+    listAgentJobs(q, ctx, ids),
+    listWorkspaceActiveSkills(q, ctx),
+    listPendingSkillProposals(q, ctx),
+    listRecentEvolutionEvents(q, ctx, { since: new Date(now.getTime() - PRUNED_VISIBLE_MS) }),
+  ]);
+  const group = <T extends { agent_id: string }, V>(rows: readonly T[], f: (r: T) => V): Map<string, V[]> => {
+    const m = new Map<string, V[]>();
+    for (const r of rows) {
+      const list = m.get(r.agent_id);
+      if (list === undefined) m.set(r.agent_id, [f(r)]);
+      else list.push(f(r));
+    }
+    return m;
+  };
+  const skillsBy = group(skills, skillView);
+  const proposalsBy = group(proposals, proposalView);
+  const prunedBy = group(events, prunedView);
   const asksBy = new Map<string, AgentAskRow[]>();
   for (const a of asks) asksBy.set(a.agent_id, [...(asksBy.get(a.agent_id) ?? []), a]);
   const jobsBy = new Map<string, AgentJobSummaryRow[]>();
   for (const j of jobs) jobsBy.set(j.agent_id, [...(jobsBy.get(j.agent_id) ?? []), j]);
   return {
-    items: rows.map((r) => libraryItem(r, asksBy.get(r.agent.id) ?? [], jobsBy.get(r.agent.id) ?? [])),
+    items: rows.map((r) => libraryItem(r, asksBy.get(r.agent.id) ?? [], jobsBy.get(r.agent.id) ?? [], {
+        skills: skillsBy.get(r.agent.id) ?? [],
+        skillProposals: proposalsBy.get(r.agent.id) ?? [],
+        pruned: prunedBy.get(r.agent.id) ?? [],
+      })),
     limit: FORMATION_LIMITS.maxAgentsPerWorkspace,
     count: rows.length,
   };

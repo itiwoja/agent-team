@@ -6,6 +6,8 @@ import type { Queryable, SessionCtx } from "@open-team/db";
 import {
   getAnswerRun,
   getEndedTaskReportRow,
+  getEvolutionReportRow,
+  getSkillProposalReportRow,
   getIncidentCaseReportRow,
   getRehearsalReportRow,
   listApprovalBundles,
@@ -14,11 +16,15 @@ import {
   listRunningTasks,
   listUncheckedAnswers,
   listUncheckedEndedTasks,
+  listUncheckedEvolutionEvents,
+  listUncheckedSkillProposals,
   listUncheckedIncidentCases,
   listUncheckedRehearsals,
   listUnknownOutcomeIntents,
   listWaitingAsks,
   type AnswerRunRow,
+  type EvolutionReportRow,
+  type SkillProposalReportRow,
   type IncidentCaseReportRow,
   type RehearsalReportRow,
   type TaskReportRow,
@@ -86,7 +92,7 @@ export function answerItem(r: AnswerRunRow): ReportItem {
     dryRun: false,
     body: conclusion === "" ? null : conclusion,
     lines,
-    link: { askId: r.run.ask_id, rehearsalRunId: null },
+    link: { askId: r.run.ask_id, rehearsalRunId: null, agentId: null },
     // どの頼みごとへの回答かを行に添える（返事の実行なら返事の文）
     request: clip(r.requestText ?? r.askText, 200),
   };
@@ -133,7 +139,7 @@ export function rehearsalItem(r: RehearsalReportRow): ReportItem {
     dryRun: false,
     body: null,
     lines: [],
-    link: { askId: r.run.ask_id, rehearsalRunId: r.run.id },
+    link: { askId: r.run.ask_id, rehearsalRunId: r.run.id, agentId: null },
     request: null,
   };
 }
@@ -153,7 +159,7 @@ export function incidentItem(r: IncidentCaseReportRow): ReportItem {
     dryRun: false,
     body: null,
     lines: r.row.reason_code === null ? [] : [`止まった理由：${r.row.reason_code}`],
-    link: { askId: r.row.ask_id, rehearsalRunId: null },
+    link: { askId: r.row.ask_id, rehearsalRunId: null, agentId: null },
     request: null,
   };
 }
@@ -177,7 +183,57 @@ export function endedTaskItem(r: TaskReportRow): ReportItem {
     dryRun: false,
     body: t.report,
     lines: [],
-    link: { askId: t.ask_id, rehearsalRunId: null },
+    link: { askId: t.ask_id, rehearsalRunId: null, agentId: null },
+    request: null,
+  };
+}
+
+/** スキルの案（未決定）。案が決まると一覧から消える（SQL が proposed だけを返す） */
+export function skillProposalItem(r: SkillProposalReportRow): ReportItem {
+  const p = r.proposal;
+  const name = p.name ?? "";
+  const agentName = r.agentName ?? "担当";
+  return {
+    kind: "report",
+    reportKind: "evolution",
+    key: `skill_proposal:${p.id}`,
+    title: `${agentName} にスキルの案「${clip(name, 40)}」が届きました`,
+    subtitle: [r.agentName, timeText(p.created_at)].filter((x) => x !== null).join(" · "),
+    agent: r.agentName === null ? null : { id: p.agent_id, name: r.agentName },
+    askId: null,
+    at: p.created_at.toISOString(),
+    opened: false,
+    failed: false,
+    dryRun: false,
+    body: [p.description, p.reason === null || p.reason === "" ? null : `案にした理由：${p.reason}`].filter((x): x is string => x !== null && x !== "").join("\n") || null,
+    lines: [],
+    link: { askId: null, rehearsalRunId: null, agentId: p.agent_id },
+    request: null,
+  };
+}
+
+/** 整理の知らせ（0件の種類は出さない） */
+export function evolutionItem(r: EvolutionReportRow): ReportItem {
+  const e = r.event;
+  const skills = e.items.filter((i) => i.type === "skill").length;
+  const rules = e.items.filter((i) => i.type === "rule").length;
+  const counts = [skills > 0 ? `使われていないスキル ${skills}件` : null, rules > 0 ? `ルール ${rules}件` : null].filter((x) => x !== null).join("・");
+  const agentName = r.agentName ?? "担当";
+  return {
+    kind: "report",
+    reportKind: "evolution",
+    key: `evolution:${e.id}`,
+    title: `${agentName}：${counts}を外しました（担当のページで戻せます）`,
+    subtitle: [r.agentName, timeText(e.created_at)].filter((x) => x !== null).join(" · "),
+    agent: r.agentName === null ? null : { id: e.agent_id, name: r.agentName },
+    askId: null,
+    at: e.created_at.toISOString(),
+    opened: false,
+    failed: false,
+    dryRun: false,
+    body: null,
+    lines: e.items.map((i) => `${i.type === "skill" ? "スキル" : "ルール"}：${i.label}`),
+    link: { askId: null, rehearsalRunId: null, agentId: e.agent_id },
     request: null,
   };
 }
@@ -196,7 +252,7 @@ const byTimeDesc = (a: { at: string }, b: { at: string }): number => (a.at < b.a
 export async function buildCheck(deps: ItemDeps, s: Viewer, focusKey: string | null = null): Promise<CheckBuild> {
   const now = deps.clock.now();
   const q = deps.db;
-  const [approvals, waiting, unknowns, answers, rehearsals, incidents, ended, runningRows] = await Promise.all([
+  const [approvals, waiting, unknowns, answers, rehearsals, incidents, ended, proposals, evolutions, runningRows] = await Promise.all([
     listApprovalBundles(q, s, { status: "pending", notExpiredAt: now, limit: 100 }),
     listWaitingAsks(q, s, 50),
     listUnknownOutcomeIntents(q, s, 50),
@@ -204,6 +260,8 @@ export async function buildCheck(deps: ItemDeps, s: Viewer, focusKey: string | n
     listUncheckedRehearsals(q, s, REPORT_LIMIT),
     listUncheckedIncidentCases(q, s, REPORT_LIMIT),
     listUncheckedEndedTasks(q, s, REPORT_LIMIT),
+    listUncheckedSkillProposals(q, s, REPORT_LIMIT),
+    listUncheckedEvolutionEvents(q, s, REPORT_LIMIT),
     listRunningTasks(q, s, 50),
   ]);
 
@@ -270,7 +328,7 @@ export async function buildCheck(deps: ItemDeps, s: Viewer, focusKey: string | n
     ),
   ].sort(byTimeDesc);
 
-  const reports: ReportItem[] = [...answers.map(answerItem), ...rehearsals.map(rehearsalItem), ...incidents.map(incidentItem), ...ended.map(endedTaskItem)]
+  const reports: ReportItem[] = [...answers.map(answerItem), ...rehearsals.map(rehearsalItem), ...incidents.map(incidentItem), ...ended.map(endedTaskItem), ...proposals.map(skillProposalItem), ...evolutions.map(evolutionItem)]
     .map((r) => (r.key === focusKey ? { ...r, opened: true } : r))
     .sort(byTimeDesc);
 
@@ -315,6 +373,14 @@ export async function reportItemOfKey(deps: ItemDeps, s: Viewer, key: string): P
     case "task": {
       const r = await getEndedTaskReportRow(q, s, id!);
       return r === null ? null : endedTaskItem(r);
+    }
+    case "skill_proposal": {
+      const r = await getSkillProposalReportRow(q, s, id!);
+      return r === null ? null : skillProposalItem(r);
+    }
+    case "evolution": {
+      const r = await getEvolutionReportRow(q, s, id!);
+      return r === null ? null : evolutionItem(r);
     }
     default:
       return null;

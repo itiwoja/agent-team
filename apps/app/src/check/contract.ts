@@ -1,7 +1,7 @@
 // 承認・チェック・counts・セッションの応答の契約（フロント apps/web が合わせる1か所。zod のスキーマと型）
 // 06 ask-and-check.md（SCR-019）・09_api/approvals.md（API-017・019）・tasks.md（API-016）・15 §ゲストのワークスペース
 // - ここは「応答の形」だけ。文言は reasons.ts が reasonCode から固定の文で作る（LLM に書かせない）
-// - 行のキー（item key）は '<種類>:<UUID>'。報告は check_marks のキーと同じ（answer / rehearsal / incident_added / task）。
+// - 行のキー（item key）は '<種類>:<UUID>'。報告は check_marks のキーと同じ（answer / rehearsal / incident_added / task、育つ：skill_proposal / evolution）。
 //   承認は approval:<approvalId>、質問は ask_question:<askId> / unknown_outcome:<intentId>
 // - 時刻はすべて ISO 8601（UTC）。金額・数量は表示用の文字列を持たず、値のまま出す（画面が整える）。ただし「理由の文」は文で返す
 // - SSE（EP-45 /workspaces/:id/stream）の事象は CHECK_EVENT_TYPES：check.upsert（行が増えた・変わった）、check.remove（行が消えた）、
@@ -233,7 +233,7 @@ export const QuestionItem = z.object({
   intentId: Id.nullable(),
 });
 
-export const REPORT_KINDS = ["answer", "rehearsal", "incident_added", "task"] as const;
+export const REPORT_KINDS = ["answer", "rehearsal", "incident_added", "task", "evolution"] as const;
 export const ReportItem = z.object({
   ...ItemBase,
   kind: z.literal("report"),
@@ -246,7 +246,8 @@ export const ReportItem = z.object({
   body: z.string().nullable(),
   lines: z.array(z.string()),
   /** 「この依頼のページ」（SCR-021）へのリンク用 */
-  link: z.object({ askId: Id.nullable(), rehearsalRunId: Id.nullable() }),
+  /** agentId：担当のページ（/agents#<agentId>）へ移る行（evolution）だけ。ほかは null */
+  link: z.object({ askId: Id.nullable(), rehearsalRunId: Id.nullable(), agentId: Id.nullable() }),
   /** 回答の報告のとき、その回答が答えた「頼んだこと」（返事の実行は返事の文。秘密情報はマスク済み）。ほかの報告は null */
   request: z.string().nullable(),
 });

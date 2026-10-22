@@ -1,7 +1,8 @@
 // 「頼む・チェック」の報告の行（items.ts）のうち、練習（リハーサル）の行の文言
 import type { AnswerRunRow, RehearsalReportRow } from "@open-team/db/check";
 import { describe, expect, it } from "vitest";
-import { answerItem, rehearsalItem, rehearsalLine } from "./items.ts";
+import type { EvolutionReportRow } from "@open-team/db/check";
+import { answerItem, evolutionItem, rehearsalItem, rehearsalLine } from "./items.ts";
 
 function report(run: Partial<RehearsalReportRow["run"]>): RehearsalReportRow {
   return {
@@ -48,5 +49,19 @@ describe("回答の行", () => {
   });
   it("返事の実行は返事の文を添える", () => {
     expect(answerItem({ run: run({ trigger_type: "manual" }), askText: "在庫を見て発注して", requestText: "もう少し詳しく" }).request).toBe("もう少し詳しく");
+  });
+});
+
+describe("整理の行", () => {
+  const evt = (items: Array<{ type: "skill" | "rule"; label: string }>): EvolutionReportRow => ({
+    event: { id: "e1", agent_id: "g1", items: items.map((i, n) => ({ ...i, id: `i${n}`, restoredAt: null })), created_at: new Date("2026-10-05T07:00:00Z") } as unknown as EvolutionReportRow["event"],
+    agentName: "仕入れ係",
+  });
+  it("0件の種類は出さない", () => {
+    expect(evolutionItem(evt([{ type: "skill", label: "a" }, { type: "skill", label: "b" }])).title).toBe("仕入れ係：使われていないスキル 2件を外しました（担当のページで戻せます）");
+    expect(evolutionItem(evt([{ type: "rule", label: "r" }])).title).toBe("仕入れ係：ルール 1件を外しました（担当のページで戻せます）");
+    const both = evolutionItem(evt([{ type: "skill", label: "a" }, { type: "rule", label: "r" }]));
+    expect(both.title).toBe("仕入れ係：使われていないスキル 1件・ルール 1件を外しました（担当のページで戻せます）");
+    expect(both.link).toEqual({ askId: null, rehearsalRunId: null, agentId: "g1" });
   });
 });

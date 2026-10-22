@@ -58,7 +58,8 @@ export function checkRoutes(r: ApiRouter, deps: AppDeps): void {
     if (!m) throw new AppError("VALIDATION_ERROR", undefined, { details: [{ field: "itemId", reason: "行のキーの形ではありません" }] });
     const kind = m[1]!;
     if (NOT_CHECKABLE.has(kind)) throw new AppError("CHECK_ITEM_NOT_CHECKABLE");
-    if (!(REPORT_KINDS as readonly string[]).includes(kind)) throw new AppError("NOT_FOUND");
+    // スキルの案の行（skill_proposal:<id>）は報告の種類 evolution の行（キーの種類と報告の種類が違う）
+    if (!(REPORT_KINDS as readonly string[]).includes(kind) && kind !== "skill_proposal") throw new AppError("NOT_FOUND");
     // 自分のワークスペースにある報告だけ（別のワークスペースの ID は 404）
     if ((await reportItemOfKey(deps, s, key)) === null) throw new AppError("NOT_FOUND");
     const now = deps.clock.now();

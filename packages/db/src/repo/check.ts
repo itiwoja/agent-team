@@ -10,6 +10,8 @@ import type {
   ActionIntentRow,
   AgentSnapshotRow,
   ApprovalRow,
+  AgentEvolutionEventRow,
+  AgentSkillRow,
   ApprovalStatus,
   AskRunRow,
   ConnectorRow,
@@ -18,6 +20,7 @@ import type {
   IntentStatus,
   RehearsalCaseRow,
   RehearsalRunRow,
+  SkillProposalRow,
   TaskRow,
   Uuid,
 } from "../types.ts";
@@ -325,6 +328,72 @@ export async function listUncheckedIncidentCases(q: Queryable, ctx: WsCtx, limit
 export async function getIncidentCaseReportRow(q: Queryable, ctx: WsCtx, caseId: Uuid): Promise<IncidentCaseReportRow | null> {
   const r = await maybe<IncidentJoin>(q, `${INCIDENT_SELECT} AND c.id = $2`, [ctx.workspaceId, caseId]);
   return r === null ? null : splitIncident(r);
+}
+
+// ---- 育つ（0022）：スキルの案・整理の記録の報告 ----
+
+export interface SkillProposalReportRow {
+  proposal: SkillProposalRow;
+  agentName: string | null;
+}
+type ProposalJoin = SkillProposalRow & { agent_name: string | null };
+const splitProposal = (x: ProposalJoin): SkillProposalReportRow => {
+  const { agent_name, ...proposal } = x;
+  return { proposal: proposal as SkillProposalRow, agentName: agent_name };
+};
+const PROPOSAL_SELECT = `SELECT p.*, ag.name AS agent_name FROM skill_proposals p
+   LEFT JOIN agents ag ON ag.workspace_id = p.workspace_id AND ag.id = p.agent_id
+  WHERE p.workspace_id = $1 AND p.status <> 'skipped'`;
+
+/** 未チェックで、まだ決めていないスキルの案（proposed。決めたら見てほしいものから消える） */
+export async function listUncheckedSkillProposals(q: Queryable, ctx: WsCtx, limit: number): Promise<SkillProposalReportRow[]> {
+  const r = await q.query<ProposalJoin>(
+    `${PROPOSAL_SELECT} AND p.status = 'proposed' AND (ag.id IS NULL OR ag.status <> 'removed')
+        AND NOT EXISTS (SELECT 1 FROM check_marks m WHERE m.workspace_id = p.workspace_id AND m.item_key = 'skill_proposal:' || p.id::text)
+      ORDER BY p.created_at DESC, p.id DESC LIMIT $2`,
+    [ctx.workspaceId, limit],
+  );
+  return r.rows.map(splitProposal);
+}
+
+export async function getSkillProposalReportRow(q: Queryable, ctx: WsCtx, id: Uuid): Promise<SkillProposalReportRow | null> {
+  const r = await maybe<ProposalJoin>(q, `${PROPOSAL_SELECT} AND p.id = $2`, [ctx.workspaceId, id]);
+  return r === null ? null : splitProposal(r);
+}
+
+export interface EvolutionReportRow {
+  event: AgentEvolutionEventRow;
+  agentName: string | null;
+}
+type EvolutionJoin = AgentEvolutionEventRow & { agent_name: string | null };
+const splitEvolution = (x: EvolutionJoin): EvolutionReportRow => {
+  const { agent_name, ...event } = x;
+  return { event: event as AgentEvolutionEventRow, agentName: agent_name };
+};
+const EVOLUTION_SELECT = `SELECT e.*, ag.name AS agent_name FROM agent_evolution_events e
+   LEFT JOIN agents ag ON ag.workspace_id = e.workspace_id AND ag.id = e.agent_id
+  WHERE e.workspace_id = $1`;
+
+/** 未チェックの整理の記録（新しい順） */
+export async function listUncheckedEvolutionEvents(q: Queryable, ctx: WsCtx, limit: number): Promise<EvolutionReportRow[]> {
+  const r = await q.query<EvolutionJoin>(
+    `${EVOLUTION_SELECT} AND (ag.id IS NULL OR ag.status <> 'removed')
+        AND NOT EXISTS (SELECT 1 FROM check_marks m WHERE m.workspace_id = e.workspace_id AND m.item_key = 'evolution:' || e.id::text)
+      ORDER BY e.created_at DESC, e.id DESC LIMIT $2`,
+    [ctx.workspaceId, limit],
+  );
+  return r.rows.map(splitEvolution);
+}
+
+export async function getEvolutionReportRow(q: Queryable, ctx: WsCtx, id: Uuid): Promise<EvolutionReportRow | null> {
+  const r = await maybe<EvolutionJoin>(q, `${EVOLUTION_SELECT} AND e.id = $2`, [ctx.workspaceId, id]);
+  return r === null ? null : splitEvolution(r);
+}
+
+/** ワークスペースの外していないスキル全部（担当の一覧が担当ごとに引かないための一括。名前の順） */
+export async function listWorkspaceActiveSkills(q: Queryable, ctx: WsCtx): Promise<AgentSkillRow[]> {
+  const r = await q.query<AgentSkillRow>("SELECT * FROM agent_skills WHERE workspace_id = $1 AND removed_at IS NULL ORDER BY name, id", [ctx.workspaceId]);
+  return r.rows;
 }
 
 export interface TaskReportRow {
