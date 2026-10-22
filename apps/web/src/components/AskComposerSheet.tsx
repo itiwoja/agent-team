@@ -105,7 +105,7 @@ function Progress({ state, onAnswer }: { state: GenState; onAnswer: AskGeneratio
       {state.phase === "generating" && (
         <div className="gen ask-sheet-gen">
           <Egg />
-          <p className="ask-sheet-gen-title">エージェント生成中…</p>
+          <p className="ask-sheet-gen-title">担当を作っています…</p>
           {state.slow && <p className="muted">まだ考えています</p>}
         </div>
       )}

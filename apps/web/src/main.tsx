@@ -322,7 +322,7 @@ function NotFound() {
       <h1>ページが見つかりません</h1>
       <p className="muted">アドレスが違うか、ページが移ったようです。</p>
       <Link to="/" className="btn btn-ghost">
-        任せるへ戻る
+        入口へ戻る
       </Link>
     </div>
   );

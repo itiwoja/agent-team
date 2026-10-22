@@ -238,7 +238,7 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
       )}
       {justInstalled && !ceremony && (
         <p className="pw-done" role="status">
-          {justInstalled.join("・")}が入りました。<Link to="/agents">エージェントを見る</Link>
+          {justInstalled.join("・")}が入りました。<Link to="/agents">担当を見る</Link>
         </p>
       )}
 

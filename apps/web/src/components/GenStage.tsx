@@ -47,7 +47,7 @@ export function GenFormation({ state, heading = "h1" }: { state: GenState; headi
   );
   return (
     <section aria-live="polite" className="gen">
-      <Heading className="sr-only">エージェントができました</Heading>
+      <Heading className="sr-only">担当ができました</Heading>
       {state.askId ? (
         <Link to={`/asks/${state.askId}`} className="gen-link">
           {body}

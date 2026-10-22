@@ -1,4 +1,4 @@
-// SCR-020：任せる（`/`）。真ん中の1文・例文・入力欄だけ（件数はヘッダー右、カレンダーの接続はメニュー）。頼むと「エージェント生成中…」→ 担当が1行ずつ現れる → 依頼のページ（/asks/:id）へ移る
+// SCR-020：入口（`/`）。真ん中の1文・例文・入力欄だけ（件数はヘッダー右、カレンダーの接続はメニュー）。頼むと「担当を作っています…」→ 担当が1行ずつ現れる → 依頼のページ（/asks/:id）へ移る
 import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type RefObject } from "react";
 import { Egg, GenFormation } from "../components/GenStage";
 import { enterAskDelay, type GenState } from "../lib/generation";
@@ -198,7 +198,7 @@ function Center({ state, killSwitchEngaged, onAnswer }: { state: GenState; killS
         <section className="gen">
           <Egg />
           <div aria-live="polite" className="gen-live">
-            <h1 className="hero entrance-title">エージェント生成中…</h1>
+            <h1 className="hero entrance-title">担当を作っています…</h1>
             {state.slow && <p className="muted entrance-note">まだ考えています</p>}
           </div>
         </section>
