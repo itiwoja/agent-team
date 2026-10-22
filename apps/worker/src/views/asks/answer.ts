@@ -1,6 +1,6 @@
 // 依頼の回答（FR-063）の表示の部分（apps/app/src/asks/answer.ts の表示の部分の WorkspaceDO 版）。
 // 保存した回答（ask_runs.answer）を画面の形にするところと、担当ごとの最新のタスクだけ。
-// 回答を組み立てて保存する（composeRunAnswer・persistAnswer）は実行と一緒に第4段で移す
+// 回答を組み立てて保存する（composeRunAnswer・persistAnswer）は src/asks/answer.ts（ここの関数を使う）
 
 import type { ComposedAnswer } from "@open-team/kernel";
 import type { AskRunRow, TaskRow } from "../../db/types.ts";

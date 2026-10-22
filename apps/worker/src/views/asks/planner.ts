@@ -1,5 +1,5 @@
 // 生成に失敗したときの画面の1行（apps/app/src/asks/planner.ts の表示の部分の WorkspaceDO 版。FAILURE_MESSAGES だけ）。
-// 設定プランナー（Gemini の呼び出し・編成の検査）は第4段で移す
+// 設定プランナー（Gemini の呼び出し・編成の検査）は src/asks/planner.ts（そこから FAILURE_MESSAGES を re-export する）
 
 import type { AskFailureReason } from "./contract.ts";
 

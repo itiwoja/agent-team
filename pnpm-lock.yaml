@@ -245,9 +245,15 @@ importers:
       '@open-team/kernel':
         specifier: workspace:*
         version: link:../../packages/kernel
+      '@open-team/llm':
+        specifier: workspace:*
+        version: link:../../packages/llm
       '@open-team/platform':
         specifier: workspace:*
         version: link:../../packages/platform
+      '@open-team/runner':
+        specifier: workspace:*
+        version: link:../../packages/runner
       hono:
         specifier: ^4.13.11
         version: 4.13.11
