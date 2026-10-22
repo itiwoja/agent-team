@@ -19,6 +19,8 @@ regexes = [
   '''test-secret-0123456789''',
   '''tt-0123456789''',
   '''tt-1234567890''',
+  # 試験だけで使う偽のタスクのトークン（apps/worker/test/db/gateway.test.ts）
+  '''tok-0123456789abcdef''',
 ]
 
 # 偽の秘密鍵でマスクを試す試験（packages/platform/src/mask.test.ts）

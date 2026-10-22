@@ -11,3 +11,8 @@ coverage
 # 計測の結果（scripts/measure。README に載せる表は条件と一緒に手で写す：15 §引っかかり率の計測）
 scripts/measure/results/
 .claude/worktrees/
+
+# wrangler のローカルの状態（apps/worker）
+.wrangler/
+.dev.vars*
+!.dev.vars.example

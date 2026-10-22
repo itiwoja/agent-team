@@ -287,7 +287,8 @@ module.exports = {
       comment: "解決できない import は禁止（package.json に書いていない依存は、pnpm の厳密な配置とイメージで実行時に落ちる）",
       severity: "error",
       from: {},
-      to: { couldNotResolve: true },
+      // cloudflare:* は Workers の実行環境が持つ組み込み（apps/worker）
+      to: { couldNotResolve: true, pathNot: "^cloudflare:" },
     },
     {
       name: "no-non-package-json",
@@ -307,7 +308,7 @@ module.exports = {
   options: {
     doNotFollow: { path: ["(^|/)node_modules/"] },
     // 自分たちのビルド結果だけを除く（node_modules の中の dist/ まで除くと npm の依存が消え、規則が当たらなくなる）
-    exclude: { path: ["^(apps|packages)/[^/]+/(dist|coverage)/"] },
+    exclude: { path: ["^(apps|packages)/[^/]+/(dist|coverage|\\.wrangler)/"] },
     moduleSystems: ["es6", "cjs"],
     // 差し替えのときは型の情報がないので acorn で読む。typescript 5 系が見えるなら型だけの import も数える
     tsPreCompilationDeps: !useShim,

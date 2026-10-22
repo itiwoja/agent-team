@@ -5,4 +5,7 @@ packages:
 # 公開から3日たっていない版は入れない（15 §サプライチェーン、D-50）
 minimumReleaseAge: 4320
 # install スクリプトは既定で無効。要るものだけここに足す（D-50）
-onlyBuiltDependencies: []
+onlyBuiltDependencies:
+  # wrangler・vitest-plugin が使う workerd とバンドラ（apps/worker）
+  - esbuild
+  - workerd
