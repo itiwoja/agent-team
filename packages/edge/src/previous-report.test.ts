@@ -9,7 +9,7 @@ import { T0, fxWorkspace, inboxDefinition, seedAgent, seedChainAsk, seedConnecto
 const T = useTestDb();
 
 async function setup(db: Db, trigger: "schedule" | "manual") {
-  const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());

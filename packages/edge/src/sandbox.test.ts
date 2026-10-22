@@ -1,6 +1,6 @@
 // 作業場（D-116）の試験：実装係（dev-coder）が write_file・run_command を呼ぶと、edge が判定してコマンドを積み、
 // 同じプロセスで動かした作業場の実行役（@open-team/sandbox）が実行して結果と控えを返す。run_command の出力でタスクが汚染される。
-// 作業場を使えないタスク（ゲスト・作業場のプロバイダーなし）には道具が渡らない。スキルは load_skill で読める。
+// 作業場を使えないタスク（作業場のプロバイダーなし）には道具が渡らない。スキルは load_skill で読める。
 // SG-05：汚染されたタスクの控えを受け取ったタスクは汚染される（パックの控えは汚染なし）。運営のパックと同じ中身でないスキルは包んで汚染する
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -35,8 +35,8 @@ function coderDefinition(): AgentDefinitionInput {
   };
 }
 
-async function setup(db: Db, kind: "owner" | "guest" = "owner") {
-  const ws = await fxWorkspace(db, { kind, audit: true });
+async function setup(db: Db) {
+  const ws = await fxWorkspace(db, { audit: true });
   const coder = await seedAgent(db, ws, coderDefinition());
   const ask = await seedChainAsk(db, ws, [{ agent: coder, jobSlug: "build", position: 1, spokesperson: true }]);
   const task = await seedTask(db, ws, coder, "build", { ask, memberName: "コード職人" });
@@ -104,7 +104,7 @@ async function haltAndDrain(db: Db, taskId: Uuid, provider: ReturnType<typeof in
 describe("作業場の道具（D-116）", () => {
   it("順番の依頼は直前担当のHTMLを次の作業場で読める。汚染は事前判定にも引き継ぐ", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     const writer = await seedAgent(db, ws, coderDefinition());
     const reader = await seedAgent(db, ws, { ...coderDefinition(), name: "確認係", jobs: [{ ...coderDefinition().jobs![0]!, id: "review" }] });
     const ask = await seedChainAsk(db, ws, [
@@ -135,7 +135,7 @@ describe("作業場の道具（D-116）", () => {
     expect((await taintOf(db, to)).taint_sources).toEqual([expect.objectContaining({ kind: "workspace_snapshot", fromTaskId: from })]);
     await haltAndDrain(db, to, provider);
   });
-  it("オーナーの本番の依頼の実装係には作業場の道具が渡る。プロバイダーがない・ゲストなら渡らない", async () => {
+  it("本番の依頼の実装係には作業場の道具が渡る。プロバイダーがないなら渡らない", async () => {
     const { db } = T();
     const w = await setup(db);
     const withSandbox = started(db, [], inProcessProvider(db));
@@ -145,10 +145,6 @@ describe("作業場の道具（D-116）", () => {
 
     const none = started(db, [], undefined);
     expect((await none.edge.getTaskContext(await tokenFor(db, w.ws, w.task))).tools.map((t) => t.name)).not.toContain("run_command");
-
-    const g = await setup(db, "guest");
-    const guest = started(db, [], inProcessProvider(db));
-    expect((await guest.edge.getTaskContext(await tokenFor(db, g.ws, g.task))).tools.map((t) => t.name)).not.toContain("write_file");
   });
 
   it("write_file → run_command：作業場で書いて動かし、結果を <untrusted> で返す。run_command でタスクが汚染され、控えが残る。報告で作業場が閉じる", async () => {

@@ -17,7 +17,6 @@ const base: TaskToolSelection = {
   template: "researcher",
   mcpGrants: { mail: ["list_inbox"] },
   webAllowDomains: [],
-  guestWorkspace: true,
   formation: { shape: "chain", memberCount: 2, isAggregator: false },
   teamBoard: false,
   followup: false,
@@ -26,7 +25,7 @@ const base: TaskToolSelection = {
 const sel = (over: Partial<TaskToolSelection>): TaskToolSelection => ({ ...base, ...over });
 
 describe("selectTaskTools（§2.5）", () => {
-  it("PR-04 受信箱係（ゲスト・Web の付与なし）は mcp_call・notify・submit_report・finish", () => {
+  it("PR-04 受信箱係（Web の付与なし）は mcp_call・notify・submit_report・finish", () => {
     expect(selectTaskToolNames(base)).toEqual(["mcp_call", "notify", "submit_report", "finish"]);
   });
 
@@ -76,9 +75,9 @@ describe("selectTaskTools（§2.5）", () => {
   });
 
   it("§2.5-3・C-47 Web の付与があれば web_search・web_fetch が入る／なければ外す", () => {
-    const owner = sel({ guestWorkspace: false, webAllowDomains: ["*"] });
+    const owner = sel({ webAllowDomains: ["*"] });
     expect(selectTaskToolNames(owner)).toEqual(["mcp_call", "web_search", "web_fetch", "notify", "submit_report", "finish"]);
-    expect(selectTaskToolNames(sel({ guestWorkspace: false, webAllowDomains: [] }))).toEqual([
+    expect(selectTaskToolNames(sel({ webAllowDomains: [] }))).toEqual([
       "mcp_call",
       "notify",
       "submit_report",
@@ -86,18 +85,11 @@ describe("selectTaskTools（§2.5）", () => {
     ]);
   });
 
-  it("BR-64 ゲストは Web の付与があっても web_search を外す（web_fetch は付与したドメインだけなので残す）", () => {
-    const names = selectTaskToolNames(sel({ guestWorkspace: true, webAllowDomains: ["*"] }));
-    expect(names).not.toContain("web_search");
-    expect(names).toContain("web_fetch");
-  });
-
   it("BR-72 まとめ役は submit_report・notify・finish だけ（付与・Web があっても）", () => {
     const names = selectTaskToolNames(
       sel({
         template: "briefer",
         webAllowDomains: ["*"],
-        guestWorkspace: false,
         formation: { shape: "aggregate", memberCount: 3, isAggregator: true },
       }),
     );
@@ -126,7 +118,7 @@ describe("selectTaskTools（§2.5）", () => {
   });
 
   it("作業場の道具は sandbox のときだけ、load_skill はスキルのある担当だけ（D-116）", () => {
-    const base: TaskToolSelection = { template: "dev-coder", mcpGrants: {}, webAllowDomains: [], guestWorkspace: false, formation: null, teamBoard: false, followup: false };
+    const base: TaskToolSelection = { template: "dev-coder", mcpGrants: {}, webAllowDomains: [], formation: null, teamBoard: false, followup: false };
     expect(selectTaskToolNames(base)).toEqual(["notify", "submit_report", "finish"]);
     expect(selectTaskToolNames({ ...base, sandbox: true })).toEqual(["notify", "submit_report", "finish", "list_files", "read_file", "search", "write_file", "delete_file", "run_command"]);
     expect(selectTaskToolNames({ ...base, template: "reviewer", sandbox: true })).not.toContain("write_file");
@@ -136,7 +128,7 @@ describe("selectTaskTools（§2.5）", () => {
   });
 
   it("ask_user は本番の依頼の担当にだけ渡す（まとめ役・追いのターンには渡さない）", () => {
-    const base: TaskToolSelection = { template: "researcher", mcpGrants: {}, webAllowDomains: ["*"], guestWorkspace: false, formation: null, teamBoard: false, followup: false };
+    const base: TaskToolSelection = { template: "researcher", mcpGrants: {}, webAllowDomains: ["*"], formation: null, teamBoard: false, followup: false };
     expect(selectTaskToolNames(base)).not.toContain("ask_user");
     expect(selectTaskToolNames({ ...base, askUser: true })).toContain("ask_user");
     expect(selectTaskToolNames({ ...base, askUser: true, formation: { shape: "aggregate", memberCount: 3, isAggregator: true } })).not.toContain("ask_user");
@@ -157,38 +149,36 @@ describe("selectTaskTools（§2.5）", () => {
     for (const template of templates)
       for (const mcpGrants of grantsList)
         for (const webAllowDomains of webList)
-          for (const guestWorkspace of [false, true])
-            for (const formation of formations)
-              for (const teamBoard of [false, true])
-                for (const followup of [false, true]) {
-                  const s: TaskToolSelection = { template, mcpGrants, webAllowDomains, guestWorkspace, formation, teamBoard, followup };
-                  const names = selectTaskToolNames(s);
-                  n += 1;
-                  expect(names).toContain("finish");
-                  expect(new Set(names).size).toBe(names.length);
-                  expect(names).toEqual(TOOL_ORDER.filter((t) => names.includes(t)));
-                  expect(names).not.toContain("remember");
-                  expect(names).not.toContain("load_skill");
-                  if (followup) {
-                    expect(names).toEqual(TOOL_ORDER.filter((t) => FOLLOWUP_TOOLS.includes(t)));
-                    continue;
-                  }
-                  const allowed = new Set<string>([...TEMPLATE_RUNTIME_0H[template].tools, "finish", ...TEAM_TOOLS]);
-                  for (const t of names) expect(allowed.has(t)).toBe(true);
-                  const granted = Object.values(mcpGrants).flat().length > 0;
-                  if (!granted) expect(names).not.toContain("mcp_call");
-                  if (webAllowDomains.length === 0) {
-                    expect(names).not.toContain("web_search");
-                    expect(names).not.toContain("web_fetch");
-                  }
-                  if (guestWorkspace) expect(names).not.toContain("web_search");
-                  if (formation?.isAggregator) {
-                    for (const t of names) expect([...AGGREGATOR_TOOLS, ...TEAM_TOOLS]).toContain(t);
-                  }
-                  const team = names.includes("team_post");
-                  expect(team).toBe(teamBoard && formation !== null && formation.shape !== "single" && formation.memberCount >= 2);
-                  expect(names.includes("team_wait")).toBe(team);
+          for (const formation of formations)
+            for (const teamBoard of [false, true])
+              for (const followup of [false, true]) {
+                const s: TaskToolSelection = { template, mcpGrants, webAllowDomains, formation, teamBoard, followup };
+                const names = selectTaskToolNames(s);
+                n += 1;
+                expect(names).toContain("finish");
+                expect(new Set(names).size).toBe(names.length);
+                expect(names).toEqual(TOOL_ORDER.filter((t) => names.includes(t)));
+                expect(names).not.toContain("remember");
+                expect(names).not.toContain("load_skill");
+                if (followup) {
+                  expect(names).toEqual(TOOL_ORDER.filter((t) => FOLLOWUP_TOOLS.includes(t)));
+                  continue;
                 }
+                const allowed = new Set<string>([...TEMPLATE_RUNTIME_0H[template].tools, "finish", ...TEAM_TOOLS]);
+                for (const t of names) expect(allowed.has(t)).toBe(true);
+                const granted = Object.values(mcpGrants).flat().length > 0;
+                if (!granted) expect(names).not.toContain("mcp_call");
+                if (webAllowDomains.length === 0) {
+                  expect(names).not.toContain("web_search");
+                  expect(names).not.toContain("web_fetch");
+                }
+                if (formation?.isAggregator) {
+                  for (const t of names) expect([...AGGREGATOR_TOOLS, ...TEAM_TOOLS]).toContain(t);
+                }
+                const team = names.includes("team_post");
+                expect(team).toBe(teamBoard && formation !== null && formation.shape !== "single" && formation.memberCount >= 2);
+                expect(names.includes("team_wait")).toBe(team);
+              }
     expect(n).toBeGreaterThan(1000);
   });
 

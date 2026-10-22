@@ -10,8 +10,8 @@ import { T0, fxWorkspace, seedAgent, seedConnectors, seedTask, supplierDefinitio
 
 const T = useTestDb();
 
-async function running(db: Db, script: Parameters<typeof buildEdge>[1] = {}) {
-  const ws = await fxWorkspace(db, { kind: "guest", audit: true });
+async function running(db: Db, script: Parameters<typeof buildEdge>[1] = {}, second = false) {
+  const ws = await fxWorkspace(db, { audit: true, second });
   await seedConnectors(db, ws);
   const agent = await seedAgent(db, ws, supplierDefinition());
   const taskId = await seedTask(db, ws, agent, "reorder");
@@ -48,7 +48,7 @@ describe("postEvents（API-038）", () => {
     const { db } = T();
     const w = await running(db, { limits: { eventsPerSecond: 100 } });
     expect(await w.env.edge.postEvents(w.token, Array.from({ length: 25 }, (_, i) => msg(i)))).toEqual({ accepted: 20, dropped: 5 });
-    const def = await running(db);
+    const def = await running(db, {}, true);
     expect(await def.env.edge.postEvents(def.token, Array.from({ length: 25 }, (_, i) => msg(i)))).toEqual({ accepted: 10, dropped: 15 });
   });
 

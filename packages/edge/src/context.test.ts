@@ -19,8 +19,8 @@ import {
 
 const T = useTestDb();
 
-async function chain(db: Db, kind: "guest" | "owner" = "guest") {
-  const ws = await fxWorkspace(db, { kind, audit: true });
+async function chain(db: Db, second = false) {
+  const ws = await fxWorkspace(db, { audit: true, second });
   await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());
@@ -67,7 +67,7 @@ describe("getTaskContext（API-036）", () => {
     expect(again.started_at.getTime()).toBe(T0.getTime() + 5_000);
   });
 
-  it("PR-04 受信箱係（ゲスト・researcher）：テンプレート・フェーズ・ツール（mcp_call・notify・submit_report・finish と、2体の編成の連絡板 team_post・team_wait、本番の依頼なので利用者への質問 ask_user）・付与した MCP のツールだけ", async () => {
+  it("PR-04 受信箱係（researcher）：テンプレート・フェーズ・ツール（mcp_call・notify・submit_report・finish と、2体の編成の連絡板 team_post・team_wait、本番の依頼なので利用者への質問 ask_user）・付与した MCP のツールだけ", async () => {
     const { db } = T();
     const { ws, inbox, ask } = await chain(db);
     const taskId = await seedTask(db, ws, inbox, "read-supplier-mail", { ask, memberName: "受信箱係" });
@@ -121,7 +121,7 @@ describe("getTaskContext（API-036）", () => {
 
   it("オーナーの owner は web の付与がなければ web_* を渡さない／無効のコネクタ・確認待ちのツールは見せない", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     await seedConnectors(db, ws, { disabled: ["bank"] });
     await db.query("UPDATE connector_tools SET status = 'needs_review' WHERE workspace_id = $1 AND name = 'list_products'", [ws.workspaceId]);
     const supplier = await seedAgent(db, ws, supplierDefinition());
@@ -187,7 +187,7 @@ describe("getTaskContext（API-036）", () => {
   it("15:486 別のワークスペースのタスクはトークンからしか引けない（トークンが自分のタスクとワークスペースを決める）", async () => {
     const { db } = T();
     const a = await chain(db);
-    const b = await chain(db);
+    const b = await chain(db, true);
     const taskA = await seedTask(db, a.ws, a.inbox, "read-supplier-mail");
     const taskB = await seedTask(db, b.ws, b.inbox, "read-supplier-mail");
     const { edge } = buildEdge(db);

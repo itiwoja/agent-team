@@ -38,7 +38,7 @@ interface Posted {
 
 /** 受信箱係（1段目・済み）→ 仕入れ係（2段目・窓口）。受信箱係のタスクは報告つきで終わっている */
 async function setup(db: Db, o: { inboxDone?: boolean } = {}) {
-  const ws = await fxWorkspace(db, { kind: "guest", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());

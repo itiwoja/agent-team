@@ -37,14 +37,12 @@ export const ERROR_STATUS = {
   RULE_NOT_ALLOWED: 422, // details { failedConditions?, reason? }
   NOT_IN_CATALOG: 422, // details { nearest, line, candidateId }
   PROPOSAL_NOT_NARROW: 422, // details { classification }
-  CONNECTOR_NOT_ALLOWED: 422, // details [{ reasonCode }]
   AGENT_SCHEMA_INVALID: 422,
   AGENT_EXCEEDS_POLICY: 422,
   AGENT_LIMIT_REACHED: 422, // details { limit }（エージェントは20体まで：A-81）
   KILL_SWITCH_ENGAGED: 423,
   RATE_LIMITED: 429, // LLM Proxy の毎分60回だけ（§4.4）
-  GUEST_LIMIT_REACHED: 429, // details { scope: "global" | "ip" }
-  DAILY_BUDGET_EXCEEDED: 429, // details { scope: "workspace" | "global" } ＋ Retry-After
+  DAILY_BUDGET_EXCEEDED: 429, // details { scope: "global" } ＋ Retry-After
   USER_CASE_DAILY_LIMIT: 429, // details { limit: 5 }
   INTERNAL_ERROR: 500,
   LLM_UPSTREAM_ERROR: 502,
@@ -87,13 +85,11 @@ export const DEFAULT_ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   RULE_NOT_ALLOWED: "このルールは作れません",
   NOT_IN_CATALOG: "障害のカタログに当てはまりません",
   PROPOSAL_NOT_NARROW: "狭める変更ではありません",
-  CONNECTOR_NOT_ALLOWED: "この接続先は使えません",
   AGENT_SCHEMA_INVALID: "エージェントの定義がスキーマに合いません",
   AGENT_EXCEEDS_POLICY: "エージェントの定義がポリシーより緩いです",
   AGENT_LIMIT_REACHED: "エージェントの数が上限に達しています",
   KILL_SWITCH_ENGAGED: "Kill Switch が発動中です",
   RATE_LIMITED: "回数の上限を超えました",
-  GUEST_LIMIT_REACHED: "混み合っています",
   DAILY_BUDGET_EXCEEDED: "今日の予算を使い切りました",
   USER_CASE_DAILY_LIMIT: "今日の追加の上限に達しました",
   INTERNAL_ERROR: "内部エラーが発生しました",

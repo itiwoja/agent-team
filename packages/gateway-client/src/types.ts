@@ -5,14 +5,13 @@
 
 import type { ReasonCode, ToolHash, Uuid } from "@open-team/kernel";
 
-/** EP-49 の拒否の理由（decide の理由のほか、gateway の境界：BR-63・64・66） */
+/** EP-49 の拒否の理由（decide の理由のほか、gateway の確かめ：BR-63・66） */
 export type GwRejectReason =
   | ReasonCode
   | "timeout"
   | "tool_not_read"
   | "tool_removed"
   | "connector_not_found"
-  | "guest_workspace"
   | "upstream_error";
 
 /** EP-49 POST /gw/v1/tools/call（読み取り）。ヘッダー X-Task-Token にタスクのトークン */

@@ -187,7 +187,7 @@ describe("knownSecretsFromEnv", () => {
   it("決まった名前の、8文字以上の値だけを拾う", () => {
     const env = {
       PHASE0_ACCESS_TOKEN: "o".repeat(32),
-      GUEST_ENTRY_TOKEN: "short",
+      SESSION_COOKIE_SECRET: "short",
       INTERNAL_SHARED_TOKEN: "i".repeat(40),
       DATABASE_URL: "postgres://u:p@h/db",
       PORT: "8080",

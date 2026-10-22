@@ -26,8 +26,8 @@ import { USAGE } from "./__fixtures__/env.ts";
 
 const T = useTestDb();
 
-async function supplierWorld(db: Db, kind: "guest" | "owner" = "guest") {
-  const ws = await fxWorkspace(db, { kind, audit: true });
+async function supplierWorld(db: Db) {
+  const ws = await fxWorkspace(db, { audit: true });
   const conns = await seedConnectors(db, ws);
   const agent = await seedAgent(db, ws, supplierDefinition());
   return { ws, conns, agent };
@@ -135,17 +135,16 @@ describe("G-01 loadDecideInputs：判定の入力の出どころ", () => {
 });
 
 describe("checkSpend（SO §3.12：呼ぶ前、spent + est > limit）", () => {
-  it("順番は全体 → ゲスト。ちょうどは通す", async () => {
+  it("全体の上限。ちょうどは通す", async () => {
     const { db } = T();
     const { ws, agent } = await supplierWorld(db);
     await fxUsage(db, ws, { agentId: agent.agentId, costUsd: "3.900000", createdAt: T0 });
-    const target = { workspaceId: ws.workspaceId, workspaceKind: "guest" as const };
-    expect(await checkSpend(db, target, 100_000, T0)).toEqual({ ok: true });
-    expect(await checkSpend(db, target, 100_001, T0)).toEqual({ ok: false, scope: "workspace", limitMicroUsd: 4_000_000, spentMicroUsd: 3_900_000, estimatedMicroUsd: 100_001 });
-    // 全体の上限を下げると全体が先
-    expect(await checkSpend(db, target, 100_001, T0, { platformDayMicroUsd: 3_950_000, guestDayMicroUsd: 4_000_000 })).toMatchObject({ scope: "global" });
-    // オーナーはワークスペースの $4 を数えない（ゲストだけ）
-    expect(await checkSpend(db, { ...target, workspaceKind: "owner" }, 100_001, T0)).toEqual({ ok: true });
+    const target = { workspaceId: ws.workspaceId, workspaceKind: "owner" as const };
+    const limits = { platformDayMicroUsd: 4_000_000 };
+    expect(await checkSpend(db, target, 100_000, T0, limits)).toEqual({ ok: true });
+    expect(await checkSpend(db, target, 100_001, T0, limits)).toEqual({ ok: false, scope: "global", limitMicroUsd: 4_000_000, spentMicroUsd: 3_900_000, estimatedMicroUsd: 100_001 });
+    // 既定の上限（$15）なら通す
+    expect(await checkSpend(db, target, 100_001, T0)).toEqual({ ok: true });
   });
 });
 
@@ -153,7 +152,9 @@ describe("canStartWork（SO §3.12：始める前、spent ≥ limit。見積も�
   it("Kill Switch → kill_switch、本番の running が max_concurrent_tasks 以上 → concurrency", async () => {
     const { db } = T();
     const { ws, agent } = await supplierWorld(db);
-    const row = async () => (await db.query<{ id: Uuid; kind: "guest"; kill_switch_engaged: boolean; max_concurrent_tasks: number }>("SELECT id, kind, kill_switch_engaged, max_concurrent_tasks FROM workspaces WHERE id = $1", [ws.workspaceId])).rows[0]!;
+    const row = async () => (await db.query<{ id: Uuid; kind: "owner"; kill_switch_engaged: boolean; max_concurrent_tasks: number }>("SELECT id, kind, kill_switch_engaged, max_concurrent_tasks FROM workspaces WHERE id = $1", [ws.workspaceId])).rows[0]!;
+    expect(await canStartWork(db, await row(), T0)).toEqual({ ok: true });
+    await seedTask(db, ws, agent, "reorder", { status: "running" });
     expect(await canStartWork(db, await row(), T0)).toEqual({ ok: true });
     await seedTask(db, ws, agent, "reorder", { status: "running" });
     expect(await canStartWork(db, await row(), T0)).toEqual({ ok: true });
@@ -163,19 +164,15 @@ describe("canStartWork（SO §3.12：始める前、spent ≥ limit。見積も�
     expect(await canStartWork(db, await row(), T0)).toEqual({ ok: false, reason: "kill_switch" });
   });
 
-  it("ゲストの今日の費用 = $4 ちょうどで始めない（≥）。$3.999999 なら始める。オーナーは $4 を数えない", async () => {
+  it("全体の今日の費用 = 上限ちょうどで始めない（≥）。1マイクロドル下なら始める", async () => {
     const { db } = T();
     const { ws, agent } = await supplierWorld(db);
-    const wsRow = { id: ws.workspaceId, kind: "guest" as const, kill_switch_engaged: false, max_concurrent_tasks: 2 };
+    const wsRow = { id: ws.workspaceId, kind: "owner" as const, kill_switch_engaged: false, max_concurrent_tasks: 3 };
+    const limits = { platformDayMicroUsd: 4_000_000 };
     await fxUsage(db, ws, { agentId: agent.agentId, costUsd: "3.999999", createdAt: T0 });
-    expect(await canStartWork(db, wsRow, T0)).toEqual({ ok: true });
+    expect(await canStartWork(db, wsRow, T0, limits)).toEqual({ ok: true });
     await fxUsage(db, ws, { agentId: agent.agentId, costUsd: "0.000001", createdAt: T0 });
-    expect(await canStartWork(db, wsRow, T0)).toEqual({ ok: false, reason: "workspace" });
-    const owner = await fxWorkspace(db, { kind: "owner" });
-    const oAgent = await seedAgent(db, owner, inboxDefinition());
-    await fxUsage(db, owner, { agentId: oAgent.agentId, costUsd: "4.000000", createdAt: T0 });
-    const ownerRow = { id: owner.workspaceId, kind: "owner" as const, kill_switch_engaged: false, max_concurrent_tasks: 3 };
-    expect(await canStartWork(db, ownerRow, T0)).toEqual({ ok: true });
+    expect(await canStartWork(db, wsRow, T0, limits)).toEqual({ ok: false, reason: "global" });
   });
 });
 
@@ -189,7 +186,7 @@ describe("callGemini（タスクの外：設定プランナー・状況の生成
     const { db } = T();
     const { ws, agent } = await supplierWorld(db);
     const llm = new ScriptedLlmClient([{ parts: [{ type: "text", text: "{}" }], usage: USAGE }]);
-    const out = await callGemini(deps(db, llm), { workspaceId: ws.workspaceId, workspaceKind: "guest", taskId: null, agentId: agent.agentId, askId: null, purpose: "planner", phase: "planner" }, req);
+    const out = await callGemini(deps(db, llm), { workspaceId: ws.workspaceId, workspaceKind: "owner", taskId: null, agentId: agent.agentId, askId: null, purpose: "planner", phase: "planner" }, req);
     expect(out.usage.costMicroUsd).toBe(2250);
     expect(out.usage.estimatedMicroUsd).toBe(estimateCallMicroUsd(req));
     const u = (await db.query<{ agent_id: Uuid; task_id: Uuid | null; phase: string; cost_usd: string }>("SELECT agent_id, task_id, phase, cost_usd FROM usage_records WHERE workspace_id = $1", [ws.workspaceId])).rows;
@@ -199,9 +196,9 @@ describe("callGemini（タスクの外：設定プランナー・状況の生成
   it("予算を超えるなら呼ばない：GeminiCallError(budget)。toAppError は 429 DAILY_BUDGET_EXCEEDED（scope・Retry-After）", async () => {
     const { db } = T();
     const { ws, agent } = await supplierWorld(db);
-    await fxUsage(db, ws, { agentId: agent.agentId, costUsd: "4.000000", createdAt: T0 });
+    await fxUsage(db, ws, { agentId: agent.agentId, costUsd: "15.000000", createdAt: T0 });
     const llm = new ScriptedLlmClient([]);
-    const e = await callGemini(deps(db, llm), { workspaceId: ws.workspaceId, workspaceKind: "guest", taskId: null, agentId: agent.agentId, askId: null, purpose: "planner", phase: "planner" }, req).then(
+    const e = await callGemini(deps(db, llm), { workspaceId: ws.workspaceId, workspaceKind: "owner", taskId: null, agentId: agent.agentId, askId: null, purpose: "planner", phase: "planner" }, req).then(
       () => null,
       (x: unknown) => x,
     );
@@ -209,7 +206,7 @@ describe("callGemini（タスクの外：設定プランナー・状況の生成
     expect((e as GeminiCallError).kind).toBe("budget");
     const app = (e as GeminiCallError).toAppError(T0);
     expect(app.code).toBe("DAILY_BUDGET_EXCEEDED");
-    expect(app.details).toEqual({ scope: "workspace" });
+    expect(app.details).toEqual({ scope: "global" });
     // 2026-10-12 18:00 JST → 翌日 0:00 まで 6時間
     expect(app.headers).toEqual({ "Retry-After": String(6 * 3600) });
     expect(llm.requests).toHaveLength(0);
@@ -225,7 +222,7 @@ describe("callGemini（タスクの外：設定プランナー・状況の生成
       return { parts: [{ type: "text", text: "{}" }], usage: USAGE };
     });
     const mem = memoryLogger();
-    await callGemini({ ...deps(db, llm), log: mem.logger }, { workspaceId: ws.workspaceId, workspaceKind: "guest", taskId: null, agentId: agent.agentId, askId: null, purpose: "planner", phase: "planner" }, req);
+    await callGemini({ ...deps(db, llm), log: mem.logger }, { workspaceId: ws.workspaceId, workspaceKind: "owner", taskId: null, agentId: agent.agentId, askId: null, purpose: "planner", phase: "planner" }, req);
     const retry = mem.records.find((r) => r.event === "llm.retry");
     expect(retry).toMatchObject({ retry: 1, status: 504, purpose: "planner" });
     expect(mem.records.find((r) => r.event === "llm.called")).toMatchObject({ attempts: 2, latencyMs: expect.any(Number) });
@@ -234,7 +231,7 @@ describe("callGemini（タスクの外：設定プランナー・状況の生成
   it("Kill Switch 中は呼ばない（423 KILL_SWITCH_ENGAGED）。持ち主がなければ例外。LLM の失敗は GeminiCallError(llm)", async () => {
     const { db } = T();
     const { ws, agent } = await supplierWorld(db);
-    const ctx = { workspaceId: ws.workspaceId, workspaceKind: "guest" as const, taskId: null, agentId: agent.agentId, askId: null, purpose: "planner" as const, phase: "planner" as const };
+    const ctx = { workspaceId: ws.workspaceId, workspaceKind: "owner" as const, taskId: null, agentId: agent.agentId, askId: null, purpose: "planner" as const, phase: "planner" as const };
     await expect(callGemini(deps(db, new ScriptedLlmClient([])), { ...ctx, agentId: null }, req)).rejects.toThrow(/持ち主/);
     const failing = new ScriptedLlmClient(() => {
       throw new LlmError("bad request", 400, false);
@@ -266,7 +263,7 @@ describe("issueTaskToken・resolveTaskByToken（SO §3.10）", () => {
     expect(row.task_token_expires_at.getTime()).toBe(T0.getTime() + 20 * 60_000);
     const r = await resolveTaskByToken(db, token, T0, { allow: ["queued"] });
     expect(r.task.id).toBe(taskId);
-    expect(r.ctx).toEqual({ workspaceId: ws.workspaceId, kind: "guest", userId: null });
+    expect(r.ctx).toEqual({ workspaceId: ws.workspaceId, kind: "owner", userId: null });
     await db.query("UPDATE tasks SET status = 'cancelled', finished_at = $2 WHERE id = $1", [taskId, T0]);
     await expect(db.transaction((tx) => issueTaskToken(tx, ws.ctx, taskId, T0))).rejects.toThrow(/トークン/);
   });

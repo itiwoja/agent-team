@@ -15,7 +15,6 @@ export const MIN_KNOWN_SECRET_LENGTH = 8;
 /** 値をマスクする環境変数（秘密の値・鍵・共有トークン） */
 export const SECRET_ENV_NAMES = [
   "PHASE0_ACCESS_TOKEN",
-  "GUEST_ENTRY_TOKEN",
   "SESSION_COOKIE_SECRET",
   "INTERNAL_SHARED_TOKEN",
   "DATABASE_URL",

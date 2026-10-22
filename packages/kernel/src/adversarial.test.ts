@@ -226,7 +226,7 @@ const TOOLS: ConnectorCatalog = {
   supplier: { connected: true, tools: { list_products: read("2"), place_order: T_PO } },
   mail: { connected: true, tools: { list_inbox: read("3"), send: T_MS } },
 };
-const CTX: ClassifyContext = { ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS), tools: TOOLS };
+const CTX: ClassifyContext = { ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy(EXAMPLE_CONNECTORS), tools: TOOLS };
 const ruleInput = (match: Record<string, Json>, free: string[], id = "r-1") => ({
   id,
   action: PO,

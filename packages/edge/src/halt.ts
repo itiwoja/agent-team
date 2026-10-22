@@ -64,7 +64,7 @@ export function haltCauseOf(result: DecideResult): HaltCause | null {
   }
 }
 
-/** checkSpend の拒否から止めた理由へ（全体 $15・ゲスト $4：BR-62。SO §3.12-3） */
+/** checkSpend の拒否から止めた理由へ（全体 $15：BR-62。SO §3.12-3） */
 export function haltCauseOfSpend(d: SpendDenied): HaltCause {
   return {
     reason: "budget_exceeded",

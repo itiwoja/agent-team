@@ -53,11 +53,11 @@ export interface TaskSetup {
 }
 
 /**
- * このタスクで作業場を使えるか（D-116）：作業場のプロバイダーがあり、オーナーのワークスペースの本番の依頼のタスク。
- * 試し実行・ゲストでは使わない（費用と悪用の面。ゲストは BR-64 と同じ考え）
+ * このタスクで作業場を使えるか（D-116）：作業場のプロバイダーがあり、本番の依頼のタスク。
+ * 試し実行では使わない（費用と悪用の面）
  */
-export function sandboxAllowed(task: Pick<TaskRow, "ask_id" | "is_dry_run" | "kind">, workspace: Pick<WorkspaceRow, "kind">, providerAvailable: boolean): boolean {
-  return providerAvailable && workspace.kind === "owner" && task.ask_id !== null && !task.is_dry_run && task.kind === "normal";
+export function sandboxAllowed(task: Pick<TaskRow, "ask_id" | "is_dry_run" | "kind">, providerAvailable: boolean): boolean {
+  return providerAvailable && task.ask_id !== null && !task.is_dry_run && task.kind === "normal";
 }
 
 function runKindOf(task: Pick<TaskRow, "is_dry_run">): TaskRunKind {
@@ -142,7 +142,7 @@ export async function loadTaskSetup(
     }
   }
 
-  const sandbox = sandboxAllowed(task, workspace, opts.sandboxProvider === true);
+  const sandbox = sandboxAllowed(task, opts.sandboxProvider === true);
   // スキル（パックで入った手順書）。試し実行のタスクにも渡す（読むだけで外へ出ない）。
   // システムプロンプトの「# 使えるスキル」に出すのは、運営のパックと同じ中身（名前・説明・本文）のスキルだけ（SG-05）。
   // システムプロンプトは汚染を付ける前に組み立てるので、確かめられないスキルの名前・説明は出さない（load_skill で読めば包んで汚染する）
@@ -153,7 +153,6 @@ export async function loadTaskSetup(
     template,
     mcpGrants: tp.policy.mcp.grants,
     webAllowDomains: tp.policy.web.allow_domains,
-    guestWorkspace: workspace.kind === "guest",
     formation: shape === null || member === null ? null : { shape, memberCount, isAggregator: member.is_aggregator },
     // 連絡板（FR-064）：2体以上の編成のタスクに team_post・team_wait を渡す（ひとりには作らない）
     teamBoard: shape !== null && shape !== "single",

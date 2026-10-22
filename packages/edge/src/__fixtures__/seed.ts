@@ -249,7 +249,7 @@ export interface SeededAgent {
 
 /** エージェント・スナップショット（effective_policies は composeAll）・仕事 */
 export async function seedAgent(db: Db | Tx, ws: FxWorkspace, def: AgentDefinitionInput, opts: { status?: "active" | "idle" } = {}): Promise<SeededAgent> {
-  const composed = composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy(ws.kind, FX_CONNECTORS.map((c) => c.slug)), agent: def });
+  const composed = composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy(FX_CONNECTORS.map((c) => c.slug)), agent: def });
   if (composed.violations.length > 0) throw new Error(`定義がポリシーを超えている：${composed.violations.map((v) => v.path).join("・")}`);
   const effective = Object.fromEntries(Object.entries(composed.jobs).map(([slug, r]) => [slug, { policy: r.effective, hash: r.effectivePolicyHash }]));
   return withTransaction(db, async (tx) => {

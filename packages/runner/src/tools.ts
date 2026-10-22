@@ -346,8 +346,6 @@ export interface TaskToolSelection {
   mcpGrants: Readonly<Record<string, readonly string[]>>;
   /** Web の付与（EffectivePolicy.web.allow_domains）。空なら web_* を外す */
   webAllowDomains: readonly string[];
-  /** ゲストのワークスペース（BR-64：web_search を外す） */
-  guestWorkspace: boolean;
   /** 編成の担当のときだけ。memberCount はまとめ役を含めた担当の数 */
   formation: null | { shape: Shape; memberCount: number; isAggregator: boolean };
   /** 連絡板（FR-064。Should）を動かしているか。作るまでは false */
@@ -393,8 +391,6 @@ export function selectTaskToolNames(sel: TaskToolSelection): RuntimeToolName[] {
     names.delete("web_search");
     names.delete("web_fetch");
   }
-  // ゲストの web_search は外す（BR-64。外さなくても edge が guest_workspace で拒否する）
-  if (sel.guestWorkspace) names.delete("web_search");
 
   // 6. まとめ役は報告だけ（BR-72）
   if (sel.formation?.isAggregator) {

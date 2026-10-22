@@ -1,6 +1,6 @@
 // LLM Proxy（edge の llmMessages。FR-009、formation-runtime.md §3.10、M-14・M-15・M-19）
 // 1 トークンでタスクを引き直す → 2 入力の検証（Zod）→ 3 1分あたり60回 → 4 Router でモデル → 5 見積もり →
-// 6 callGemini の中の1トランザクション：Kill Switch・checkSpend（全体・ゲスト）・decide(llm_call) → 7 Gemini（やり直し）→
+// 6 callGemini の中の1トランザクション：Kill Switch・checkSpend（全体）・decide(llm_call) → 7 Gemini（やり直し）→
 // 8 1トランザクション：usage_records・tasks.cost_usd／steps_used・task_events・監査ログ llm.called → 9 応答のツール呼び出しを順に decide
 // （エージェントの MCP の書き込みも kind: 'tool_call' で1回だけ：M-14。書き込みはその結果で Intent にする：recordMcpIntent）。
 // 1つの応答で submit_report より後ろの呼び出しは判定せず Intent にもしない（決定 (e)。記録だけ：runner が捨てるのと合わせる）
@@ -48,7 +48,7 @@ import { haltedDetails, isTerminalStatus, resolveTaskByToken } from "./tokens.ts
 import { charCount, toJsonObject } from "./util.ts";
 import { parseLlmMessagesRequest } from "./validate.ts";
 
-/** 判定の結果（kernel の DecideResult か、edge の境界の拒否。境界の理由コードは kernel の ReasonCode にない：BR-64 の guest_workspace） */
+/** 判定の結果（kernel の DecideResult） */
 export interface Judged {
   decision: Decision;
   reasonCode: string;
@@ -133,20 +133,18 @@ async function recordDecision(
 interface BuiltCall {
   subject: Subject;
   mcp: McpTarget | null;
-  /** edge の境界で先に拒否する（BR-64：ゲストの web_search。decide の前：KD §8-38） */
-  boundary: { reasonCode: string; operation: OperationType } | null;
   /** run_command の写し先（SG-07）。ほかのツールは null */
   command: CommandJudgement | null;
 }
 
-async function buildCallSubject(tx: Tx, ctx: WsCtx, call: ToolCallPart, workspace: WorkspaceRow, taint: TaintState): Promise<BuiltCall> {
+async function buildCallSubject(tx: Tx, ctx: WsCtx, call: ToolCallPart, taint: TaintState): Promise<BuiltCall> {
   if (call.name === "mcp_call") {
     const parsed = parseMcpCallArgs(call.arguments);
     if (parsed === null) {
-      return { subject: { kind: "tool_call", actionType: "mcp_call", args: {}, paths: [], origin: "agent" }, mcp: null, boundary: null, command: null };
+      return { subject: { kind: "tool_call", actionType: "mcp_call", args: {}, paths: [], origin: "agent" }, mcp: null, command: null };
     }
     const r = await resolveMcpSubject(tx, ctx, parsed);
-    return { subject: r.subject, mcp: r.mcp, boundary: null, command: null };
+    return { subject: r.subject, mcp: r.mcp, command: null };
   }
   const subject: Subject = {
     kind: "tool_call",
@@ -156,16 +154,13 @@ async function buildCallSubject(tx: Tx, ctx: WsCtx, call: ToolCallPart, workspac
     paths: [],
     origin: "agent",
   };
-  if (call.name === "web_search" && workspace.kind === "guest") {
-    return { subject, mcp: null, boundary: { reasonCode: "guest_workspace", operation: "web_read" }, command: null };
-  }
   if (call.name === "run_command") {
     // SG-07：汚染（外の内容を読んだか）と形から、run_tests と run_shell のどちらとして判定するかをここで決める。
     // 汚染は decide の手順の条件には入れない（BR-39）。decide は subject.commandOperation と形だけを見る
     const command = judgeCommand(subject.args, taint);
-    return { subject: { ...subject, commandOperation: command.operation }, mcp: null, boundary: null, command };
+    return { subject: { ...subject, commandOperation: command.operation }, mcp: null, command };
   }
-  return { subject, mcp: null, boundary: null, command: null };
+  return { subject, mcp: null, command: null };
 }
 
 export interface JudgedCalls {
@@ -223,27 +218,15 @@ export async function judgeToolCalls(
   // SG-07：run_command の写し先に使う汚染（作業場が受け取る控えの汚染を先に足したもの）。run_command があるときだけ読む
   const commandTaint = judgedCalls.some((c) => c.name === "run_command") ? await commandTaintOf(tx, ctx, task, base.taint, now) : base.taint;
   for (const call of judgedCalls) {
-    const built = await buildCallSubject(tx, ctx, call, base.workspace, commandTaint);
-    let kernelResult: DecideResult | null = null;
-    let result: Judged;
-    if (built.boundary !== null) {
-      result = {
-        decision: "deny",
-        reasonCode: built.boundary.reasonCode,
-        matchedRule: null,
-        inputsHash: computeInputsHash(policy, built.subject, counters, base.flags, base.taint),
-        operation: built.boundary.operation,
-      };
-    } else {
-      kernelResult = decide(policy, built.subject, counters, base.flags, base.taint);
-      result = kernelResult;
-    }
+    const built = await buildCallSubject(tx, ctx, call, commandTaint);
+    const kernelResult: DecideResult = decide(policy, built.subject, counters, base.flags, base.taint);
+    const result: Judged = kernelResult;
 
     // MCP の書き込み（未分類も書き込み：ADR-022）は判定の結果で Intent にする（M-14）
     let intent: RecordedMcpIntent | null = null;
     let invalidArgs: string[] | null = null;
     const mcp = built.mcp;
-    if (mcp !== null && mcp.info.classification !== "read" && kernelResult !== null) {
+    if (mcp !== null && mcp.info.classification !== "read") {
       // 実行されうる（allow）か承認に回る（approve）Intent は、入力スキーマに合わなければ作らない（M-12。ツールのエラーで返す）
       if (result.decision === "allow" || result.decision === "approve") {
         const check = checkToolArguments(mcp.tool.input_schema, built.subject.args, rt.limits.mcpArgsMaxBytes);
@@ -320,7 +303,7 @@ export async function judgeToolCalls(
     });
 
     if (result.decision === "halt") {
-      const cause = kernelResult === null ? null : haltCauseOf(kernelResult);
+      const cause = haltCauseOf(kernelResult);
       if (cause !== null) await haltTask(tx, ctx, task, cause, now);
       halted = true;
       break;
@@ -387,7 +370,7 @@ export async function llmMessages(rt: EdgeRuntime, token: string, rawReq: unknow
       gctx,
       llmReq,
       {
-        // Kill Switch・全体 $15・ゲスト $4（M-19）。タスクの中で止めたら halted(budget_exceeded)＋監査ログ budget.exceeded
+        // Kill Switch・全体 $15（M-19）。タスクの中で止めたら halted(budget_exceeded)＋監査ログ budget.exceeded
         onStopped: async (tx, stop, now) => {
           const t = await lockTask(tx, ctx, task.id);
           if (t === null || isTerminalStatus(t.status)) return;

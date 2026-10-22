@@ -202,19 +202,13 @@ describe("自律度の厳しさと切り詰め（KC §3.2・§8 #1）", () => {
   });
 });
 
-describe("ワークスペースのポリシーの既定値（KC §2.3・M-59・BR-62）", () => {
-  const owner = defaultWorkspacePolicy("owner");
-  const guest = defaultWorkspacePolicy("guest");
-  it("オーナーの per_day_usd は 10（M-59）、ゲストは 4（BR-62・D-105・D-106：edge のゲスト1日 $4 と同じ）。ほかは同じ", () => {
-    expect(owner.budget.per_day_usd).toBe(10);
-    expect(guest.budget.per_day_usd).toBe(4);
-    expect({ ...owner, budget: { ...owner.budget, per_day_usd: 0 } }).toEqual({ ...guest, budget: { ...guest.budget, per_day_usd: 0 } });
-  });
-  it("例の値（policy-and-schema.md:43-65）と推奨の Breaker（KC §8 #20）", () => {
-    expect(guest).toEqual({
+describe("ワークスペースのポリシーの既定値（KC §2.3・M-59）", () => {
+  const owner = defaultWorkspacePolicy();
+  it("例の値（policy-and-schema.md:43-65）と推奨の Breaker（KC §8 #20）。per_day_usd は 10（M-59）", () => {
+    expect(owner).toEqual({
       version: 1,
       autonomy: { web_read: "auto", notify: "auto", mcp_read: "auto", mcp_write: "approve", open_pr: "approve", memory_write: "auto" },
-      budget: { per_task_usd: 0.5, per_day_usd: 4, max_steps: 40, max_minutes: 15 },
+      budget: { per_task_usd: 0.5, per_day_usd: 10, max_steps: 40, max_minutes: 15 },
       breakers: { same_action_repeat: 5, denied_attempts_max: 3, step_cost_usd_max: 0.5 },
       web: { deny_domains: ["*.internal", "localhost"], max_fetches_per_task: 30 },
       connectors: { enabled: [] },
@@ -225,33 +219,33 @@ describe("ワークスペースのポリシーの既定値（KC §2.3・M-59・B
     expect(DEFAULT_BREAKERS).toEqual({ same_action_repeat: 5, denied_attempts_max: 3, step_cost_usd_max: 0.5 });
   });
   it("有効なコネクタの既定は空。渡せば差し替え（trim・昇順・重複なし）", () => {
-    expect(defaultWorkspacePolicy("owner").connectors.enabled).toEqual([]);
-    expect(defaultWorkspacePolicy("guest", [" news ", "mail", "mail"]).connectors.enabled).toEqual(["mail", "news"]);
+    expect(defaultWorkspacePolicy().connectors.enabled).toEqual([]);
+    expect(defaultWorkspacePolicy([" news ", "mail", "mail"]).connectors.enabled).toEqual(["mail", "news"]);
   });
   it("日の区切りは Asia/Tokyo（M-59）", () => {
     expect(DAY_BOUNDARY_TIMEZONE).toBe("Asia/Tokyo");
   });
   it("呼ぶたびに新しいオブジェクト（呼び出し側が書き換えても既定値は変わらない）", () => {
-    const a = defaultWorkspacePolicy("owner");
+    const a = defaultWorkspacePolicy();
     (a.budget as { per_task_usd: number }).per_task_usd = 99;
-    expect(defaultWorkspacePolicy("owner").budget.per_task_usd).toBe(0.5);
+    expect(defaultWorkspacePolicy().budget.per_task_usd).toBe(0.5);
   });
   it("スキーマを通る。Hard Ceiling を超える値も形が合えば通る（範囲の検証は Q-30。compose が切り詰める）", () => {
     expect(parseWorkspacePolicy(owner)).toEqual(owner);
-    expect(workspacePolicySchema.safeParse({ ...guest, budget: { ...guest.budget, per_task_usd: 30 } }).success).toBe(true);
-    expect(workspacePolicySchema.safeParse({ ...guest, autonomy: { ...guest.autonomy, mcp_write: "auto" } }).success).toBe(true);
+    expect(workspacePolicySchema.safeParse({ ...owner, budget: { ...owner.budget, per_task_usd: 30 } }).success).toBe(true);
+    expect(workspacePolicySchema.safeParse({ ...owner, autonomy: { ...owner.autonomy, mcp_write: "auto" } }).success).toBe(true);
   });
   it("スキーマ：未知のキー・欠け・負の値・有限でない値は拒否", () => {
-    expect(workspacePolicySchema.safeParse({ ...guest, extra: 1 }).success).toBe(false);
-    const { web: _web, ...noWeb } = guest;
+    expect(workspacePolicySchema.safeParse({ ...owner, extra: 1 }).success).toBe(false);
+    const { web: _web, ...noWeb } = owner;
     expect(workspacePolicySchema.safeParse(noWeb).success).toBe(false);
-    expect(workspacePolicySchema.safeParse({ ...guest, budget: { ...guest.budget, per_day_usd: -1 } }).success).toBe(false);
-    expect(workspacePolicySchema.safeParse({ ...guest, budget: { ...guest.budget, per_day_usd: Number.POSITIVE_INFINITY } }).success).toBe(false);
-    expect(workspacePolicySchema.safeParse({ ...guest, autonomy: { ...guest.autonomy, browser_submit: "approve" } }).success).toBe(false);
+    expect(workspacePolicySchema.safeParse({ ...owner, budget: { ...owner.budget, per_day_usd: -1 } }).success).toBe(false);
+    expect(workspacePolicySchema.safeParse({ ...owner, budget: { ...owner.budget, per_day_usd: Number.POSITIVE_INFINITY } }).success).toBe(false);
+    expect(workspacePolicySchema.safeParse({ ...owner, autonomy: { ...owner.autonomy, browser_submit: "approve" } }).success).toBe(false);
     expect(() => parseWorkspacePolicy({ version: 2 })).toThrow();
   });
   it("breakers・max_intents_per_task は省略できる（DB の形：db-schema.md §3）", () => {
-    const { breakers: _b, max_intents_per_task: _m, ...rest } = guest;
+    const { breakers: _b, max_intents_per_task: _m, ...rest } = owner;
     expect(workspacePolicySchema.safeParse(rest).success).toBe(true);
   });
 });
@@ -545,40 +539,27 @@ describe("正規化 normalizeAgentDefinition（KC §3.1）", () => {
 });
 
 describe("最初の境界 initialAgentDefinition（agents.md:61-70・A-79・KC §6.10）", () => {
-  const guest = defaultWorkspacePolicy("guest");
-  it("I-01：ゲストの ws（per_day 4）で per_task_usd 0.2・per_day_usd 4（D-105・D-106）・max_runs_per_day 10、違反なし", () => {
-    const d = initialAgentDefinition({ name: "新しい係", workspacePolicy: guest, workspaceKind: "guest" });
-    expect(d.budget).toEqual({ per_task_usd: 0.2, per_day_usd: 4 });
+  const owner = defaultWorkspacePolicy();
+  it("I-01：per_task_usd 0.2・per_day_usd 1（ws 10 より低い初期値）・max_runs_per_day 10・Web の付与 ['*']（KC §8 #22）、違反なし", () => {
+    const d = initialAgentDefinition({ name: "新しい係", role: "research", workspacePolicy: owner });
+    expect(d.budget).toEqual({ per_task_usd: 0.2, per_day_usd: 1 });
     expect(d.max_runs_per_day).toBe(10);
     expect(d.autonomy).toEqual({ web_read: "auto", memory_write: "auto" });
-    expect(d.grants).toEqual({ connectors: {} }); // ゲストは Web を付けない（KC §8 #22）
-    expect(d).toMatchObject({ rules: [], jobs: [], profile: [], role: null });
-    expect(composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy: guest, agent: d }).violations).toEqual([]);
+    expect(d.grants).toEqual({ web: { allow_domains: ["*"] }, connectors: {} });
+    expect(d).toMatchObject({ rules: [], jobs: [], profile: [], role: "research" });
+    expect(composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy: owner, agent: d }).violations).toEqual([]);
     expectValid(d);
+    expect(INITIAL_AGENT_BOUNDARY).toEqual({ autonomy: { web_read: "auto", memory_write: "auto" }, budget: { per_task_usd: 0.2, per_day_usd: 1 }, max_runs_per_day: 10 });
   });
-  it("I-02：ws の per_task_usd 0.1 なら最初の境界も 0.1（ws に合わせる）", () => {
-    const ws: WorkspacePolicy = { ...guest, budget: { ...guest.budget, per_task_usd: 0.1 } };
-    expect(initialAgentDefinition({ name: "x", workspacePolicy: ws, workspaceKind: "guest" }).budget.per_task_usd).toBe(0.1);
+  it("I-02：ws の per_task_usd 0.1・per_day_usd 0.5 なら最初の境界もそれに合わせる", () => {
+    const ws: WorkspacePolicy = { ...owner, budget: { ...owner.budget, per_task_usd: 0.1, per_day_usd: 0.5 } };
+    expect(initialAgentDefinition({ name: "x", workspacePolicy: ws }).budget).toEqual({ per_task_usd: 0.1, per_day_usd: 0.5 });
   });
   it("I-03：ws の web_read が deny なら最初の境界も deny（ws の範囲で持つ）。不正な ws の値も切り詰めてから", () => {
-    const ws: WorkspacePolicy = { ...guest, autonomy: { ...guest.autonomy, web_read: "deny" } };
-    expect(initialAgentDefinition({ name: "x", workspacePolicy: ws, workspaceKind: "guest" }).autonomy.web_read).toBe("deny");
-    const bad: WorkspacePolicy = { ...guest, autonomy: { ...guest.autonomy, web_read: "approve" } };
-    expect(initialAgentDefinition({ name: "x", workspacePolicy: bad, workspaceKind: "guest" }).autonomy.web_read).toBe("deny");
-  });
-  it("オーナーは Web の付与 ['*']（KC §8 #22）、per_day_usd は 1（ws 10 より低い初期値）", () => {
-    const d = initialAgentDefinition({ name: "x", role: "research", workspacePolicy: defaultWorkspacePolicy("owner"), workspaceKind: "owner" });
-    expect(d.grants.web).toEqual({ allow_domains: ["*"] });
-    expect(d.budget.per_day_usd).toBe(1);
-    expect(d.role).toBe("research");
-    expect(INITIAL_AGENT_BOUNDARY).toEqual({ autonomy: { web_read: "auto", memory_write: "auto" }, budget: { per_task_usd: 0.2, per_day_usd: 1 }, guest_per_day_usd: 4, max_runs_per_day: 10 });
-  });
-  it("D-105・D-106：ゲストの担当の1日は 4 まで。ws がそれより低ければ ws に合わせる（ゲストの ws が 1・2 のままの古いワークスペースではその値）", () => {
-    expect(initialAgentDefinition({ name: "x", workspacePolicy: { ...guest, budget: { ...guest.budget, per_day_usd: 1 } }, workspaceKind: "guest" }).budget.per_day_usd).toBe(1);
-    expect(initialAgentDefinition({ name: "x", workspacePolicy: { ...guest, budget: { ...guest.budget, per_day_usd: 2 } }, workspaceKind: "guest" }).budget.per_day_usd).toBe(2);
-    expect(initialAgentDefinition({ name: "x", workspacePolicy: { ...guest, budget: { ...guest.budget, per_day_usd: 5 } }, workspaceKind: "guest" }).budget.per_day_usd).toBe(4);
-    // オーナーは ws が 4 でも 1（変えない）
-    expect(initialAgentDefinition({ name: "x", workspacePolicy: guest, workspaceKind: "owner" }).budget.per_day_usd).toBe(1);
+    const ws: WorkspacePolicy = { ...owner, autonomy: { ...owner.autonomy, web_read: "deny" } };
+    expect(initialAgentDefinition({ name: "x", workspacePolicy: ws }).autonomy.web_read).toBe("deny");
+    const bad: WorkspacePolicy = { ...owner, autonomy: { ...owner.autonomy, web_read: "approve" } };
+    expect(initialAgentDefinition({ name: "x", workspacePolicy: bad }).autonomy.web_read).toBe("deny");
   });
   it("性質：どのワークスペースのポリシーでも、最初の境界は違反を出さない（ws より緩くならない）", () => {
     const level = fc.constantFrom(...AUTONOMY_LEVELS);
@@ -589,24 +570,23 @@ describe("最初の境界 initialAgentDefinition（agents.md:61-70・A-79・KC �
           memory_write: level,
           per_task: fc.double({ min: 0.01, max: 30, noNaN: true }),
           per_day: fc.double({ min: 0.01, max: 300, noNaN: true }),
-          kind: fc.constantFrom("owner" as const, "guest" as const),
         }),
         (r) => {
           const ws: WorkspacePolicy = {
-            ...guest,
-            autonomy: { ...guest.autonomy, web_read: r.web_read, memory_write: r.memory_write },
-            budget: { ...guest.budget, per_task_usd: r.per_task, per_day_usd: r.per_day },
+            ...owner,
+            autonomy: { ...owner.autonomy, web_read: r.web_read, memory_write: r.memory_write },
+            budget: { ...owner.budget, per_task_usd: r.per_task, per_day_usd: r.per_day },
           };
-          const d = initialAgentDefinition({ name: "x", workspacePolicy: ws, workspaceKind: r.kind });
+          const d = initialAgentDefinition({ name: "x", workspacePolicy: ws });
           expect(composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy: ws, agent: d }).violations).toEqual([]);
         },
       ),
     );
   });
   it("最初の境界に仕事を足しても compose できる（仕事がないうちは境界だけ）", () => {
-    const d = initialAgentDefinition({ name: "x", workspacePolicy: guest, workspaceKind: "guest" });
+    const d = initialAgentDefinition({ name: "x", workspacePolicy: owner });
     const withJob = { ...d, jobs: [{ id: "news", kind: "recurring" as const, template: "researcher" as const, instructions: "x" }] };
-    expect(compose({ ceilings: DEFAULT_CEILINGS, workspacePolicy: guest, agent: withJob }, "news").effective.tools).toEqual(["finish", "notify", "submit_report"]);
+    expect(compose({ ceilings: DEFAULT_CEILINGS, workspacePolicy: owner, agent: withJob }, "news").effective.tools).toEqual(["finish", "notify", "submit_report", "web_fetch", "web_search"]);
   });
 });
 

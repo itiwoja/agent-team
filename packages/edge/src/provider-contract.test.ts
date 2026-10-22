@@ -10,7 +10,7 @@ const profile = { inputPerMTokMicroUsd: 2_000_000, outputPerMTokMicroUsd: 10_000
 async function world(provider: "anthropic" | "deepseek" | "openrouter", options: { haiku55?: boolean; costUsd?: string; tools?: boolean; malformed?: boolean; networkFailure?: boolean; retryDelays?: number[] } = {}) {
   const selectedModel = options.haiku55 ? "claude-haiku-5-5" : model;
   const { db } = T();
-  const ws = await fxWorkspace(db, { kind: "guest", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   await seedConnectors(db, ws);
   const agent = await seedAgent(db, ws, supplierDefinition());
   const taskId = await seedTask(db, ws, agent, "reorder", { ...(options.costUsd ? { costUsd: options.costUsd } : {}) });

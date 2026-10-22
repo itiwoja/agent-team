@@ -12,7 +12,7 @@ import type { Counters, EffectivePolicy, Flags, Guard, JsonObject, Subject, Tool
 /** 試験の例のコネクタ（ワークスペースで有効にするもの） */
 const EXAMPLE_CONNECTORS = ["bank", "mail", "store", "supplier"];
 
-// ---- フィクスチャ（KC §6 の前提：DEFAULT_CEILINGS、ゲストの ws、§2.4 の仕入れ係（M-36 の付与）、例の4つのコネクタ） ----
+// ---- フィクスチャ（KC §6 の前提：DEFAULT_CEILINGS、既定の ws（1日 $1 に固定）、§2.4 の仕入れ係（M-36 の付与）、例の4つのコネクタ） ----
 
 const H = (c: string): ToolHash => `sha256:${c.repeat(64)}`;
 const PO = "mcp.supplier.place_order";
@@ -34,8 +34,8 @@ const TOOLS: ConnectorCatalog = {
   mail: { connected: true, tools: { list_inbox: read("3"), send: T_MS } },
   bank: { connected: true, tools: { register_payee: T_BP } },
 };
-const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS));
-/** 試験の ws は1日 $1 に固定する（D-105 でゲストの既定は 2 になったが、ここの期待値・保存したハッシュは per_day_usd 1 の ws で作った） */
+const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy(EXAMPLE_CONNECTORS));
+/** 試験の ws は1日 $1 に固定する（既定は 10 だが、ここの期待値・保存したハッシュは per_day_usd 1 の ws で作った） */
 function pinDay1(w: WorkspacePolicy): WorkspacePolicy {
   return { ...w, budget: { ...w.budget, per_day_usd: 1 } };
 }
@@ -371,7 +371,8 @@ describe("6.8 classify（項目ごと。KC §3.8）", () => {
     ]);
   });
   it("K-43c：新しいエージェント（付与なし）に付与を足して assistant の仕事を追加（編成の生成）→ widen（grant_added×付与の数、job_added、template_widened）", () => {
-    const fresh = initialAgentDefinition({ name: "仕入れ係", workspacePolicy: WS, workspaceKind: "guest" });
+    // 付与なしにするため Web の付与（初期値 ['*']）も外す
+    const fresh = { ...initialAgentDefinition({ name: "仕入れ係", workspacePolicy: WS }), grants: { connectors: {} } };
     const after = def((d) => {
       d.grants.connectors = { supplier: { grant: ["list_products", "place_order"] }, store: { grant: ["get_inventory"] } };
       d.jobs = [{ id: "reorder", kind: "recurring", template: "assistant", instructions: "x" }];
@@ -497,7 +498,7 @@ describe("6.8 classify（項目ごと。KC §3.8）", () => {
     ]);
   });
   it("K-55：入力に ws は1つだけ（ws の変化は classify の対象外）。どの ws でも同じ定義なら項目なし", () => {
-    for (const ws of [WS, defaultWorkspacePolicy("owner", EXAMPLE_CONNECTORS), { ...WS, autonomy: { ...WS.autonomy, mcp_read: "deny" as const } }]) {
+    for (const ws of [WS, defaultWorkspacePolicy(EXAMPLE_CONNECTORS), { ...WS, autonomy: { ...WS.autonomy, mcp_read: "deny" as const } }]) {
       expect(cls(BUYER_R, BUYER_R, { ...CTX, workspacePolicy: ws }).items).toEqual([]);
     }
   });

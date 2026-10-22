@@ -37,7 +37,7 @@ function coder(autonomy: AgentDefinitionInput["autonomy"] = {}): AgentDefinition
 }
 
 function ws(runShell?: WorkspacePolicy["autonomy"]["run_shell"]): WorkspacePolicy {
-  const w = defaultWorkspacePolicy("owner");
+  const w = defaultWorkspacePolicy();
   return runShell === undefined ? w : { ...w, autonomy: { ...w.autonomy, run_shell: runShell } };
 }
 

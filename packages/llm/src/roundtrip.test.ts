@@ -47,7 +47,6 @@ function context(kind: "supplier" | "inbox"): TaskContext {
       template: supplier ? "assistant" : "researcher",
       mcpGrants: supplier ? { store: ["get_inventory"], supplier: ["list_products", "place_order"], bank: ["register_payee"] } : { mail: ["list_inbox"] },
       webAllowDomains: [],
-      guestWorkspace: true,
       formation: null,
       teamBoard: false,
       followup: false,

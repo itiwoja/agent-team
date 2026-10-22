@@ -81,7 +81,7 @@ describe("computeApproverIds（BR-14）", () => {
     expect(approvers({ requesterId: "owner1" })).toEqual(["owner1", "owner2"]);
   });
 
-  it("0-H のゲスト：依頼者が唯一の owner なら本人だけ", () => {
+  it("依頼者が唯一の owner なら本人だけ", () => {
     expect(computeApproverIds({ policyApprovers: [], requesterId: "g", workspaceOwners: ["g"], roles: { g: "owner" } })).toEqual(["g"]);
   });
 

@@ -3,9 +3,7 @@
 // （formation-runtime.md §3.10・§6.6、kernel-decide.md §3.4、intents-approvals.md §3.5・§3.7、SO §3.12）
 import { describe, expect, it } from "vitest";
 import {
-  INITIAL_AGENT_BOUNDARY,
   computeMcpIntentHash,
-  defaultWorkspacePolicy,
   destinationKey,
   optionDigest,
   toMicroUsd,
@@ -51,14 +49,15 @@ interface World {
 async function world(
   db: Db,
   o: {
-    kind?: "guest" | "owner";
     def?: "supplier" | "inbox";
+    /** 2つ目のワークスペース（同じ試験で2つ目の world を作るとき） */
+    second?: boolean;
     defOverride?: Parameters<typeof supplierDefinition>;
     task?: SeedTaskOptions;
     env?: Parameters<typeof buildEdge>[1];
   } = {},
 ): Promise<World> {
-  const ws = await fxWorkspace(db, { kind: o.kind ?? "guest", audit: true });
+  const ws = await fxWorkspace(db, { audit: true, second: o.second === true });
   const conns = await seedConnectors(db, ws);
   const def = o.def === "inbox" ? inboxDefinition() : supplierDefinition(...(o.defOverride ?? []));
   const agent = await seedAgent(db, ws, def);
@@ -188,7 +187,7 @@ describe("予算（decide の手順2：llm_call。超える（>）で止める�
     await ok.env.edge.llmMessages(ok.token, llmRequest([], { system: "s", messages: [{ role: "user", content: "u" }], maxTokens: 3200 }));
     expect(ok.env.llm.requests).toHaveLength(1);
 
-    const ng = await world(db, { task: { status: "running", costUsd: "0.160000" }, env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
+    const ng = await world(db, { second: true, task: { status: "running", costUsd: "0.160000" }, env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
     const e = await expectEdgeError(ng.env.edge.llmMessages(ng.token, llmRequest([], { system: "s", messages: [{ role: "user", content: "u" }], maxTokens: 3200 })), "TASK_HALTED");
     expect(e.details).toMatchObject({ haltReason: "budget_exceeded", reasonCode: "budget_exceeded", matchedRule: "budget.per_task_usd" });
     expect(ng.env.llm.requests).toHaveLength(0);
@@ -210,7 +209,7 @@ describe("予算（decide の手順2：llm_call。超える（>）で止める�
     const over = system.microToUsd(toMicroUsd(0.2) - est + 1);
     const a = await world(db, { task: { status: "running", costUsd: exact }, env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
     await a.env.edge.llmMessages(a.token, llmRequest([], req));
-    const b = await world(db, { task: { status: "running", costUsd: over }, env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
+    const b = await world(db, { second: true, task: { status: "running", costUsd: over }, env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
     await expectEdgeError(b.env.edge.llmMessages(b.token, llmRequest([], req)), "TASK_HALTED");
   });
 
@@ -233,7 +232,7 @@ describe("予算（decide の手順2：llm_call。超える（>）で止める�
     const { db } = T();
     const a = await world(db, { task: { status: "running", stepsUsed: 39 }, env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
     await a.env.edge.llmMessages(a.token, llmRequest([]));
-    const b = await world(db, { task: { status: "running", stepsUsed: 40 } });
+    const b = await world(db, { second: true, task: { status: "running", stepsUsed: 40 } });
     const e = await expectEdgeError(b.env.edge.llmMessages(b.token, llmRequest([])), "TASK_HALTED");
     expect(e.details).toMatchObject({ matchedRule: "budget.max_steps" });
   });
@@ -248,7 +247,7 @@ describe("予算（decide の手順2：llm_call。超える（>）で止める�
 
   it("agent_day_usd（エージェントの1日 $1）：同じエージェントの別のタスクの今日の費用も数える（G-01）", async () => {
     const { db } = T();
-    const w = await world(db, { kind: "owner", env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
+    const w = await world(db, { env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
     const other = await seedTask(db, w.ws, w.agent, w.jobSlug, { status: "running" });
     await fxUsage(db, w.ws, { taskId: other, costUsd: "0.999000", createdAt: T0 });
     const e = await expectEdgeError(w.env.edge.llmMessages(w.token, llmRequest([])), "TASK_HALTED");
@@ -256,18 +255,16 @@ describe("予算（decide の手順2：llm_call。超える（>）で止める�
   });
 });
 
-describe("全体 $15・ゲスト $4（checkSpend：decide の外。M-19・D-106）", () => {
-  it("D-106：上限は全体 $15・ゲスト1日 $4。ゲスト1日は Kernel のゲストのワークスペース・担当の1日（per_day_usd）と同じ値", () => {
-    expect(SPEND_LIMITS).toEqual({ platformDayMicroUsd: 15_000_000, guestDayMicroUsd: 4_000_000 });
-    expect(toMicroUsd(defaultWorkspacePolicy("guest").budget.per_day_usd)).toBe(SPEND_LIMITS.guestDayMicroUsd);
-    expect(toMicroUsd(INITIAL_AGENT_BOUNDARY.guest_per_day_usd)).toBe(SPEND_LIMITS.guestDayMicroUsd);
+describe("全体 $15（checkSpend：decide の外。M-19・D-106）", () => {
+  it("D-106：上限は全体 $15", () => {
+    expect(SPEND_LIMITS).toEqual({ platformDayMicroUsd: 15_000_000 });
   });
 
   it("BR-62 全体の今日の費用＋見積もり > $15 → 呼ばずに halted(budget_exceeded)、監査ログに scope: global", async () => {
     const { db } = T();
-    const w = await world(db, { kind: "owner", env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
+    const w = await world(db, { env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
     const est = estimateCallMicroUsd({ ...bareRequest(1000), system: "s" });
-    const otherWs = await fxWorkspace(db, { kind: "guest" });
+    const otherWs = await fxWorkspace(db, { second: true });
     const otherAgent = await seedAgent(db, otherWs, inboxDefinition());
     await fxUsage(db, otherWs, { agentId: otherAgent.agentId, costUsd: system.microToUsd(15_000_000 - est + 1), createdAt: T0 });
     const e = await expectEdgeError(w.env.edge.llmMessages(w.token, llmRequest([], { system: "s", messages: [{ role: "user", content: "u" }], maxTokens: 1000 })), "TASK_HALTED");
@@ -278,9 +275,9 @@ describe("全体 $15・ゲスト $4（checkSpend：decide の外。M-19・D-106�
 
   it("全体：ちょうど $15 に届くのは通す（日付が変われば数えない）", async () => {
     const { db } = T();
-    const w = await world(db, { kind: "owner", env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
+    const w = await world(db, { env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
     const est = estimateCallMicroUsd(bareRequest(1000));
-    const otherWs = await fxWorkspace(db, { kind: "guest" });
+    const otherWs = await fxWorkspace(db, { second: true });
     const otherAgent = await seedAgent(db, otherWs, inboxDefinition());
     await fxUsage(db, otherWs, { agentId: otherAgent.agentId, costUsd: system.microToUsd(15_000_000 - est), createdAt: T0 });
     // 前の日（Asia/Tokyo の 0時より前）の費用は数えない
@@ -289,15 +286,6 @@ describe("全体 $15・ゲスト $4（checkSpend：decide の外。M-19・D-106�
     expect(w.env.llm.requests).toHaveLength(1);
   });
 
-  it("BR-62 ゲストのワークスペースの今日の費用＋見積もり > $4 → scope: workspace", async () => {
-    const { db } = T();
-    const w = await world(db, { kind: "guest" });
-    const est = estimateCallMicroUsd(bareRequest(1000));
-    const otherAgent = await seedAgent(db, w.ws, { ...inboxDefinition(), name: "別の係" });
-    await fxUsage(db, w.ws, { agentId: otherAgent.agentId, costUsd: system.microToUsd(SPEND_LIMITS.guestDayMicroUsd - est + 1), createdAt: T0 });
-    const e = await expectEdgeError(w.env.edge.llmMessages(w.token, llmRequest([], { system: "s", messages: [{ role: "user", content: "u" }], maxTokens: 1000 })), "TASK_HALTED");
-    expect(e.details).toMatchObject({ scope: "workspace" });
-  });
 
 });
 
@@ -441,7 +429,7 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
 
   it("M-25 定期の依頼の承認の期限は「次の実行」が24時間より早ければそれ（expiry_cause: next_run）", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "guest", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     await seedConnectors(db, ws);
     const supplier = await seedAgent(db, ws, supplierDefinition());
     const ask = await seedChainAsk(db, ws, [{ agent: supplier, jobSlug: "reorder", position: 1, spokesperson: true }], {
@@ -518,7 +506,7 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
 
   it("M-14 researcher に書き込みのツールを付与しても LLM は呼べない（not_granted：mcp.llmWrite）", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "guest", audit: true });
+    const ws = await fxWorkspace(db, { audit: true });
     await seedConnectors(db, ws);
     const def = inboxDefinition();
     def.grants = { connectors: { mail: { grant: ["list_inbox", "send"] } } };
@@ -561,13 +549,6 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
     expect((await taskRow(db, w.taskId)).denied_count).toBe(2);
     const pd = (await db.query<{ action_type: string | null }>("SELECT action_type FROM policy_decisions WHERE task_id = $1 AND subject_kind = 'tool_call' ORDER BY created_at, id", [w.taskId])).rows;
     expect(pd.map((r) => r.action_type).sort()).toEqual(["mcp_read", "memory_write", "notify", null].sort());
-  });
-
-  it("BR-64 ゲストの web_search は decide の前に deny（guest_workspace）", async () => {
-    const { db } = T();
-    const w = await world(db, { env: { script: [{ parts: [call("c1", "web_search", { query: "豆", max_results: 3 })], usage: USAGE }] } });
-    const res = await respond(w);
-    expect(res.governance).toEqual([{ toolCallId: "c1", decision: "deny", reasonCode: "guest_workspace", matchedRule: null }]);
   });
 
   it("FR-014 同じ呼び出しの5回目で Breaker（same_action_repeat）→ halt、タスクは halted(breaker_tripped)・監査ログ breaker.tripped。残りは判定しない", async () => {
@@ -683,7 +664,7 @@ async function ruleWorld(
   db: Db,
   o: { script: ReturnType<typeof call>[] },
 ): Promise<World> {
-  const ws = await fxWorkspace(db, { kind: "guest", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   const conns = await seedConnectors(db, ws);
   const placeHash = conns.supplier!.tools.place_order!.toolHash;
   const def = supplierDefinition(

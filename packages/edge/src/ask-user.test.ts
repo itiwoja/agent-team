@@ -12,7 +12,7 @@ import { normalizeNextActions } from "./validate.ts";
 const T = useTestDb();
 
 async function setup(db: Db) {
-  const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());

@@ -22,7 +22,7 @@ interface W {
 }
 
 async function setup(db: Db, o: { script: readonly ScriptedStep[]; fetchPage?: PageFetcher }): Promise<W> {
-  const ws = await fxWorkspace(db, { kind: "owner" });
+  const ws = await fxWorkspace(db);
   await seedConnectors(db, ws);
   const def = supplierDefinition();
   // オーナーの既定と同じく、すべてのドメインを付与した担当（policy.ts の allow_domains:["*"]）
@@ -256,8 +256,8 @@ describe("SG-04：タスクを作るときに入れる URL（利用者の文・�
   type Fx = Awaited<ReturnType<typeof fxWorkspace>>;
 
   /** 依頼のタスクを db の insertAskTask で作る（app の createMemberTask と同じく、利用者の文の URL の鍵を渡す） */
-  async function askWorld(db: Db, kind: "owner" | "guest" = "owner") {
-    const ws = await fxWorkspace(db, { kind });
+  async function askWorld(db: Db, second = false) {
+    const ws = await fxWorkspace(db, { second });
     await seedConnectors(db, ws);
     // 担当の指示（プランナーの LLM が書く instructions）にだけ URL がある
     const base = supplierDefinition({}, { instructions: `${PLANNER_URL} も見て、在庫を確認してください。` });
@@ -340,7 +340,7 @@ describe("SG-04：タスクを作るときに入れる URL（利用者の文・�
   it("別のワークスペースのタスクが同じ URL を見ていても通らない（入力に挙げても写らない）", async () => {
     const { db } = T();
     const a = await askWorld(db);
-    const b = await askWorld(db, "guest");
+    const b = await askWorld(db, true);
     const shared = "https://shared.example/x?id=1";
     const other = await b.parentTask([shared]);
     // A のタスクが B のタスクを入力に挙げても（id を知っていても）、B の集合は写らない

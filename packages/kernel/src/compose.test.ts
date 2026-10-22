@@ -26,7 +26,7 @@ import type { AutonomyLevel, Counters, DecideResult, EffectivePolicy, Flags, Gua
 /** 試験の例のコネクタ（ワークスペースで有効にするもの） */
 const EXAMPLE_CONNECTORS = ["bank", "mail", "store", "supplier"];
 
-// ---- フィクスチャ（KC §6 の前提：DEFAULT_CEILINGS、ゲストの ws、§2.4 の仕入れ係（M-36 の付与）） ----
+// ---- フィクスチャ（KC §6 の前提：DEFAULT_CEILINGS、既定の ws（1日 $1 に固定）、§2.4 の仕入れ係（M-36 の付与）） ----
 
 const H = (c: string): ToolHash => `sha256:${c.repeat(64)}`;
 const PO = "mcp.supplier.place_order";
@@ -38,8 +38,8 @@ const T_PO: ToolInfo = {
   toolHash: H("a"),
   argRoles: { supplier_id: "destination", "items[].sku": "option", "items[].quantity": "option", "items[].unit_price": "option", note: "content" },
 };
-const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS));
-/** 試験の ws は1日 $1 に固定する（D-105 でゲストの既定は 2 になったが、ここの期待値・保存したハッシュは per_day_usd 1 の ws で作った） */
+const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy(EXAMPLE_CONNECTORS));
+/** 試験の ws は1日 $1 に固定する（既定は 10 だが、ここの期待値・保存したハッシュは per_day_usd 1 の ws で作った） */
 function pinDay1(w: WorkspacePolicy): WorkspacePolicy {
   return { ...w, budget: { ...w.budget, per_day_usd: 1 } };
 }
@@ -205,13 +205,8 @@ describe("6.2 予算・Breaker・回数（KC §3.3 B2〜B5）", () => {
     expect(r.effective.budget).toMatchObject({ agent_day_usd: 1, per_day_usd: 1 });
     expect(r.violations).toMatchObject([{ path: "budget.per_day_usd", defined: 2, limit: 1, by: "policy" }]);
   });
-  it("D-105・D-106：ゲストの既定の ws（per_day 4）で定義 per_day_usd 4 → per_day_usd = 4・agent_day_usd = 4、違反なし", () => {
-    const r = run(def((d) => (d.budget.per_day_usd = 4)), defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS));
-    expect(r.effective.budget).toMatchObject({ per_day_usd: 4, agent_day_usd: 4 });
-    expect(r.violations).toEqual([]);
-  });
-  it("オーナーの ws（per_day 10）では per_day_usd = 10・agent_day_usd = 1（両方が別々に効く）", () => {
-    expect(eff(BUYER, defaultWorkspacePolicy("owner", EXAMPLE_CONNECTORS)).budget).toMatchObject({ per_day_usd: 10, agent_day_usd: 1 });
+  it("既定の ws（per_day 10）では per_day_usd = 10・agent_day_usd = 1（両方が別々に効く）", () => {
+    expect(eff(BUYER, defaultWorkspacePolicy(EXAMPLE_CONNECTORS)).budget).toMatchObject({ per_day_usd: 10, agent_day_usd: 1 });
   });
   it("C-28：定義 max_steps 41・ws 40 → 40、違反", () => {
     const r = run(def((d) => (d.budget.max_steps = 41)));
@@ -745,7 +740,7 @@ describe("6.7 ハッシュ（effectivePolicyHash。KC §3.4・M-07）", () => {
   });
 });
 
-// H-12 の固定値（BUYER・ゲストの ws・DEFAULT_CEILINGS。ceilings_version 2026-10-14.1：run_shell を足した：SG-07）
+// H-12 の固定値（BUYER・既定の ws（1日 $1 に固定）・DEFAULT_CEILINGS。ceilings_version 2026-10-14.1：run_shell を足した：SG-07）
 const GOLDEN_BUYER_JSON =
   '{"approvers":[],"autonomy":{"edit_code":"auto","mcp_read":"auto","mcp_write":"approve","memory_write":"auto","merge":"deny","notify":"auto","open_pr":"approve","payment":"handoff","read":"auto","run_shell":"deny","run_tests":"auto","shell_network":"deny","web_read":"auto"},"breakers":{"denied_attempts_max":3,"same_action_repeat":5,"step_cost_usd_max":0.5},"budget":{"agent_day_usd":1,"max_minutes":15,"max_steps":40,"per_day_usd":1,"per_task_usd":0.2},"guards":[],"max_intents_per_task":5,"max_runs_per_day":10,"mcp":{"deliverWrite":true,"grants":{"bank":["register_payee"],"store":["get_inventory"],"supplier":["list_products","place_order"]},"llmRead":true,"llmWrite":true},"rules":{"enabled":true,"items":[]},"tools":["finish","mcp_call","notify","submit_report"],"version":1,"web":{"allow_domains":[],"deny_domains":["*.internal","localhost"],"max_fetches_per_task":30}}';
 const GOLDEN_BUYER_HASH = "39245be8eabba98aac54ece210997e27700afeab6953172fdd528bb5ad1d9a06";

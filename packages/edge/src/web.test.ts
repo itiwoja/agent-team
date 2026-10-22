@@ -20,7 +20,7 @@ interface W {
 }
 
 async function setup(db: Db, o: { script: readonly ScriptedStep[]; fetchPage?: PageFetcher; allow?: string[] }): Promise<W> {
-  const ws = await fxWorkspace(db, { kind: "owner" });
+  const ws = await fxWorkspace(db);
   await seedConnectors(db, ws);
   const def = supplierDefinition();
   const agent = await seedAgent(db, ws, { ...def, grants: { ...def.grants, web: { allow_domains: o.allow ?? ["*"] } } });
@@ -84,7 +84,7 @@ describe("callTool：web_search（Google 検索の Grounding）", () => {
 
   it("検索の語句の既知の秘密はマスクしてから送る", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     await seedConnectors(db, ws);
     const def = supplierDefinition();
     const agent = await seedAgent(db, ws, { ...def, grants: { ...def.grants, web: { allow_domains: ["*"] } } });
