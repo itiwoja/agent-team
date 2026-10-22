@@ -5,11 +5,13 @@ import type { Hono } from "hono";
 import type { AppEnv } from "../auth/routes.ts";
 import { agentRoutes } from "./agents.ts";
 import { askRoutes } from "./asks.ts";
-import { apiRouter } from "./router.ts";
+import { apiRouter, type ApiDeps } from "./router.ts";
+import { workspaceRoutes } from "./workspace.ts";
 
-export function v1Routes(app: Hono<AppEnv>): void {
+export function v1Routes(app: Hono<AppEnv>, deps: ApiDeps): void {
   const r = apiRouter(app);
   agentRoutes(r);
-  askRoutes(r);
+  askRoutes(r, deps);
+  workspaceRoutes(r, deps);
   app.all("/api/v1/*", (c) => errorResponse(c, "NOT_FOUND"));
 }

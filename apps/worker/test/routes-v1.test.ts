@@ -276,7 +276,7 @@ describe("GET /api/v1/asks・/asks/:id・/asks/:id/messages", () => {
     const res = await get("/nope");
     expect(res.status).toBe(404);
     expect((await errorOf(res)).code).toBe("NOT_FOUND");
-    const post = await app.request(`${ORIGIN}/api/v1/asks`, { method: "POST" }, env);
+    const post = await app.request(`${ORIGIN}/api/v1/nope`, { method: "POST" }, env);
     expect(post.status).toBe(404);
   });
 });

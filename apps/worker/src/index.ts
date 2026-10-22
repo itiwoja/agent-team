@@ -14,7 +14,7 @@ export function createApp(deps: AuthDeps): Hono<AppEnv> {
   app.get("/api/health", (c) => c.json({ ok: true }));
   app.use("/api/*", sessionMiddleware(deps));
   authRoutes(app, deps);
-  v1Routes(app);
+  v1Routes(app, deps);
   app.onError(errorHandler());
   return app;
 }

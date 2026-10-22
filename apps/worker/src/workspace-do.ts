@@ -3,14 +3,27 @@
 // スキーマ（db/schema.ts）は作られたとき・起き直したときに blockConcurrencyWhile の中で MIGRATIONS を順に当てる（当てた版は schema_migrations に残す）。
 // 表の読み書きは db/repo/*.ts の同期の関数（WsDb を受け取る）。画面の表示用ビューは views/*（RPC で返す。JSON にできる素の値で、時刻は ISO の文字列）
 
+import { knownSecretsFromEnv } from "@open-team/platform";
 import { DurableObject } from "cloudflare:workers";
+import { acceptAsk, answerAskQuestion } from "./asks/accept.ts";
 import { MIGRATIONS } from "./db/schema.ts";
 import { wsDbOf, type WsDb } from "./db/sqlite.ts";
 import { initWorkspace } from "./db/workspace.ts";
+import { runIdempotent, type IdemRequest } from "./idempotency.ts";
+import { engageKillSwitch, releaseKillSwitch, type KillSwitchEngageResponse, type KillSwitchReleaseResponse } from "./kill-switch.ts";
 import type { AgentLibraryResponse } from "./views/agents/contract.ts";
 import { buildAgentLibrary } from "./views/agents/view.ts";
-import type { AskDetailResponse, AskStatus, ListAskMessagesResponse, ListAsksResponse } from "./views/asks/contract.ts";
+import type {
+  AnswerAskBody,
+  AskAcceptedResponse,
+  AskDetailResponse,
+  AskStatus,
+  CreateAskBody,
+  ListAskMessagesResponse,
+  ListAsksResponse,
+} from "./views/asks/contract.ts";
 import { buildAskDetail, listAskSummaries, listMessages } from "./views/asks/view.ts";
+import { captureAppError, type WriteResult } from "./write.ts";
 
 export { MIGRATIONS };
 
@@ -73,5 +86,32 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** 連絡板（API-076）。依頼がなければ null */
   askMessages(askId: string): ListAskMessagesResponse | null {
     return listMessages(this.db, askId);
+  }
+
+  // ---- 書き込み（POST /api/v1/*）。AppError は値（WriteResult）にして返す（write.ts） ----
+
+  /** 利用者の文から伏せる既知の秘密（Workers secrets のうち SECRET_ENV_NAMES のもの） */
+  private secrets(): readonly string[] {
+    return knownSecretsFromEnv(this.env as unknown as Record<string, string | undefined>);
+  }
+
+  /** API-072：依頼を作る（201） */
+  acceptAsk(i: { userId: string; body: CreateAskBody; idem: IdemRequest | null; now: Date }): WriteResult<AskAcceptedResponse> {
+    return runIdempotent(this.db, i.idem, 201, i.now, () => acceptAsk(this.db, { ...i, secrets: this.secrets() }));
+  }
+
+  /** API-073：生成中の質問に答える */
+  answerAskQuestion(i: { userId: string; askId: string; body: AnswerAskBody; idem: IdemRequest | null; now: Date }): WriteResult<AskAcceptedResponse> {
+    return runIdempotent(this.db, i.idem, 200, i.now, () => answerAskQuestion(this.db, { ...i, secrets: this.secrets() }));
+  }
+
+  /** EP-27：Kill Switch の発動 */
+  engageKillSwitch(i: { userId: string; reason: string | null; idem: IdemRequest | null; now: Date }): WriteResult<KillSwitchEngageResponse> {
+    return runIdempotent(this.db, i.idem, 200, i.now, () => engageKillSwitch(this.db, i));
+  }
+
+  /** EP-28：Kill Switch の解除 */
+  releaseKillSwitch(i: { userId: string; reason: string; now: Date }): WriteResult<KillSwitchReleaseResponse> {
+    return captureAppError(() => ({ status: 200, body: releaseKillSwitch(this.db, i) }));
   }
 }
