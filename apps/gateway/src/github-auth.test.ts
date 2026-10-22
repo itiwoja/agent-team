@@ -1,6 +1,6 @@
 // GitHub のコネクタの証明（18 §3.5、D-119、ADR-002）：GitHub App の JWT でインストールのトークンを作り、キャッシュする・
 // 保護したブランチへの許可は実行のときの行の値・アンインストール（404）は auth_required・同期では GitHub の頭を送らない・
-// リハーサル・影は模擬がないので拒否される
+// ゲストでも本人の GitHub のコネクタは境界を通る
 import { createPublicKey, createVerify, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
@@ -128,7 +128,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
     let t = NOW.getTime();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => new Date(t) } });
 
-    const h1 = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    const h1 = await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(h1[GITHUB_HEADER.token]).toBe(INSTALL_TOKEN);
     expect(h1[GITHUB_HEADER.allowProtectedWrite]).toBe("false");
     expect(h1[GITHUB_HEADER.idempotencyKey]).toBeUndefined();
@@ -136,10 +136,10 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
     expect(fake.issued[0]!.url).toBe(`${API}/app/installations/${INSTALLATION}/access_tokens`);
     expect(verifyJwt(fake.issued[0]!.authorization.replace(/^Bearer /, "")).iss).toBe("123456");
 
-    await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(fake.issued).toHaveLength(1);
     t += 3541_000;
-    await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(fake.issued).toHaveLength(2);
   });
 
@@ -149,9 +149,9 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
     const { conn, credentialId } = await seedGithub(db, ws);
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(okFake()), clock: { now: () => NOW } });
     await db.transaction((tx) => setGithubProtectedWrite(tx, ws.ctx, credentialId!, true));
-    expect((await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("true");
+    expect((await provider({ connector: conn, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("true");
     await db.transaction((tx) => setGithubProtectedWrite(tx, ws.ctx, credentialId!, false));
-    expect((await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("false");
+    expect((await provider({ connector: conn, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("false");
   });
 
   it("アンインストール（404）・一時停止（403）は ConnectorAuthRequired、5xx は ConnectorTokenUnavailable", async () => {
@@ -166,7 +166,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
       const fake = { ...okFake(), status };
       // キャッシュに当たらないよう、時計を毎回ずらす
       const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => new Date(NOW.getTime() + status * 3600_000) } });
-      const e = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" }).then(() => null, (x: unknown) => x);
+      const e = await provider({ connector: conn, intentId: null, purpose: "call" }).then(() => null, (x: unknown) => x);
       expect(e).toBeInstanceOf(cls);
       expect((e as { reason: string }).reason).toBe(reason);
     }
@@ -178,7 +178,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
     const { conn } = await seedGithub(db, ws, false);
     const fake = okFake();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    await expect(provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "no_credential" });
+    await expect(provider({ connector: conn, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "no_credential" });
     expect(fake.issued).toHaveLength(0);
   });
 
@@ -188,11 +188,11 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
     const { conn } = await seedGithub(db, ws);
     const fake = okFake();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    const h = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "list" });
+    const h = await provider({ connector: conn, intentId: null, purpose: "list" });
     expect(h[GITHUB_HEADER.token]).toBeUndefined();
     expect(h.authorization).toBe(`Bearer ${SHARED}`);
     expect(fake.issued).toHaveLength(0);
-    await expect(provider({ connector: { ...conn, url: "https://evil.example/mcp/github" }, simWorld: false, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(
+    await expect(provider({ connector: { ...conn, url: "https://evil.example/mcp/github" }, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(
       ConnectorAuthUnsupported,
     );
   });
@@ -200,14 +200,12 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
 
 describe("境界（18 §3.5）", () => {
   const conn = { url: GH_URL, auth: { type: "oauth", provider: "github" } as const };
-  it("本人の GitHub のコネクタはゲストでも通し、リハーサル・影は拒否する（模擬の GitHub はない）", () => {
+  it("本人の GitHub のコネクタはゲストでも通す", () => {
     expect(isOwnGithubConnector(conn, GH_BASE)).toBe(true);
     expect(isOwnGithubConnector({ ...conn, auth: { type: "oauth", provider: "google" } }, GH_BASE)).toBe(false);
     expect(isOwnConnector({ gcalOrigin: null, githubOrigin: GH_BASE }, conn)).toBe(true);
-    const base = { simWorldOrigin: null, connectorUrl: GH_URL, ownOAuthConnector: true };
-    expect(connectorBoundary({ ...base, workspaceKind: "guest", rehearsalRunId: null, shadow: false })).toEqual({ ok: true });
-    expect(connectorBoundary({ ...base, workspaceKind: "owner", rehearsalRunId: "r1", shadow: false })).toEqual({ ok: false, reasonCode: "rehearsal_real_connector" });
-    expect(connectorBoundary({ ...base, workspaceKind: "owner", rehearsalRunId: null, shadow: true })).toEqual({ ok: false, reasonCode: "shadow_real_connector" });
+    expect(connectorBoundary({ workspaceKind: "guest", ownOAuthConnector: true })).toEqual({ ok: true });
+    expect(connectorBoundary({ workspaceKind: "owner", ownOAuthConnector: true })).toEqual({ ok: true });
   });
 });
 

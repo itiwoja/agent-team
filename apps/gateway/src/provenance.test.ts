@@ -1,10 +1,10 @@
 // SG-03 承認の出どころの照合（docs/design/17_security_governance.md）。app（ot_app）が action_intents などの列を書き換えただけの
-// Intent を gateway が実行しないこと、正しい証拠のある Intent はこれまでどおり実行すること、影・リハーサルの振る舞いを変えないこと。
-// 証拠のうち書き換えられる列（Intent・承認・判定・合格証）は一致を見るだけで、「起きたこと」と「順番」は追記だけの監査ログで見る
+// Intent を gateway が実行しないこと、正しい証拠のある Intent はこれまでどおり実行すること。
+// 証拠のうち書き換えられる列（Intent・承認・判定）は一致を見るだけで、「起きたこと」と「順番」は追記だけの監査ログで見る
 import { randomUUID } from "node:crypto";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { appendAuditLog, type Db, type PolicyDecisionRow } from "@open-team/db";
-import { fxAgent, fxHash, fxTask, openRoleDb, useTestDb } from "@open-team/db/testing";
+import { fxHash, fxTask, openRoleDb, useTestDb } from "@open-team/db/testing";
 import type { ProvenanceAuditEvent } from "@open-team/db/gateway";
 import { computeMcpIntentHash, type JsonObject } from "@open-team/kernel";
 import {
@@ -14,32 +14,30 @@ import {
   connectionRefused,
   decideApproval,
   gatewayEnv,
-  insertCertificate,
-  insertDecidedApproval,
   insertIntent,
   insertKernelEvidence,
   intentRow,
-  rehearsalRows,
-  revokeCertificate,
-  seedShop,
+  seedConnectors,
+  startFakeMcp,
   startGateway,
-  startSimWorld,
   taskRow,
   taskWithToken,
   workspace,
+  type DecideApprovalInput,
+  type FakeMcpHandle,
   type FetchHook,
   type KernelEvidenceInput,
-  type SimWorldHandle,
+  type SeededConnector,
 } from "./test-helpers.ts";
 import { judgeProvenance, type ProvenanceInput } from "./provenance.ts";
 
 const T = useTestDb();
-let sim: SimWorldHandle;
+let fake: FakeMcpHandle;
 beforeAll(async () => {
-  sim = await startSimWorld();
+  fake = await startFakeMcp();
 });
 afterAll(async () => {
-  await sim.close();
+  await fake.close();
 });
 
 const PLACE_ORDER = "mcp.supplier.place_order";
@@ -47,18 +45,17 @@ const POLICY = fxHash("policy");
 const APPROVE = { decision: "approve", reasonCode: "approval_required", matchedRule: "autonomy.mcp_write" } as const;
 const RULE_ALLOW = { decision: "allow", reasonCode: "rule_matched", matchedRule: "rules.items[0]" } as const;
 
-async function setup(o: { kind?: "owner" | "guest"; hook?: FetchHook } = {}) {
-  const { db, url } = T();
-  const ws = await workspace(db, o.kind ?? "owner");
-  const demo = await sim.createDemoStore(ws.workspaceId);
+/** reuse を渡すと、同じワークスペース・gateway・コネクタで新しいタスクを作る（オーナーのワークスペースは DB に1つだけ） */
+async function setup(o: { hook?: FetchHook; reuse?: { db: Db; url: string; ws: Awaited<ReturnType<typeof workspace>>; gw: ReturnType<typeof startGateway>; supplier: SeededConnector } } = {}) {
+  const { db, url } = o.reuse ?? T();
+  const ws = o.reuse?.ws ?? (await workspace(db));
   let armed = false;
   const hook: FetchHook | undefined = o.hook ? (req, real, init) => (armed ? o.hook!(req, real, init) : null) : undefined;
-  const gw = startGateway(db, gatewayEnv(sim.url), hook ? { hook } : {});
-  const shop = await seedShop(db, gw.client, ws, sim.url, { slugs: ["supplier"] });
+  const gw = o.reuse?.gw ?? startGateway(db, gatewayEnv(fake.url), hook ? { hook } : {});
+  const supplier = o.reuse?.supplier ?? (await seedConnectors(db, gw.client, ws, fake.url, { slugs: ["supplier"] })).supplier!;
   gw.sent.length = 0;
   armed = true;
   const task = await taskWithToken(db, ws, { status: "executing" });
-  const supplier = shop.supplier!;
   const tool = supplier.tools.place_order!;
   /** 証拠なしの Intent（app が行を書き換えた・作った状態）。証拠は試験ごとに入れる */
   const bare = (extra: Partial<Parameters<typeof insertIntent>[2]> = {}) =>
@@ -66,7 +63,9 @@ async function setup(o: { kind?: "owner" | "guest"; hook?: FetchHook } = {}) {
   /** edge が残す判定の記録（intent.proposed・判定の行・decision.made。approval なら承認待ちの行と approval.requested も） */
   const evidence = (intent: { intentId: string; intentHash: string }, k: Partial<KernelEvidenceInput> & Pick<KernelEvidenceInput, "decision" | "reasonCode" | "matchedRule">) =>
     insertKernelEvidence(db, ws, { taskId: task.taskId, intentId: intent.intentId, intentHash: intent.intentHash, policyHash: POLICY, action: PLACE_ORDER, args: BEANS_20, ...k });
-  const orders = async () => (await sim.getState(ws.workspaceId, demo.id)).state.orders as Array<Record<string, any>>;
+  /** この試験で偽のサーバーが受けた発注（tools/call place_order。ファイルの中の試験は順に動く） */
+  const callsFrom = fake.calls.length;
+  const orders = async () => fake.calls.slice(callsFrom).filter((c) => c.tool === "place_order");
   const calls = () => gw.sent.filter((s) => s.rpc === "tools/call");
   /** ot_app（乗っ取られた app）のロールで書き換える */
   const asApp = async (fn: (app: Db) => Promise<unknown>): Promise<void> => {
@@ -89,6 +88,22 @@ async function setup(o: { kind?: "owner" | "guest"; hook?: FetchHook } = {}) {
 
 type Setup = Awaited<ReturnType<typeof setup>>;
 
+/** 判定の記録のない承認：承認の行を作って人が決める（承認の要求・判定の記録はない） */
+async function insertDecidedApproval(
+  db: Db,
+  ws: Setup["ws"],
+  a: Omit<DecideApprovalInput, "approvalId"> & { expiresAt?: Date },
+): Promise<string> {
+  const r = await db.query<{ id: string }>(
+    `INSERT INTO approvals (workspace_id, task_id, intent_id, status, risk_level, risk_score, approver_ids, expires_at, created_at, updated_at)
+     VALUES ($1, $2, $3, 'pending', 'medium', 3, $4, $5, $6, $6) RETURNING id`,
+    [ws.workspaceId, a.taskId, a.intentId, [ws.userId], a.expiresAt ?? new Date(NOW.getTime() + 24 * 3600_000), new Date(NOW.getTime() - 120_000)],
+  );
+  const approvalId = r.rows[0]!.id;
+  await decideApproval(db, ws, { ...a, approvalId });
+  return approvalId;
+}
+
 /** approve の Intent と edge の判定の記録・承認待ちの承認（決定は試験ごと） */
 async function pendingApprove(s: Setup, approval: KernelEvidenceInput["approval"] = true) {
   const intent = await s.bare(APPROVE);
@@ -103,14 +118,12 @@ async function approved(s: Setup) {
   return i;
 }
 
-/** ルールで allow の Intent と、判定の記録（合格証は先に入れておく：発行 < 判定） */
+/** ルールで allow の Intent と、判定の記録 */
 async function ruleAllowed(s: Setup, k: Partial<KernelEvidenceInput> = {}) {
   const intent = await s.bare(RULE_ALLOW);
-  await s.evidence(intent, { ...RULE_ALLOW, certificateValid: true, ...k });
+  await s.evidence(intent, { ...RULE_ALLOW, ...k });
   return intent;
 }
-
-const certifyPlaceOrder = (s: Setup, jobId = s.task.agent.jobId, toolHash: string = s.tool.toolHash) => insertCertificate(s.db, s.ws, jobId, [{ action: PLACE_ORDER, toolHash }]);
 
 /** 実行されず、approval_provenance（detail）で終わったこと。判定の記録・監査ログ・error のログ・タスクの終わり方まで */
 async function expectDenied(s: Setup, intentId: string, detail: string): Promise<void> {
@@ -134,7 +147,6 @@ async function expectDenied(s: Setup, intentId: string, detail: string): Promise
     failReason: "precondition_failed",
     reasonCode: "approval_provenance",
     detail,
-    shadow: false,
   });
   // 乗っ取りの兆候なので error の段で出す
   expect(s.gw.logs.records.some((r) => r.event === "gateway.approval_provenance" && r.severity === "ERROR")).toBe(true);
@@ -255,7 +267,7 @@ describe("人の承認（approve）の出どころ（SG-03 の2）", () => {
     await expectDenied(s, i.intentId, "approval_hash_mismatch");
   });
 
-  it("承認の要求の記録（approval.requested）がない承認 → approval_request_missing（ゲストでなければ例外にしない）", async () => {
+  it("承認の要求の記録（approval.requested）がない承認 → approval_request_missing", async () => {
     const s = await setup();
     const i = await s.bare(APPROVE);
     await s.evidence(i, APPROVE);
@@ -347,13 +359,12 @@ describe("Kernel の判定（SG-03 の1）", () => {
 
   it("【回帰】承認待ちの Intent を、Intent の行と判定の行の2文の UPDATE で「ルールの allow」に書き換えた → 元の decision.made と食い違うので decision_audit_mismatch", async () => {
     const s = await setup();
-    await certifyPlaceOrder(s);
     const i = await pendingApprove(s);
     await s.db.query("UPDATE action_intents SET status = 'pending_approval', expires_at = $2 WHERE id = $1", [i.intentId, new Date(NOW.getTime() + 3600_000)]);
     await s.asApp(async (app) => {
       await app.query("UPDATE action_intents SET status = 'approved', decision = 'allow', reason_code = 'rule_matched', matched_rule = 'rules.items[0]' WHERE id = $1", [i.intentId]);
       await app.query(
-        `UPDATE policy_decisions SET decision = 'allow', reason_code = 'rule_matched', matched_rule = 'rules.items[0]', flags = flags || '{"certificateValid":true}'::jsonb
+        `UPDATE policy_decisions SET decision = 'allow', reason_code = 'rule_matched', matched_rule = 'rules.items[0]'
           WHERE intent_id = $1`,
         [i.intentId],
       );
@@ -363,14 +374,13 @@ describe("Kernel の判定（SG-03 の1）", () => {
 
   it("【回帰】さらに allow の decision.made を追記しても、元の approve の decision.made は消せないので decision_audit_mismatch", async () => {
     const s = await setup();
-    await certifyPlaceOrder(s);
     const i = await pendingApprove(s);
     await s.db.query("UPDATE action_intents SET status = 'pending_approval', expires_at = $2 WHERE id = $1", [i.intentId, new Date(NOW.getTime() + 3600_000)]);
     const row = (await s.db.query<{ inputs_hash: string }>("SELECT inputs_hash FROM policy_decisions WHERE intent_id = $1", [i.intentId])).rows[0]!;
     await s.asApp(async (app) => {
       await app.query("UPDATE action_intents SET status = 'approved', decision = 'allow', reason_code = 'rule_matched', matched_rule = 'rules.items[0]' WHERE id = $1", [i.intentId]);
       await app.query(
-        `UPDATE policy_decisions SET decision = 'allow', reason_code = 'rule_matched', matched_rule = 'rules.items[0]', flags = flags || '{"certificateValid":true}'::jsonb
+        `UPDATE policy_decisions SET decision = 'allow', reason_code = 'rule_matched', matched_rule = 'rules.items[0]'
           WHERE intent_id = $1`,
         [i.intentId],
       );
@@ -385,7 +395,6 @@ describe("Kernel の判定（SG-03 の1）", () => {
 
   it("引数を差し替え intentHash も判定の行も合わせ直した → 提案の記録（intent.proposed の intentHash）と食い違うので proposal_audit_mismatch", async () => {
     const s = await setup();
-    await certifyPlaceOrder(s);
     const i = await ruleAllowed(s);
     const swapped: JsonObject = { ...BEANS_20, items: [{ sku: "BEAN-HOUSE", quantity: 200, unit_price: 780 }] };
     const hash = computeMcpIntentHash({ connectorId: s.supplier.id, tool: "place_order", arguments: swapped, toolHash: s.tool.toolHash, effectivePolicyHash: POLICY });
@@ -396,14 +405,14 @@ describe("Kernel の判定（SG-03 の1）", () => {
     await expectDenied(s, i.intentId, "proposal_audit_mismatch");
   });
 
-  it("試し実行（リハーサルでない）の Intent は simulated にしかならない（BR-24）→ approved にしても dry_run_intent", async () => {
+  it("試し実行の Intent は simulated にしかならない（BR-24）→ approved にしても dry_run_intent", async () => {
     const s = await setup();
     await s.db.query("UPDATE tasks SET is_dry_run = true, trigger_type = 'dry_run' WHERE id = $1", [s.task.taskId]);
     const i = await approved(s);
     await expectDenied(s, i.intentId, "dry_run_intent");
   });
 
-  it("本番で enforced = false（影の印だけ書き換えた）→ not_enforced", async () => {
+  it("enforced = false（判定を効かせていない印に書き換えた）→ not_enforced", async () => {
     const s = await setup();
     const i = await s.bare({ decision: "deny", reasonCode: "not_granted", matchedRule: "mcp.llmWrite", enforced: false });
     await expectDenied(s, i.intentId, "not_enforced");
@@ -413,7 +422,6 @@ describe("Kernel の判定（SG-03 の1）", () => {
 describe("実行と失効の履歴（監査ログ。再実行・復活の防止）", () => {
   it("【回帰】実行済み（ルールの allow）を ot_app で approved に戻す → already_finished。3回くり返しても1回しか書かない", async () => {
     const s = await setup();
-    await certifyPlaceOrder(s);
     const i = await ruleAllowed(s);
     await expectExecuted(s, i.intentId);
     for (let n = 0; n < 3; n++) {
@@ -460,8 +468,10 @@ describe("実行と失効の履歴（監査ログ。再実行・復活の防止�
   });
 
   it("承認の期限切れ（approval.expired）・無効化（approval.invalidated）の記録がある承認を戻す → already_finished", async () => {
+    let prev: Setup | undefined;
     for (const eventType of ["approval.expired", "approval.invalidated"]) {
-      const s = await setup({ kind: "guest" });
+      const s = await setup(prev ? { reuse: prev } : {});
+      prev = s;
       const i = await approved(s);
       await s.appendAsApp(eventType, { approvalId: i.approvalId, intentId: i.intentId });
       await expectDenied(s, i.intentId, "already_finished");
@@ -501,7 +511,7 @@ describe("実行と失効の履歴（監査ログ。再実行・復活の防止�
     await decideApproval(s.db, s.ws, { taskId: s.task.taskId, intentId: before.intentId, intentHash: before.intentHash, approvalId: k.approvalId! });
     await expectExecuted(s, before.intentId);
 
-    const s2 = await setup({ kind: "guest" });
+    const s2 = await setup({ reuse: s });
     const i = await approved(s2);
     await s2.appendAsApp("killswitch.engaged", { reason: "試験" }, { taskId: null });
     await expectDenied(s2, i.intentId, "kill_switch_expired");
@@ -509,9 +519,8 @@ describe("実行と失効の履歴（監査ログ。再実行・復活の防止�
 });
 
 describe("ルールで allow の出どころ（SG-03 の3）", () => {
-  it("(e) 判定の行が allow（rule_matched）・合格証が有効と記録・判定より前に発行された合格証がこのツールを含む → 実行（承認の行は要らない）", async () => {
+  it("(e) 判定の行が allow（rule_matched・rules.items[n]）で判定の記録がそろっている → 実行（承認の行は要らない）", async () => {
     const s = await setup();
-    await certifyPlaceOrder(s);
     const i = await ruleAllowed(s);
     await expectExecuted(s, i.intentId);
     expect(await s.orders()).toHaveLength(1);
@@ -519,171 +528,22 @@ describe("ルールで allow の出どころ（SG-03 の3）", () => {
 
   it("(f) 判定の行がない allow（decision を allow に書き換えた）→ decision_missing", async () => {
     const s = await setup();
-    await certifyPlaceOrder(s);
     const i = await s.bare(RULE_ALLOW);
     await expectDenied(s, i.intentId, "decision_missing");
   });
 
-  it("判定の入力に合格証が有効と残っていない → certificate_flag_missing", async () => {
-    const s = await setup();
-    await certifyPlaceOrder(s);
-    const i = await ruleAllowed(s, { certificateValid: false });
-    await expectDenied(s, i.intentId, "certificate_flag_missing");
-  });
-
   it("allow でも rule_matched でない（autonomy などに書き換えた）→ rule_not_matched", async () => {
     const s = await setup();
-    await certifyPlaceOrder(s);
     const i = await s.bare({ decision: "allow", reasonCode: "autonomy_auto", matchedRule: "autonomy.mcp_write" });
-    await s.evidence(i, { decision: "allow", reasonCode: "autonomy_auto", matchedRule: "autonomy.mcp_write", certificateValid: true });
+    await s.evidence(i, { decision: "allow", reasonCode: "autonomy_auto", matchedRule: "autonomy.mcp_write" });
     await expectDenied(s, i.intentId, "rule_not_matched");
   });
 
-  it("合格証の行がない → certificate_missing", async () => {
+  it("rule_matched でも matched_rule が rules.items[n] の形でない → rule_not_matched", async () => {
     const s = await setup();
-    const i = await ruleAllowed(s);
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("判定の前に失効した合格証（rehearsal.certificate_revoked）→ certificate_missing", async () => {
-    const s = await setup();
-    const cert = await certifyPlaceOrder(s);
-    await revokeCertificate(s.db, s.ws, cert, s.task.agent.jobId);
-    const i = await ruleAllowed(s);
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("判定の前に同じ仕事の次の合格証が出て superseded（このツールを含まない）→ certificate_missing", async () => {
-    const s = await setup();
-    await certifyPlaceOrder(s);
-    await insertCertificate(s.db, s.ws, s.task.agent.jobId, [{ action: "mcp.store.get_inventory", toolHash: s.tool.toolHash }]);
-    const i = await ruleAllowed(s);
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("判定のあとに失効した合格証（判定の時点では有効）→ 実行する（その時点の監査ログの順を見る）", async () => {
-    const s = await setup();
-    const cert = await certifyPlaceOrder(s);
-    const i = await ruleAllowed(s);
-    await revokeCertificate(s.db, s.ws, cert, s.task.agent.jobId);
-    await expectExecuted(s, i.intentId);
-  });
-
-  it("合格証の tool_hash がこのツールと違う → certificate_missing", async () => {
-    const s = await setup();
-    await certifyPlaceOrder(s, s.task.agent.jobId, `sha256:${"9".repeat(64)}`);
-    const i = await ruleAllowed(s);
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("別の仕事の合格証しかない → certificate_missing", async () => {
-    const s = await setup();
-    const other = await fxAgent(s.db, s.ws);
-    await certifyPlaceOrder(s, other.jobId);
-    const i = await ruleAllowed(s);
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("【回帰】判定のあとに作った合格証の issued_at を過去に書き換えても、発行の監査ログが判定より後なので certificate_missing", async () => {
-    const s = await setup();
-    const i = await ruleAllowed(s);
-    const cert = await certifyPlaceOrder(s);
-    await s.asApp((app) => app.query("UPDATE rehearsal_certificates SET issued_at = $2 WHERE id = $1", [cert, new Date(NOW.getTime() - 30 * 24 * 3600_000)]));
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("【回帰】判定のあとに作った合格証の audit_seq を判定より前の seq に書き換えても、その seq の監査ログが発行の記録でない → certificate_missing", async () => {
-    const s = await setup();
-    const i = await ruleAllowed(s);
-    const cert = await certifyPlaceOrder(s);
-    await s.asApp((app) => app.query("UPDATE rehearsal_certificates SET audit_seq = 1 WHERE id = $1", [cert]));
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("【回帰】失効の列（revoked_at）を消しても、失効の監査ログは消せない → certificate_missing", async () => {
-    const s = await setup();
-    const cert = await certifyPlaceOrder(s);
-    await revokeCertificate(s.db, s.ws, cert, s.task.agent.jobId);
-    await s.asApp((app) => app.query("UPDATE rehearsal_certificates SET revoked_at = NULL, revoke_reason = NULL WHERE id = $1", [cert]));
-    const i = await ruleAllowed(s);
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-
-  it("【回帰】判定のあとに作った合格証の audit_seq を、同じ仕事の前の合格証の発行の seq に付け替えても、ハッシュが違う → certificate_missing", async () => {
-    const s = await setup();
-    // 前の合格証（このツールを含まない）の発行 → 判定 → 新しい合格証（このツールを含む）の発行
-    const old = await insertCertificate(s.db, s.ws, s.task.agent.jobId, [{ action: "mcp.store.get_inventory", toolHash: s.tool.toolHash }]);
-    const oldSeq = (await s.db.query<{ audit_seq: number }>("SELECT audit_seq FROM rehearsal_certificates WHERE id = $1", [old])).rows[0]!.audit_seq;
-    const i = await ruleAllowed(s);
-    const cert = await certifyPlaceOrder(s);
-    await s.asApp((app) => app.query("UPDATE rehearsal_certificates SET audit_seq = $2 WHERE id = $1", [cert, oldSeq]));
-    await expectDenied(s, i.intentId, "certificate_missing");
-  });
-});
-
-describe("照合しないもの・例外（影・リハーサル・ゲストのデモ）", () => {
-  it("影の走行：判定の記録も承認の行もない deny の Intent も、これまでどおり sim-world に実行する（BR-67③）", async () => {
-    const s = await setup();
-    const rows = await rehearsalRows(s.db, s.ws, s.task.agent, "shadow");
-    await sim.createExecution({ workspaceId: s.ws.workspaceId, rehearsalRunId: rows.runId, executionId: rows.executionId, variant: "shadow", faults: [] });
-    const shadow = await taskWithToken(s.db, s.ws, { agent: s.task.agent, rehearsalRunId: rows.runId, rehearsalScenarioId: rows.scenarioId, shadow: true, simExecutionId: rows.executionId, status: "executing" });
-    const { intentId } = await insertIntent(s.db, s.ws, {
-      taskId: shadow.taskId,
-      jobId: s.task.agent.jobId,
-      connector: s.supplier,
-      tool: s.tool,
-      args: BEANS_20,
-      decision: "deny",
-      reasonCode: "not_granted",
-      enforced: false,
-      provenance: false,
-    });
-    expect((await s.gw.client.executeIntent(intentId)).status).toBe("executed");
-    expect((await sim.getState(s.ws.workspaceId, rows.executionId)).state.orders).toHaveLength(1);
-  });
-
-  it("リハーサルの承認した分岐の写し（承認の行・判定の記録なしの approved）→ これまでどおり sim-world に実行する", async () => {
-    const s = await setup();
-    const rows = await rehearsalRows(s.db, s.ws, s.task.agent, "governed");
-    await sim.createExecution({ workspaceId: s.ws.workspaceId, rehearsalRunId: rows.runId, executionId: rows.executionId, variant: "governed", faults: [] });
-    const task = await taskWithToken(s.db, s.ws, { agent: s.task.agent, rehearsalRunId: rows.runId, rehearsalScenarioId: rows.scenarioId, simExecutionId: rows.executionId, status: "executing" });
-    const { intentId } = await insertIntent(s.db, s.ws, { taskId: task.taskId, jobId: s.task.agent.jobId, connector: s.supplier, tool: s.tool, args: BEANS_20, provenance: false });
-    expect((await s.gw.client.executeIntent(intentId)).status).toBe("executed");
-  });
-
-  it("ゲストのデモ（判定の記録が何もない approve を sim-world へ）：人の承認があれば実行", async () => {
-    const s = await setup({ kind: "guest" });
-    const seeded = await s.bare(APPROVE);
-    await insertDecidedApproval(s.db, s.ws, { taskId: s.task.taskId, intentId: seeded.intentId, intentHash: seeded.intentHash });
-    await expectExecuted(s, seeded.intentId);
-  });
-
-  it("ゲストのデモでも人の承認がなければ approval_missing", async () => {
-    const s = await setup({ kind: "guest" });
-    const seeded = await s.bare(APPROVE);
-    await expectDenied(s, seeded.intentId, "approval_missing");
-  });
-
-  it("ゲストでも allow は例外にしない → decision_missing", async () => {
-    const s = await setup({ kind: "guest" });
-    await certifyPlaceOrder(s);
-    const allow = await s.bare(RULE_ALLOW);
-    await expectDenied(s, allow.intentId, "decision_missing");
-  });
-
-  it("ゲストで判定の行だけを消しても、decision.made が残るので例外にならない → decision_missing", async () => {
-    const s = await setup({ kind: "guest" });
-    const i = await approved(s);
-    await s.asApp((app) => app.query("DELETE FROM policy_decisions WHERE intent_id = $1", [i.intentId]));
-    await expectDenied(s, i.intentId, "decision_missing");
-  });
-
-  it("ゲストで判定の行があるのに監査ログ（decision.made など）がない → 例外にせず decision_audit_missing", async () => {
-    const s = await setup({ kind: "guest" });
-    const i = await s.bare(APPROVE);
-    await s.evidence(i, { ...APPROVE, audit: false });
-    await insertDecidedApproval(s.db, s.ws, { taskId: s.task.taskId, intentId: i.intentId, intentHash: i.intentHash });
-    await expectDenied(s, i.intentId, "decision_audit_missing");
+    const i = await s.bare({ ...RULE_ALLOW, matchedRule: "rules.extra" });
+    await s.evidence(i, { ...RULE_ALLOW, matchedRule: "rules.extra" });
+    await expectDenied(s, i.intentId, "rule_not_matched");
   });
 });
 
@@ -691,10 +551,8 @@ describe("judgeProvenance（純粋な照合）", () => {
   const intent: ProvenanceInput["intent"] = {
     id: randomUUID(),
     task_id: randomUUID(),
-    job_id: randomUUID(),
     action: PLACE_ORDER,
     payload: { connectorId: randomUUID(), tool: "place_order", arguments: BEANS_20, toolHash: `sha256:${"1".repeat(64)}` } as never,
-    tool_hash: `sha256:${"1".repeat(64)}` as never,
     decision: "approve",
     reason_code: "approval_required",
     matched_rule: "autonomy.mcp_write",
@@ -730,12 +588,12 @@ describe("judgeProvenance（純粋な照合）", () => {
     ev(10, "intent.proposed", { intentId: intent.id, action: PLACE_ORDER, decision: "approve", reasonCode: "approval_required", matchedRule: "autonomy.mcp_write", intentHash: intent.intent_hash, policyHash: POLICY, enforced: true }),
     ev(11, "decision.made", { intentId: intent.id, subjectKind: "tool_call", decision: "approve", reasonCode: "approval_required", matchedRule: "autonomy.mcp_write", inputsHash: "0".repeat(64), enforced: true }),
   ];
-  const live = { is_dry_run: false, rehearsal_run_id: null, shadow: false };
-  const empty = { decisions: [], approval: null, taskAudits: [], killSwitchSeqs: [], certificates: [], certificateAudits: [] };
+  const live = { is_dry_run: false };
+  const empty = { decisions: [], approval: null, taskAudits: [], killSwitchSeqs: [] };
 
-  it("影・リハーサルのタスクは照合の対象外（checked = false）", () => {
-    expect(judgeProvenance({ task: { is_dry_run: true, rehearsal_run_id: randomUUID(), shadow: true }, intent, guestSimWrite: false }, empty)).toEqual({ ok: true, checked: false });
-    expect(judgeProvenance({ task: { is_dry_run: true, rehearsal_run_id: randomUUID(), shadow: false }, intent, guestSimWrite: false }, empty)).toEqual({ ok: true, checked: false });
+  it("試し実行のタスクは dry_run_intent、enforced = false は not_enforced（証拠より先に見る）", () => {
+    expect(judgeProvenance({ task: { is_dry_run: true }, intent }, empty)).toEqual({ ok: false, detail: "dry_run_intent" });
+    expect(judgeProvenance({ task: live, intent: { ...intent, enforced: false } }, empty)).toEqual({ ok: false, detail: "not_enforced" });
   });
 
   it("判定の行の Intent の ID・操作・効かせたか・宛先が違えば一致しない（decision_mismatch）", () => {
@@ -745,40 +603,33 @@ describe("judgeProvenance（純粋な照合）", () => {
       row({ enforced: false }),
       row({ subject: { action: "mcp.supplier.cancel_order", args: BEANS_20, call: { intentId: intent.id } } }),
     ]) {
-      expect(judgeProvenance({ task: live, intent, guestSimWrite: false }, { ...empty, decisions: [bad], taskAudits: kernelAudits })).toEqual({ ok: false, detail: "decision_mismatch" });
+      expect(judgeProvenance({ task: live, intent }, { ...empty, decisions: [bad], taskAudits: kernelAudits })).toEqual({ ok: false, detail: "decision_mismatch" });
     }
     // 一致する行と記録があれば、P-1 を通って承認の照合へ
-    expect(judgeProvenance({ task: live, intent, guestSimWrite: false }, { ...empty, decisions: [row()], taskAudits: kernelAudits })).toEqual({ ok: false, detail: "approval_missing" });
+    expect(judgeProvenance({ task: live, intent }, { ...empty, decisions: [row()], taskAudits: kernelAudits })).toEqual({ ok: false, detail: "approval_missing" });
   });
 
   it("decision.made の inputsHash・subjectKind が判定の行と違う → decision_audit_mismatch。intent.proposed がなければ proposal_audit_missing", () => {
     const [proposed, made] = kernelAudits as [ProvenanceAuditEvent, ProvenanceAuditEvent];
     for (const p of [{ inputsHash: "1".repeat(64) }, { subjectKind: "intent" }, { enforced: false }] as JsonObject[]) {
       const bad = { ...made, payload: { ...made.payload, ...p } };
-      expect(judgeProvenance({ task: live, intent, guestSimWrite: false }, { ...empty, decisions: [row()], taskAudits: [proposed, bad] })).toEqual({ ok: false, detail: "decision_audit_mismatch" });
+      expect(judgeProvenance({ task: live, intent }, { ...empty, decisions: [row()], taskAudits: [proposed, bad] })).toEqual({ ok: false, detail: "decision_audit_mismatch" });
     }
-    expect(judgeProvenance({ task: live, intent, guestSimWrite: false }, { ...empty, decisions: [row()], taskAudits: [made] })).toEqual({ ok: false, detail: "proposal_audit_missing" });
+    expect(judgeProvenance({ task: live, intent }, { ...empty, decisions: [row()], taskAudits: [made] })).toEqual({ ok: false, detail: "proposal_audit_missing" });
   });
 
-  it("合格証は Intent の仕事のものだけ（別の仕事の合格証と発行の記録が混ざっても数えない）", () => {
+  it("allow：rule_matched の rules.items[n] なら通る。それ以外の matched_rule は rule_not_matched", () => {
     const allowIntent = { ...intent, decision: "allow" as const, reason_code: "rule_matched", matched_rule: "rules.items[0]" };
-    const allowRow = row({ decision: "allow", reason_code: "rule_matched", matched_rule: "rules.items[0]", flags: { certificateValid: true } });
+    const allowRow = row({ decision: "allow", reason_code: "rule_matched", matched_rule: "rules.items[0]" });
     const audits = [
       ev(10, "intent.proposed", { ...kernelAudits[0]!.payload, decision: "allow", reasonCode: "rule_matched", matchedRule: "rules.items[0]" }),
       ev(11, "decision.made", { ...kernelAudits[1]!.payload, decision: "allow", reasonCode: "rule_matched", matchedRule: "rules.items[0]" }),
     ];
-    const cert = (jobId: string) =>
-      ({ id: randomUUID(), job_id: jobId, tool_hashes: [{ action: PLACE_ORDER, toolHash: intent.tool_hash }], certificate_hash: "c".repeat(64), audit_seq: 5 }) as never;
-    const issued = (jobId: string) => ev(5, "rehearsal.certificate_issued", { jobId, certificateHash: "c".repeat(64) });
-    const input = { task: live, intent: allowIntent, guestSimWrite: false };
-    const other = randomUUID();
-    expect(judgeProvenance(input, { ...empty, decisions: [allowRow], taskAudits: audits, certificates: [cert(other)], certificateAudits: [issued(other)] })).toEqual({
-      ok: false,
-      detail: "certificate_missing",
-    });
-    expect(judgeProvenance(input, { ...empty, decisions: [allowRow], taskAudits: audits, certificates: [cert(intent.job_id)], certificateAudits: [issued(intent.job_id)] })).toEqual({
-      ok: true,
-      checked: true,
-    });
+    expect(judgeProvenance({ task: live, intent: allowIntent }, { ...empty, decisions: [allowRow], taskAudits: audits })).toEqual({ ok: true });
+
+    const other = { ...allowIntent, matched_rule: "autonomy.mcp_write" };
+    const otherRow = row({ decision: "allow", reason_code: "rule_matched", matched_rule: "autonomy.mcp_write" });
+    const otherAudits = audits.map((a) => ({ ...a, payload: { ...a.payload, matchedRule: "autonomy.mcp_write" } }));
+    expect(judgeProvenance({ task: live, intent: other }, { ...empty, decisions: [otherRow], taskAudits: otherAudits })).toEqual({ ok: false, detail: "rule_not_matched" });
   });
 });

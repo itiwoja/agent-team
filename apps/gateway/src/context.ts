@@ -1,6 +1,4 @@
-// gateway の処理が使う依存（DB・時計・ログ・HTTP・認証）と、コネクタを呼ぶときの宛先（URL と頭）を作る。
-// sim-world へは呼び出し元の証明（SIM_WORLD_SHARED_TOKEN）と X-OT-* を付ける。
-// X-OT-* の値はタスク・Intent の行から引き直したものだけ（M-43・15:486）。実のコネクタ（フェーズ0）には X-OT-* を渡さない（MT §3.12.5 の7）
+// gateway の処理が使う依存（DB・時計・ログ・HTTP・認証）と、コネクタを呼ぶときの宛先（URL と頭）を作る
 
 import { createSign } from "node:crypto";
 import { getActiveCredential, type ConnectorCredentialRow, type ConnectorRow, type Db } from "@open-team/db";
@@ -17,50 +15,16 @@ import {
   type Logger,
   type ServiceAuth,
 } from "@open-team/platform";
-import { isSimWorldUrl, originOf } from "./boundary.ts";
+import { originOf } from "./boundary.ts";
 import type { GatewayEnv, GcalConfig, GithubConfig } from "./env.ts";
 import { MCP_CALL_TIMEOUT_MS, MCP_LIST_TIMEOUT_MS, type McpTarget } from "./mcp.ts";
-
-/** gateway → sim-world のヘッダー（M-43。sim-core の SIM_HEADERS と同じ名前。sim-core は gateway の本番の依存ではないので写す） */
-export const SIM_HEADER = {
-  workspaceId: "x-ot-workspace-id",
-  rehearsalRunId: "x-ot-rehearsal-run-id",
-  simExecutionId: "x-ot-sim-execution-id",
-  taskId: "x-ot-task-id",
-  intentId: "x-ot-intent-id",
-  shadow: "x-ot-shadow",
-} as const;
 
 /** 送信前の失敗の再試行の待ち（IA §2.1 の PRESEND_BACKOFF_MS。11 §9 の値を流用。合計21秒で EP-50 の1回の要求に収める：G-02） */
 export const PRESEND_BACKOFF_MS: readonly number[] = [1_000, 4_000, 16_000];
 
-/** sim-world の状態の場所（DB の行から引いた値だけ） */
-export interface SimCallContext {
-  workspaceId: string;
-  rehearsalRunId: string | null;
-  simExecutionId: string | null;
-  taskId: string | null;
-  intentId: string | null;
-  shadow: boolean;
-}
-
-/** X-OT-*（null は付けない。影の印は常に true / false を付ける） */
-export function simHeadersOf(c: SimCallContext): Record<string, string> {
-  return {
-    [SIM_HEADER.workspaceId]: c.workspaceId,
-    ...(c.rehearsalRunId !== null ? { [SIM_HEADER.rehearsalRunId]: c.rehearsalRunId } : {}),
-    ...(c.simExecutionId !== null ? { [SIM_HEADER.simExecutionId]: c.simExecutionId } : {}),
-    ...(c.taskId !== null ? { [SIM_HEADER.taskId]: c.taskId } : {}),
-    ...(c.intentId !== null ? { [SIM_HEADER.intentId]: c.intentId } : {}),
-    [SIM_HEADER.shadow]: c.shadow ? "true" : "false",
-  };
-}
-
 /** コネクタを呼ぶときの証明の依頼 */
 export interface ConnectorAuthRequest {
   connector: Pick<ConnectorRow, "id" | "workspace_id" | "url" | "auth">;
-  /** sim-world のコネクタか（isSimWorldUrl） */
-  simWorld: boolean;
   /** 書き込みの Intent の ID（execute だけ。読み取り・同期は null）。Google では冪等キーになる */
   intentId: string | null;
   /** list：tools/list（同期。アダプターは Google の頭を見ないので資格情報を開かない）／call：tools/call（資格情報が要る） */
@@ -230,7 +194,6 @@ export interface DefaultConnectorAuthDeps {
 
 /**
  * 既定の証明（MT D-12、SO §3.9、16 §3.5）：
- * - sim-world：共有トークン＋x-ot-caller: sa-gateway（apps/sim-world の auth.ts）
  * - Google カレンダー（auth.type = oauth・provider google、URL の origin が GCAL_URL）：呼び出しの証明（GCAL_SHARED_TOKEN）。purpose = call のときは資格情報を開き、アクセストークンと GCAL_HEADER.* を足す。
  *   アクセストークンはメモリに exp−60秒までキャッシュする（資格情報の行の id が変われば取り直す）
  * - GitHub（auth.type = oauth・provider github、URL の origin が GITHUB_URL）：呼び出しの証明（GITHUB_SHARED_TOKEN）。purpose = call のときは資格情報の行のインストールで GitHub App のトークンを作り、
@@ -238,7 +201,6 @@ export interface DefaultConnectorAuthDeps {
  * - 実のコネクタ：auth.type = none は頭なし。api_key は 0-H では使えない
  */
 export function defaultConnectorAuth(env: GatewayEnv, deps: DefaultConnectorAuthDeps): ConnectorAuthProvider {
-  let simLocalAuth: ServiceAuth | null = null;
   let gcalLocalAuth: ServiceAuth | null = null;
   let githubLocalAuth: ServiceAuth | null = null;
   /** キー：<connector_id>:<credential_id>。値はアクセストークンだけ（ログに出さない） */
@@ -337,15 +299,7 @@ export function defaultConnectorAuth(env: GatewayEnv, deps: DefaultConnectorAuth
   };
 
   return async (req) => {
-    const { connector, simWorld } = req;
-    if (simWorld) {
-      simLocalAuth ??= createServiceAuth({ sharedToken: env.simWorldSharedToken });
-      try {
-        return await simLocalAuth.serviceAuthHeaders("sa-gateway", env.simWorldUrl ?? connector.url);
-      } catch {
-        throw new ConnectorAuthUnsupported("SIM_WORLD_SHARED_TOKEN がない・短い");
-      }
-    }
+    const { connector } = req;
     switch (connector.auth.type) {
       case "none":
         return {};
@@ -388,9 +342,6 @@ export interface GatewayContext {
   presendBackoffMs: readonly number[];
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   knownSecrets: readonly string[];
-  /** SIM_WORLD_URL（末尾の / なし。模擬の Google カレンダーへ向け直すときの基になる：effectiveConnectorUrl） */
-  simWorldUrl: string | null;
-  simWorldOrigin: string | null;
   /** GCAL_URL の origin（Google カレンダーのコネクタの判定。境界の ownOAuthConnector） */
   gcalOrigin: string | null;
   /** GITHUB_URL の origin（GitHub のコネクタの判定。境界の ownOAuthConnector） */
@@ -417,7 +368,6 @@ export function abortableSleep(ms: number, signal?: AbortSignal): Promise<boolea
 
 export function resolveContext(env: GatewayEnv, deps: GatewayDeps): GatewayContext {
   const knownSecrets = [...(deps.knownSecrets ?? knownSecretsFromEnv(process.env))];
-  if (env.simWorldSharedToken) knownSecrets.push(env.simWorldSharedToken);
   if (env.serviceAuth.sharedToken) knownSecrets.push(env.serviceAuth.sharedToken);
   if (env.gcal?.sharedToken) knownSecrets.push(env.gcal.sharedToken);
   if (env.gcal) knownSecrets.push(env.gcal.clientSecret, env.gcal.tokenKey);
@@ -459,8 +409,6 @@ export function resolveContext(env: GatewayEnv, deps: GatewayDeps): GatewayConte
     presendBackoffMs: deps.presendBackoffMs ?? PRESEND_BACKOFF_MS,
     sleep: deps.sleep ?? (async (ms, signal) => void (await abortableSleep(ms, signal))),
     knownSecrets,
-    simWorldUrl: env.simWorldUrl,
-    simWorldOrigin: env.simWorldUrl ? originOf(env.simWorldUrl) : null,
     gcalOrigin: env.gcal?.origin ?? null,
     githubOrigin: env.github?.origin ?? null,
     revokeGoogleCredential,
@@ -471,28 +419,18 @@ export function resolveContext(env: GatewayEnv, deps: GatewayDeps): GatewayConte
 const SECRET_HEADERS: readonly string[] = [GCAL_HEADER.accessToken, GITHUB_HEADER.token];
 
 /**
- * コネクタを呼ぶ宛先（URL・証明・X-OT-*）。証明できなければ ConnectorAuthUnsupported。
+ * コネクタを呼ぶ宛先（URL・証明）。証明できなければ ConnectorAuthUnsupported。
  * 資格情報の失敗は ConnectorAuthRequired・ConnectorTokenUnavailable（呼び出し側が結果に直す）。
- * purpose = list は同期（tools/list）：Google のコネクタでも資格情報を開かない
- * url は呼び先（既定は connector.url。リハーサル・影の模擬の Google は effectiveConnectorUrl の結果を渡す）。
- * simWorld（資格情報を開かない・X-OT-* を付ける）はこの url で決める
+ * purpose = list は同期（tools/list）：Google のコネクタでも資格情報を開かない。
+ * intentId は書き込みの Intent の ID（execute だけ。読み取り・同期は null）
  */
 export async function targetFor(
   g: GatewayContext,
   connector: Pick<ConnectorRow, "id" | "workspace_id" | "url" | "auth">,
-  sim: SimCallContext,
-  requestId: string | null,
+  intentId: string | null,
   purpose: "list" | "call",
-  url: string = connector.url,
 ): Promise<McpTarget> {
-  const simWorld = isSimWorldUrl(url, g.simWorldOrigin);
-  const auth = await g.connectorAuth({ connector: { ...connector, url }, simWorld, intentId: sim.intentId, purpose });
-  const headers: Record<string, string> = {
-    ...auth,
-    ...(simWorld ? simHeadersOf(sim) : {}),
-    // ログをつなぐための要求の ID も sim-world にだけ
-    ...(simWorld && requestId ? { "x-request-id": requestId } : {}),
-  };
+  const headers = await g.connectorAuth({ connector, intentId, purpose });
   const secrets = SECRET_HEADERS.map((h) => headers[h]).filter((v): v is string => typeof v === "string" && v !== "");
-  return { url, headers, secrets };
+  return { url: connector.url, headers, secrets };
 }

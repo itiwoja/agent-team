@@ -16,7 +16,7 @@ describe("toolResultText（MT §3.10 の3）", () => {
     });
     expect(text).toBe(["一行目", OMITTED_IMAGE, OMITTED_AUDIO, "資料の本文"].join("\n"));
   });
-  it("文字の部分がなく structuredContent があれば正規形 JSON（sim-world の text と二重にしない）", () => {
+  it("文字の部分がなく structuredContent があれば正規形 JSON（text と二重にしない）", () => {
     expect(toolResultText({ content: [], structuredContent: { b: 2, a: [1, "x"] } })).toBe('{"a":[1,"x"],"b":2}');
     expect(toolResultText({ content: [{ type: "text", text: '{"a":1}' }], structuredContent: { a: 1 } })).toBe('{"a":1}');
   });

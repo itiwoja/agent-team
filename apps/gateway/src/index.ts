@@ -14,9 +14,6 @@ export {
 } from "./env.ts";
 export {
   connectorBoundary,
-  effectiveConnectorUrl,
-  SIM_GCAL_PATH,
-  isSimWorldUrl,
   isOwnOAuthConnector,
   isOwnGithubConnector,
   isOwnConnector,
@@ -29,20 +26,17 @@ export {
 export {
   resolveContext,
   defaultConnectorAuth,
-  simHeadersOf,
   targetFor,
   abortableSleep,
   ConnectorAuthUnsupported,
   ConnectorAuthRequired,
   ConnectorTokenUnavailable,
   GOOGLE_TOKEN_URL,
-  SIM_HEADER,
   PRESEND_BACKOFF_MS,
   type GatewayDeps,
   type GatewayContext,
   type ConnectorAuthProvider,
   type ConnectorAuthRequest,
-  type SimCallContext,
 } from "./context.ts";
 export {
   openMcpSession,
@@ -69,7 +63,6 @@ export {
   judgeProvenance,
   judgeKernelEvidence,
   decisionRowMatches,
-  provenanceApplies,
   PROVENANCE_REASON,
   PROVENANCE_FAILURES,
   type ProvenanceFailure,

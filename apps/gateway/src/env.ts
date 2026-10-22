@@ -62,12 +62,8 @@ export interface GatewayEnv {
   databaseUrl: string;
   /** 正規化した ALLOWED_CONNECTOR_URLS（BR-66）。境界では使わない */
   allowedConnectorUrls: readonly string[];
-  /** 正規化した SIM_WORLD_URL（無ければ sim-world なし＝ゲスト・影・リハーサルは全部拒否） */
-  simWorldUrl: string | null;
   /** 受ける側の呼び出し元の確認（sa-app だけ：15:483）。INTERNAL_SHARED_TOKEN */
   serviceAuth: ServiceAuthConfig;
-  /** sim-world を呼ぶ共有トークン（SIM_WORLD_SHARED_TOKEN：compose.yaml・.env.example と同じ） */
-  simWorldSharedToken: string | undefined;
   /** Google カレンダー（GCAL_URL があるときだけ。無ければ null＝「つなぐ」は使えない） */
   gcal: GcalConfig | null;
   /** GitHub（GITHUB_URL があるときだけ。無ければ null＝「つなぐ」は使えない） */
@@ -109,15 +105,14 @@ export function normalizeConnectorUrl(raw: string): string {
 export interface AllowedConnectorInput {
   /** ALLOWED_CONNECTOR_URLS をカンマで分けたもの（前後の空白・空はここで除く） */
   allowedConnectorUrls: readonly string[];
-  simWorldUrl: string | null | undefined;
 }
 
 /**
  * 起動時の確認（SO §3.1.2 assertAllowedConnectorUrls、MT §3.12.1、BR-66）。外れたら GatewayStartupError。
- * 一覧のどれかが正規化できない、または SIM_WORLD_URL が不正 → 断る。一覧の中身は確かめない（実のコネクタをつなぐ）
- * 返すのは正規化して重複を除いた一覧と SIM_WORLD_URL
+ * 一覧のどれかが正規化できない → 断る。一覧の中身は確かめない（実のコネクタをつなぐ）
+ * 返すのは正規化して重複を除いた一覧
  */
-export function assertAllowedConnectorUrls(input: AllowedConnectorInput): { allowedConnectorUrls: string[]; simWorldUrl: string | null } {
+export function assertAllowedConnectorUrls(input: AllowedConnectorInput): { allowedConnectorUrls: string[] } {
   const reasons: string[] = [];
   const allowed: string[] = [];
   for (const raw of input.allowedConnectorUrls.map((s) => s.trim()).filter((s) => s !== "")) {
@@ -128,22 +123,13 @@ export function assertAllowedConnectorUrls(input: AllowedConnectorInput): { allo
       reasons.push(`ALLOWED_CONNECTOR_URLS に正規化できない URL がある（${(e as Error).message}）`);
     }
   }
-  let simWorldUrl: string | null = null;
-  const simRaw = input.simWorldUrl?.trim();
-  if (simRaw) {
-    try {
-      simWorldUrl = normalizeConnectorUrl(simRaw);
-    } catch (e) {
-      reasons.push(`SIM_WORLD_URL が不正（${(e as Error).message}）`);
-    }
-  }
   if (reasons.length > 0) throw new GatewayStartupError([], reasons);
-  return { allowedConnectorUrls: allowed, simWorldUrl };
+  return { allowedConnectorUrls: allowed };
 }
 
 /**
  * 環境変数を読む（SO §2.2 の GatewayEnv）。足りない・不正な名前（missing）と、起動時の確認（BR-66）の理由（reasons）を返す。
- * 必須：DATABASE_URL・INTERNAL_SHARED_TOKEN（受ける側）。SIM_WORLD_URL があれば SIM_WORLD_SHARED_TOKEN（sim-world を呼ぶ側）。
+ * 必須：DATABASE_URL・INTERNAL_SHARED_TOKEN（受ける側）。
  * PLATFORM_CEILINGS_VERSION はコードの定数なので読まない（M-59）
  */
 export function readGatewayEnv(source: EnvSource = process.env): { env: GatewayEnv | null; missing: string[]; reasons: string[] } {
@@ -151,9 +137,7 @@ export function readGatewayEnv(source: EnvSource = process.env): { env: GatewayE
   const port = r.port();
   const databaseUrl = r.string("DATABASE_URL", { required: true });
   const serviceAuth = readServiceAuthEnv(r);
-  const simRaw = r.string("SIM_WORLD_URL");
   const allowedRaw = r.list("ALLOWED_CONNECTOR_URLS");
-  const simWorldSharedToken = simRaw !== undefined ? r.secret("SIM_WORLD_SHARED_TOKEN", { required: true }) : undefined;
 
   // Google カレンダー（16 §3.5）：GCAL_URL があるときだけ、残りの秘密・鍵を必須にする
   const reasons: string[] = [];
@@ -202,9 +186,9 @@ export function readGatewayEnv(source: EnvSource = process.env): { env: GatewayE
   const githubSharedToken = githubUrl !== null ? r.secret("GITHUB_SHARED_TOKEN", { required: true }) : undefined;
   const commitSha = r.string("COMMIT_SHA");
 
-  let urls: { allowedConnectorUrls: string[]; simWorldUrl: string | null } = { allowedConnectorUrls: [], simWorldUrl: null };
+  let urls: { allowedConnectorUrls: string[] } = { allowedConnectorUrls: [] };
   try {
-    urls = assertAllowedConnectorUrls({ allowedConnectorUrls: allowedRaw, simWorldUrl: simRaw });
+    urls = assertAllowedConnectorUrls({ allowedConnectorUrls: allowedRaw });
   } catch (e) {
     if (!(e instanceof GatewayStartupError)) throw e;
     reasons.push(...e.reasons);
@@ -238,9 +222,7 @@ export function readGatewayEnv(source: EnvSource = process.env): { env: GatewayE
       port,
       databaseUrl,
       allowedConnectorUrls: urls.allowedConnectorUrls,
-      simWorldUrl: urls.simWorldUrl,
       serviceAuth,
-      simWorldSharedToken,
       gcal,
       github,
       commitSha,
