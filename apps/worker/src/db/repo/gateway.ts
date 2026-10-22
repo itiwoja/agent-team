@@ -424,7 +424,7 @@ export interface GatewayDecisionInput {
   reasonCode: string;
   /** 'boundary.<code>'・'gateway.tool_changed' など */
   matchedRule: string;
-  /** 判定どおりに効かせたか（今は常に true。0023 より前の影の走行の行だけ false） */
+  /** 判定どおりに効かせたか（今は常に true。0024 より前の影の走行の行だけ false） */
   enforced: boolean;
 }
 

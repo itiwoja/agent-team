@@ -265,7 +265,7 @@ export function listAuditLogs(db: WsDb, f: AuditListFilter): { rows: AuditLogRow
   if (f.to) add("occurred_at <= ?", f.to);
   if (f.eventTypes && f.eventTypes.length > 0) add("event_type IN (SELECT value FROM json_each(?))", f.eventTypes);
   if (f.taskId) add("task_id = ?", f.taskId);
-  // 0023 より前の影の走行の行（payload.enforced = false。真偽でも文字列でも）は出さない
+  // 0024 より前の影の走行の行（payload.enforced = false。真偽でも文字列でも）は出さない
   where.push("json_type(payload, '$.enforced') IS NOT 'false' AND json_extract(payload, '$.enforced') IS NOT 'false'");
   const rows = all<AuditLogRow>(
     db,

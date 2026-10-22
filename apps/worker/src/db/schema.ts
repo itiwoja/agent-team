@@ -1,4 +1,4 @@
-// WorkspaceDO の SQLite のスキーマ（docs/cloudflare-design.md「データ」）。packages/db の Postgres（0001〜0024）を写したもの。
+// WorkspaceDO の SQLite のスキーマ（docs/cloudflare-design.md「データ」）。packages/db の Postgres（0001〜0025）を写したもの。
 // - workspace_id の列はない（DO そのものがワークスペース）。ワークスペースの行は workspace（id = 1 の1行）
 // - ID は TEXT（コードで crypto.randomUUID()）。時刻は ISO 8601（UTC・ミリ秒）の TEXT。真偽は 0/1。jsonb・配列は JSON の TEXT
 // - 金額は numeric(12,6) をやめてマイクロドルの INTEGER（列の名前も *_micro_usd）
@@ -733,7 +733,9 @@ CREATE TABLE usage_records (
   latency_ms                INTEGER NOT NULL,
   prompt_hash               TEXT    NOT NULL,
   created_at                TEXT    NOT NULL DEFAULT ${NOW},
-  CONSTRAINT usage_records_provider_check CHECK (${oneOf("provider", ["google", "anthropic", "deepseek", "openrouter", "openai"])}),
+  CONSTRAINT usage_records_provider_check CHECK (${oneOf("provider", [
+    "google", "anthropic", "openai", "deepseek", "openrouter", "xai", "groq", "mistral", "together", "fireworks", "cerebras", "moonshot", "zai", "qwen", "custom",
+  ])}),
   CONSTRAINT usage_records_model_check CHECK (${len("model", 1, 128)}),
   CONSTRAINT usage_records_phase_check CHECK (${oneOf("phase", [
     "plan", "investigate", "implement", "test", "summarize", "review", "report", "planner", "rehearsal_generate", "rehearsal_interpret", "rehearsal_tighten",
