@@ -10,8 +10,10 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; name: string; sql: str
     version: 1,
     name: "init",
     sql: `CREATE TABLE workspace_meta (
-            id          INTEGER PRIMARY KEY CHECK (id = 1),
-            created_at  TEXT    NOT NULL
+            id              INTEGER PRIMARY KEY CHECK (id = 1),
+            workspace_id    TEXT    NOT NULL,
+            owner_user_id   TEXT    NOT NULL,
+            created_at      TEXT    NOT NULL
           )`,
   },
 ];
@@ -39,6 +41,17 @@ export class WorkspaceDO extends DurableObject<Env> {
         sql.exec("INSERT INTO schema_migrations (version, name, applied_at) VALUES (?, ?, ?)", m.version, m.name, new Date().toISOString());
       });
     }
+  }
+
+  /** 初めてならワークスペースの持ち主を入れる（2回目以降は何もしない。違う持ち主なら例外） */
+  init(workspaceId: string, ownerUserId: string): void {
+    const sql = this.ctx.storage.sql;
+    const row = sql.exec<{ workspace_id: string; owner_user_id: string }>("SELECT workspace_id, owner_user_id FROM workspace_meta WHERE id = 1").toArray()[0];
+    if (row === undefined) {
+      sql.exec("INSERT INTO workspace_meta (id, workspace_id, owner_user_id, created_at) VALUES (1, ?, ?, ?)", workspaceId, ownerUserId, new Date().toISOString());
+      return;
+    }
+    if (row.workspace_id !== workspaceId || row.owner_user_id !== ownerUserId) throw new Error("ワークスペースの持ち主が違う");
   }
 
   /** 当てたスキーマの版（新しい順の先頭。なければ 0） */

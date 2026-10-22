@@ -9,6 +9,14 @@
   "durable_objects": {
     "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
   },
+  "d1_databases": [{ "binding": "DB", "database_name": "makase", "migrations_dir": "migrations" }],
+  // 秘密でない設定。GOOGLE_CLIENT_SECRET は secret（ローカルは .dev.vars）
+  "vars": {
+    "APP_BASE_URL": "http://localhost:8787",
+    "GOOGLE_CLIENT_ID": "",
+    "ALLOWED_EMAILS": ""
+  },
+  "secrets": { "required": ["GOOGLE_CLIENT_SECRET"] },
   "exports": {
     "WorkspaceDO": { "type": "durable-object", "storage": "sqlite" }
   }

@@ -54,3 +54,6 @@ pnpm --filter @open-team/worker dev     # wrangler dev（http://localhost:8787�
 pnpm --filter @open-team/worker test    # workerd の中で試験（@cloudflare/vitest-plugin）
 pnpm --filter @open-team/worker types   # wrangler.jsonc を変えたら型を作り直す
 ```
+
+ローカルでログインするとき：`apps/worker/.dev.vars.example` を `.dev.vars` にコピーして Google の OAuth クライアントの値と許可するメールアドレスを入れ、
+D1 にテーブルを作る（`pnpm --filter @open-team/worker exec wrangler d1 migrations apply makase --local`）。

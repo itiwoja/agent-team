@@ -1,0 +1,7 @@
+# ローカルの wrangler dev が読む秘密（.dev.vars にコピーして埋める。.dev.vars は git に入れない）
+# Google Cloud の OAuth クライアント（ウェブ アプリケーション）のシークレット。
+# 承認済みのリダイレクト URI に http://localhost:8787/api/auth/google/callback を足しておく
+GOOGLE_CLIENT_SECRET=
+# wrangler.jsonc の vars を上書きする（クライアント ID と、ログインを許すメールアドレス。カンマ区切り）
+GOOGLE_CLIENT_ID=
+ALLOWED_EMAILS=
