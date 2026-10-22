@@ -3,12 +3,21 @@
 // スキーマ（db/schema.ts）は作られたとき・起き直したときに blockConcurrencyWhile の中で MIGRATIONS を順に当てる（当てた版は schema_migrations に残す）。
 // 表の読み書きは db/repo/*.ts の同期の関数（WsDb を受け取る）。画面の表示用ビューは views/*（RPC で返す。JSON にできる素の値で、時刻は ISO の文字列）
 
+import { defaultWorkspacePolicy, hashCanonical, type JsonObject } from "@open-team/kernel";
 import { knownSecretsFromEnv } from "@open-team/platform";
 import { DurableObject } from "cloudflare:workers";
 import { acceptAsk, answerAskQuestion } from "./asks/accept.ts";
+import { loadPlannerMaterials } from "./asks/generate.ts";
+import { savePlanResult, type PlanSaveOutcome, type PlanStepResult } from "./asks/plan-steps.ts";
+import type { PlannerInput } from "./asks/planner.ts";
+import { appendAuditLog } from "./db/audit.ts";
+import { insertWorkspacePolicyIfMissing } from "./db/repo/app.ts";
+import { bumpPlannerAttempts } from "./db/repo/asks.ts";
+import type { UsageRecordInput } from "./db/repo/edge.ts";
 import { MIGRATIONS } from "./db/schema.ts";
 import { wsDbOf, type WsDb } from "./db/sqlite.ts";
-import { initWorkspace } from "./db/workspace.ts";
+import { getWorkspace, initWorkspace } from "./db/workspace.ts";
+import { llmGate, llmRecord, type LlmGate } from "./edge/llm-call.ts";
 import { runIdempotent, type IdemRequest } from "./idempotency.ts";
 import { engageKillSwitch, releaseKillSwitch, type KillSwitchEngageResponse, type KillSwitchReleaseResponse } from "./kill-switch.ts";
 import type { AgentLibraryResponse } from "./views/agents/contract.ts";
@@ -55,9 +64,25 @@ export class WorkspaceDO extends DurableObject<Env> {
     }
   }
 
-  /** 初めてならワークスペースの持ち主を入れる（2回目以降は何もしない。違う持ち主なら例外） */
+  /**
+   * 初めてならワークスペースの持ち主と、ワークスペースのポリシー v1（kernel の既定。apps/app/src/owner-setup.ts の 2 と同じ）を入れる。
+   * 2回目以降は何もしない。違う持ち主なら例外
+   */
   init(workspaceId: string, ownerUserId: string): void {
-    initWorkspace(this.db, { workspaceId, ownerUserId, now: new Date() });
+    const now = new Date();
+    this.db.transaction(() => {
+      initWorkspace(this.db, { workspaceId, ownerUserId, now });
+      const policy = defaultWorkspacePolicy();
+      const policyHash = hashCanonical(policy);
+      const p = insertWorkspacePolicyIfMissing(this.db, { policy: policy as unknown as JsonObject, policyHash, createdBy: null, now });
+      if (p.created) {
+        appendAuditLog(
+          this.db,
+          { eventType: "policy.snapshot_created", actorType: "system", actorId: "seed", payload: { scope: "workspace", version: p.row.version, policyHash, origin: "seed" } },
+          now,
+        );
+      }
+    });
   }
 
   /** 当てたスキーマの版（新しい順の先頭。なければ 0） */
@@ -95,14 +120,58 @@ export class WorkspaceDO extends DurableObject<Env> {
     return knownSecretsFromEnv(this.env as unknown as Record<string, string | undefined>);
   }
 
-  /** API-072：依頼を作る（201） */
-  acceptAsk(i: { userId: string; body: CreateAskBody; idem: IdemRequest | null; now: Date }): WriteResult<AskAcceptedResponse> {
-    return runIdempotent(this.db, i.idem, 201, i.now, () => acceptAsk(this.db, { ...i, secrets: this.secrets() }));
+  /** API-072：依頼を作る（201）。受けたら編成の Workflow を起動する */
+  async acceptAsk(i: { userId: string; body: CreateAskBody; idem: IdemRequest | null; now: Date }): Promise<WriteResult<AskAcceptedResponse>> {
+    const r = runIdempotent(this.db, i.idem, 201, i.now, () => acceptAsk(this.db, { ...i, secrets: this.secrets() }));
+    if (r.ok && r.replayed !== true) await this.startPlan(r.body.ask.id, i.userId, "initial");
+    return r;
   }
 
-  /** API-073：生成中の質問に答える */
-  answerAskQuestion(i: { userId: string; askId: string; body: AnswerAskBody; idem: IdemRequest | null; now: Date }): WriteResult<AskAcceptedResponse> {
-    return runIdempotent(this.db, i.idem, 200, i.now, () => answerAskQuestion(this.db, { ...i, secrets: this.secrets() }));
+  /** API-073：生成中の質問に答える。答えたら編成の Workflow をもう一度起動する */
+  async answerAskQuestion(i: { userId: string; askId: string; body: AnswerAskBody; idem: IdemRequest | null; now: Date }): Promise<WriteResult<AskAcceptedResponse>> {
+    const r = runIdempotent(this.db, i.idem, 200, i.now, () => answerAskQuestion(this.db, { ...i, secrets: this.secrets() }));
+    if (r.ok && r.replayed !== true) await this.startPlan(i.askId, i.userId, "answered");
+    return r;
+  }
+
+  /**
+   * 編成の Workflow を起動する。同じ Idempotency-Key のやり直し（記録した応答を返したとき）は呼ばない。
+   * インスタンスの ID は依頼と段階（初回・質問への答えのあと）で決まるので、万一2回呼んでも2つ目は作られない（instance.already_exists）
+   */
+  private async startPlan(askId: string, userId: string, phase: "initial" | "answered"): Promise<void> {
+    const id = `plan-${askId}-${phase}`;
+    const workspaceId = getWorkspace(this.db)?.workspace_id;
+    if (workspaceId === undefined) return;
+    await this.env.PLAN_ASK.create({ id, params: { workspaceId, askId, userId } });
+  }
+
+  // ---- 編成の Workflow（workflows/plan-ask.ts）から呼ぶ ----
+
+  /** 設定プランナーの材料（生成中でない・質問に未回答なら null） */
+  planMaterials(askId: string): PlannerInput | null {
+    return loadPlannerMaterials(this.db, askId)?.input ?? null;
+  }
+
+  /** 設定プランナーを呼んだ回数を足す */
+  bumpPlannerAttempts(askId: string): void {
+    bumpPlannerAttempts(this.db, askId, 1, new Date());
+  }
+
+  /** 計画の結果を保存して、最初の実行を始める */
+  planSave(i: { askId: string; requesterId: string; result: PlanStepResult }): PlanSaveOutcome {
+    return savePlanResult(this.db, { ...i, now: new Date(), secrets: this.secrets() });
+  }
+
+  // ---- LLM の呼び出しの記録（edge/llm-call.ts の callLlm の ledger） ----
+
+  /** 呼ぶ前の確かめ（Kill Switch・費用の上限） */
+  llmGate(budgetEstimateMicroUsd: number, now: Date): LlmGate {
+    return llmGate(this.db, budgetEstimateMicroUsd, now);
+  }
+
+  /** 費用の記録 */
+  llmRecord(usage: UsageRecordInput, now: Date): void {
+    llmRecord(this.db, usage, now);
   }
 
   /** EP-27：Kill Switch の発動 */

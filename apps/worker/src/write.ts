@@ -11,10 +11,11 @@ export interface WriteError {
   headers?: Record<string, string>;
 }
 
-export type WriteResult<T> = { ok: true; status: number; body: T } | { ok: false; error: WriteError };
+/** replayed は冪等性のキーで記録した応答を返したとき（処理は動かしていない） */
+export type WriteResult<T> = { ok: true; status: number; body: T; replayed?: true } | { ok: false; error: WriteError };
 
 /** fn を動かし、AppError を値にする */
-export function captureAppError<T>(fn: () => { status: number; body: T }): WriteResult<T> {
+export function captureAppError<T>(fn: () => { status: number; body: T; replayed?: true }): WriteResult<T> {
   try {
     return { ok: true, ...fn() };
   } catch (e) {

@@ -9,6 +9,8 @@
   "durable_objects": {
     "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
   },
+  // 依頼の編成（workflows/plan-ask.ts）
+  "workflows": [{ "name": "makase-plan-ask", "binding": "PLAN_ASK", "class_name": "PlanAskWorkflow" }],
   "d1_databases": [{ "binding": "DB", "database_name": "makase", "migrations_dir": "migrations" }],
   // 秘密でない設定。GOOGLE_CLIENT_SECRET は secret（ローカルは .dev.vars）
   "vars": {

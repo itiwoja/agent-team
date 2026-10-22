@@ -35,7 +35,7 @@ export function idempotencyOf(c: Context, request: Json): IdemRequest | null {
 
 /**
  * 処理（fn。中で AppError を投げてよい）を冪等にして結果を返す。キーがなければそのまま1回動かす。
- * 2回目以降は記録した応答（状態と本文）をそのまま返す
+ * 2回目以降は記録した応答（状態と本文）をそのまま返す（replayed: true。呼ぶ側はあとの処理を動かさない）
  */
 export function runIdempotent<T>(db: WsDb, idem: IdemRequest | null, status: 200 | 201, now: Date, fn: () => T): WriteResult<T> {
   return captureAppError(() =>
@@ -48,7 +48,7 @@ export function runIdempotent<T>(db: WsDb, idem: IdemRequest | null, status: 200
             details: [{ field: "Idempotency-Key", reason: "reused_for_different_request" }],
           });
         }
-        return { status: prev.response_status, body: prev.response_body as T };
+        return { status: prev.response_status, body: prev.response_body as T, replayed: true as const };
       }
       const body = fn();
       saveIdempotencyRecord(db, { ...idem, responseStatus: status, responseBody: body as unknown as Json }, now);
