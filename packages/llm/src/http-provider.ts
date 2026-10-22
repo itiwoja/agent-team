@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantPart, ChatMessage } from "@open-team/runner";
 import { GeminiClient } from "./gemini.ts";
 import { computeMicroUsd } from "./pricing.ts";
-import { profilePrice, providerModelIdentity, PROVIDER_BASE_URLS, PROVIDER_KEY_NAMES, ModelProfileSchema, LlmConfigurationError, type LlmConfig, type LlmProvider, type ModelProfile } from "./provider-config.ts";
+import { profilePrice, providerBaseUrl, providerModelIdentity, PROVIDER_KEY_NAMES, ModelProfileSchema, LlmConfigurationError, type LlmConfig, type LlmProvider, type ModelProfile } from "./provider-config.ts";
 import { SessionBudgetClient } from "./session-budget.ts";
 import { buildToolDeclarations, fromGeminiFunctionCall, toGeminiFunctionCall, type McpFunctionTable } from "./tools.ts";
 import { LlmError, type LlmClient, type LlmRequest, type LlmResponse, type LlmUsage } from "./types.ts";
@@ -31,9 +31,9 @@ export class HttpProviderClient implements LlmClient {
     let profiles: Record<string, ModelProfile>;
     try { profiles = Object.fromEntries(Object.entries(config.profiles).map(([name, p]) => [name, ModelProfileSchema.parse(p)])); }
     catch { throw new LlmConfigurationError("モデルの正の料金・能力・上限設定を確認してください"); }
-    // 接続先は provider から決まる固定値（config.baseUrl は見ない）。readLlmEnv と同じ値にそろえる（認証の識別子に使う）
+    // 接続先は provider から決まる固定値（custom だけ config.baseUrl を検査して使う）。readLlmEnv と同じ値にそろえる（認証の識別子に使う）
     this.provider = config.provider;
-    this.config = { ...config, profiles, baseUrl: PROVIDER_BASE_URLS[config.provider] };
+    this.config = { ...config, profiles, baseUrl: providerBaseUrl(config.provider, config.baseUrl) };
     this.fetcher = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
   }

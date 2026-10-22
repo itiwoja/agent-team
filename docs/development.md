@@ -37,7 +37,7 @@ pnpm dev
 
 ## LLMを切り替える
 
-Gemini以外を使う場合は `LLM_PROVIDER`、各社のAPIキー、`LLM_MODEL_AGENT`、`LLM_MODELS_JSON` を設定します。[プロバイダー設定](llm-providers.md) に Gemini・Claude・DeepSeek・OpenRouter の例、能力チェック、料金と検証範囲を記載しています。既存のGemini設定はそのまま使えます。
+Gemini以外を使う場合は `LLM_PROVIDER`、各社のAPIキー、`LLM_MODEL_AGENT`、`LLM_MODELS_JSON` を設定します。[プロバイダー設定](llm-providers.md) に Gemini・Claude・OpenAI 互換の各社（`custom` で任意の接続先も可）の例、能力チェック、料金と検証範囲を記載しています。既存のGemini設定はそのまま使えます。
 
 ## テスト
 

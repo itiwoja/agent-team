@@ -189,8 +189,10 @@ export const RISK_LEVELS = ["low", "medium", "high"] as const;
 export type RiskLevel = (typeof RISK_LEVELS)[number];
 export const SUBJECT_KINDS = ["tool_call", "llm_call", "intent"] as const;
 export type SubjectKind = (typeof SUBJECT_KINDS)[number];
-/** usage_records.provider。Gemini API は google（llm の gemini）。openai は過去の行の CHECK 用に残す（0021） */
-export const LLM_PROVIDERS = ["google", "anthropic", "deepseek", "openrouter"] as const;
+/** usage_records.provider。Gemini API は google（llm の gemini）。ほかは llm の provider の名前のまま（0023） */
+export const LLM_PROVIDERS = [
+  "google", "anthropic", "openai", "deepseek", "openrouter", "xai", "groq", "mistral", "together", "fireworks", "cerebras", "moonshot", "zai", "qwen", "custom",
+] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
 /** runner・FR の LlmPhase（M-32）＋設定プランナー・リハーサルの生成・解釈・締める提案 */
 export const USAGE_PHASES = [
