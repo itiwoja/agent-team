@@ -411,7 +411,8 @@ CREATE TABLE ask_members (
   created_at       TEXT    NOT NULL DEFAULT ${NOW},
   CONSTRAINT ask_members_agent_uq UNIQUE (ask_id, agent_id),
   CONSTRAINT ask_members_position_check CHECK (position IS NULL OR position BETWEEN 1 AND 6),
-  CONSTRAINT ask_members_depends_on_check CHECK (json_type(depends_on) = 'array' AND json_array_length(depends_on) <= 6),
+  CONSTRAINT ask_members_depends_on_check CHECK (json_type(depends_on) = 'array' AND json_array_length(depends_on) <= 6
+    AND depends_on NOT GLOB '*[^][, 123456]*' AND depends_on NOT GLOB '*[0-9][0-9]*'),
   CONSTRAINT ask_members_flags_check CHECK (${bool("is_aggregator")} AND ${bool("is_spokesperson")} AND ${bool("is_new")}),
   CONSTRAINT ask_members_summary_check CHECK (${len("summary", 1, 200)})
 );
