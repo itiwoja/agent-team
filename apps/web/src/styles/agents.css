@@ -155,3 +155,52 @@
   background: var(--surface);
   font-size: 13px;
 }
+
+/* /agents#<agentId> で開いた担当：枠で目立たせる */
+.row.agent.is-target {
+  outline: 2px solid var(--text, currentColor);
+  outline-offset: 2px;
+  scroll-margin-top: 72px;
+}
+.agent-skill-note {
+  font-weight: 600;
+}
+/* スキルのまとまり：線で区切らず余白で区切る。スマホでも折り返す */
+.agent-skills .skill-block {
+  margin-top: 12px;
+}
+.skill-sub {
+  margin: 0 0 6px;
+  font-size: 14px;
+  font-weight: 700;
+}
+.skill-list {
+  display: grid;
+  gap: 12px;
+}
+.skill-item,
+.skill-proposal {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.skill-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+}
+.skill-name {
+  font-weight: 600;
+}
+.skill-body summary {
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--muted);
+  padding: 4px 0;
+}
+.skill-proposal .inline-actions {
+  margin-top: 4px;
+  flex-wrap: wrap;
+}

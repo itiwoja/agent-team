@@ -276,15 +276,21 @@ function ReportRow({
   };
 
   const kind =
-    item.reportKind === "rehearsal" ? "練習の結果" : item.reportKind === "incident_added" ? "事故の記録" : "報告";
+    item.reportKind === "rehearsal" ? "練習の結果" : item.reportKind === "incident_added" ? "事故の記録" : item.reportKind === "evolution" ? "育った" : "報告";
   const body = item.body ? dropLeadingTitle(item.body, item.title) : null;
   const hasBody = Boolean(body) || item.lines.length > 0;
-  const askLink = item.link.askId ? (
+  const agentLink = item.link.agentId ? (
+    <Link to={`/agents#${item.link.agentId}`} className="row-link">
+      この担当を開く
+      <Chevron dir="right" size={14} />
+    </Link>
+  ) : null;
+  const askLink = agentLink ?? (item.link.askId ? (
     <Link to={`/asks/${item.link.askId}`} className="row-link">
       この依頼のページを開く
       <Chevron dir="right" size={14} />
     </Link>
-  ) : null;
+  ) : null);
 
   if (status === "pending" || status === "sending") {
     // ○ を押した直後：行の中で置き換わる。読み上げは状態の文だけ（残り秒は毎秒変わるので aria-hidden）

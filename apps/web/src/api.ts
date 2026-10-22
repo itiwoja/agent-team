@@ -575,13 +575,13 @@ export interface QuestionItem extends ItemBase {
 
 export interface ReportItem extends ItemBase {
   kind: "report";
-  reportKind: "answer" | "rehearsal" | "incident_added" | "task";
+  reportKind: "answer" | "rehearsal" | "incident_added" | "task" | "evolution";
   failed: boolean;
   /** 試しに走らせた結果（DryRunBanner） */
   dryRun: boolean;
   body: string | null;
   lines: string[];
-  link: { askId: string | null; rehearsalRunId: string | null };
+  link: { askId: string | null; rehearsalRunId: string | null; /** 担当の画面（/agents#<agentId>）へ移る行（evolution）だけ */ agentId?: string | null };
   /** 回答の報告のとき、その回答が答えた「頼んだこと」（返事の実行は返事の文）。ほかは null（古いサーバーの応答にはない） */
   request?: string | null;
 }
@@ -691,6 +691,43 @@ export interface AgentLibraryItem {
   growthLine?: string | null;
   asks: AgentAskView[];
   jobs: AgentJobView[];
+  /** 担当が使えるスキル（外していないもの。名前順）。古いサーバーの応答にはない */
+  skills?: AgentSkillView[];
+  /** まだ決めていないスキルの案（新しい順） */
+  skillProposals?: AgentSkillProposalView[];
+  /** 使われないので外したもの（30日以内。新しい順） */
+  pruned?: AgentPrunedView[];
+}
+
+export interface AgentSkillView {
+  id: string;
+  name: string;
+  description: string;
+  origin: "pack" | "learned";
+  lastUsedAt: string | null;
+  createdAt: string;
+}
+
+export interface AgentSkillProposalView {
+  id: string;
+  name: string;
+  description: string;
+  body: string;
+  reason: string | null;
+  createdAt: string;
+}
+
+export interface AgentPrunedItemView {
+  type: "skill" | "rule";
+  id: string;
+  label: string;
+  restoredAt: string | null;
+}
+
+export interface AgentPrunedView {
+  eventId: string;
+  createdAt: string;
+  items: AgentPrunedItemView[];
 }
 
 export interface AgentLibraryResponse {
@@ -1052,6 +1089,20 @@ export const api = {
   /** 担当の作業場を最初に戻す（作業場が動いている間は 409 WORKSPACE_IN_USE） */
   resetAgentWorkspace: (agentId: string) => request<ResetAgentWorkspaceResponse>("POST", `/agents/${encodeURIComponent(agentId)}/workspace/reset`, { body: {} }),
   /** 依頼の一覧（新しい順。最大 50 件：asks/contract.ts の ListAsksQuerySchema） */
+  /** スキルの案を ○（使う）か ×（要らない）で決める（owner・maintainer）。契約：agents/contract.ts */
+  decideSkillProposal: (agentId: string, proposalId: string, decision: "approve" | "reject") =>
+    request<{ proposalId: string; status: string; skillId: string | null }>(
+      "POST",
+      `/agents/${encodeURIComponent(agentId)}/skill-proposals/${encodeURIComponent(proposalId)}/decide`,
+      { body: { decision } },
+    ),
+  /** 整理で外したスキル・ルールを戻す（owner・maintainer） */
+  restoreEvolution: (agentId: string, eventId: string, type: "skill" | "rule", id: string) =>
+    request<{ eventId: string; type: string; id: string; restoredAt: string }>(
+      "POST",
+      `/agents/${encodeURIComponent(agentId)}/evolution/${encodeURIComponent(eventId)}/restore`,
+      { body: { type, id } },
+    ),
   asks: (limit = 50) => request<{ asks: AskSummary[] }>("GET", "/asks", { query: { limit } }),
   packs: () => request<{ categories?: string[]; packs: PackView[] }>("GET", "/packs"),
   installPack: (packId: string) => request<{ pack: PackView; agents: Array<{ agentId: string; name: string }> }>("POST", `/packs/${encodeURIComponent(packId)}/install`, { body: {} }),

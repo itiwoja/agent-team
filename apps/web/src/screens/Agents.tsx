@@ -5,11 +5,12 @@ import { Avatar } from "../components/Avatar";
 import { LoadError } from "../components/LoadError";
 import { SkeletonCards } from "../components/Skeleton";
 import { formatTime } from "../lib/format";
-import { Link } from "../lib/router";
+import { Link, useLocationHash } from "../lib/router";
 import { useWorkspaceEvent } from "../workspace";
 import type { AvatarMood } from "../lib/avatar";
 import { ASK_STATUS_TEXT } from "../lib/askList";
 import { Chevron } from "../ui/icons";
+import { AgentSkills, restorableCount } from "../components/AgentSkills";
 
 /** いまの様子 → 表情 */
 export function moodOfActivity(activity: AgentLibraryItem["activity"]): AvatarMood {
@@ -59,7 +60,8 @@ export function Agents() {
   // 編成ができた・担当が動いた・終わったら取り直す（事象は取りこぼしてもよい。まとめて 400ms 後に1回）
   useWorkspaceEvent((type) => {
     if (type === "reset") return void load();
-    if (!type.startsWith("ask.")) return;
+    // スキルの案が届いた・整理で外した・戻した
+    if (!type.startsWith("ask.") && type !== "agent.skill_proposed" && !type.startsWith("agent.evolution.")) return;
     clearTimeout(timer.current);
     timer.current = setTimeout(() => void load(), 400);
   });
@@ -101,7 +103,7 @@ export function Agents() {
       ) : (
         <ul className="rows agents-list" aria-label="担当">
           {data.items.map((a) => (
-            <AgentCard key={a.id} agent={a} />
+            <AgentCard key={a.id} agent={a} onChanged={load} />
           ))}
         </ul>
       )}
@@ -110,11 +112,22 @@ export function Agents() {
   );
 }
 
-function AgentCard({ agent: a }: { agent: AgentLibraryItem }) {
-  const [open, setOpen] = useState(false);
+function AgentCard({ agent: a, onChanged }: { agent: AgentLibraryItem; onChanged: () => void }) {
+  // /agents#<agentId> で開いたら、この担当のカードを開き、見える位置まで動かして目立たせる
+  const hash = useLocationHash();
+  const targeted = hash === `#${a.id}`;
+  const [open, setOpen] = useState(targeted);
+  const li = useRef<HTMLLIElement>(null);
+  useEffect(() => {
+    if (!targeted) return;
+    setOpen(true);
+    li.current?.scrollIntoView({ block: "start" });
+  }, [targeted]);
   const panelId = `agent-${a.id}`;
+  const proposalCount = a.skillProposals?.length ?? 0;
+  const restorable = restorableCount(a);
   return (
-    <li className={`row agent is-${a.activity}`}>
+    <li ref={li} id={a.id} className={`row agent is-${a.activity}${targeted ? " is-target" : ""}`}>
       <button type="button" className="agent-toggle" aria-expanded={open} aria-controls={panelId} onClick={() => setOpen((v) => !v)}>
         <Avatar name={a.name} mood={moodOfActivity(a.activity)} size={52} className="agent-avatar" />
         <span className="agent-main">
@@ -125,6 +138,8 @@ function AgentCard({ agent: a }: { agent: AgentLibraryItem }) {
           </span>
           <span className="row-meta">{metaLineOf(a)}</span>
           {a.growthLine && <span className="row-meta">{a.growthLine}</span>}
+          {proposalCount > 0 && <span className="row-meta agent-skill-note">スキルの案が {proposalCount}件 届いています</span>}
+          {restorable > 0 && <span className="row-meta">使われていないものを {restorable}件 外しました</span>}
           {a.disabledReason && <span className="row-meta">止めた理由：{a.disabledReason}</span>}
         </span>
         <span className="agent-chevron">
@@ -169,6 +184,7 @@ function AgentCard({ agent: a }: { agent: AgentLibraryItem }) {
               </ul>
             </section>
           )}
+          <AgentSkills agent={a} onChanged={onChanged} />
           {usesWorkspace(a) && <WorkspaceReset agent={a} />}
           <p className="muted small">
             {a.nameSource === "suggested" ? "名前は担当を作るときに付けました" : "名前は自分で付けました"} · 作成 {formatTime(a.createdAt)}

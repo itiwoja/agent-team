@@ -8,6 +8,7 @@ export interface GlossaryEntry {
 
 export const GLOSSARY: readonly GlossaryEntry[] = [
   { term: "安全チェック", text: "任せる前に、Gemini が作った悪い日を本番と同じ経路で試し、止まるかを確かめること" },
+  { term: "スキル", text: "担当が仕事のときに読む手順書。繰り返した作業から案が作られ、あなたが ○ を押すと使われ始める" },
   { term: "Kernel", text: "実行の前に許可・確認・拒否を決める、LLM でないコード" },
   { term: "合否の判定", text: "悪い日の結果が合格か不合格かを決める、決まったルールで動く検査（AI は関わらない）" },
   { term: "ガード", text: "数量や単価の上限など、超えたら確認に回す条件" },
