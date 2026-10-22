@@ -147,7 +147,7 @@ describe("EP-27 発動", () => {
     const t = makeTestApp(db);
     const a = await signInOwner(t);
     expect((await engage(t, a, a.workspaceId, { reason: "x", shadow: true })).status).toBe(400);
-    const other = await fxWorkspace(db, { kind: "guest" });
+    const other = await fxWorkspace(db, { second: true });
     expect((await engage(t, a, other.workspaceId)).status).toBe(404);
     const noCsrf = await send(t, "POST", `/api/v1/workspaces/${a.workspaceId}/kill-switch`, { cookie: a.cookie, body: {} });
     expect(noCsrf.status).toBe(403);
@@ -170,7 +170,7 @@ describe("EP-27 発動", () => {
     const { db } = T();
     const t = makeTestApp(db);
     const a = await signInOwner(t);
-    const b = await fxWorkspace(db, { kind: "guest" });
+    const b = await fxWorkspace(db, { second: true });
     const bx = await seedActivity(db, b);
     await engage(t, a, a.workspaceId);
     expect((await db.query<{ e: boolean }>("SELECT kill_switch_engaged AS e FROM workspaces WHERE id = $1", [b.workspaceId])).rows[0]?.e).toBe(false);

@@ -130,14 +130,14 @@ export async function signInOwner(t: TestApp): Promise<SignedIn> {
 }
 
 /**
- * ゲストのワークスペース（kind = guest。既定のポリシーつき）を作ってセッションを出す。
- * ゲストの入口はもうないので、行は試験の道具で作る（掃除・境界の試験用）
+ * 2つ目のワークスペース（既定のポリシーつき）を作ってセッションを出す（分離の試験用）。
+ * ワークスペースはオーナーの1つだけなので本番では作れない。試験のデータベースの一意の索引を外して作る（fxWorkspace の second）
  */
-export async function signInGuest(t: TestApp): Promise<SignedIn> {
+export async function signInSecondWorkspace(t: TestApp): Promise<SignedIn> {
   const db = t.deps.db;
   const now = t.clock.now();
-  const ws = await fxWorkspace(db, { kind: "guest", now });
-  const policy = defaultWorkspacePolicy("guest");
+  const ws = await fxWorkspace(db, { now, second: true });
+  const policy = defaultWorkspacePolicy();
   await db.transaction((tx) =>
     insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now }),
   );

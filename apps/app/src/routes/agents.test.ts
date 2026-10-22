@@ -5,7 +5,7 @@ import { AgentLibraryResponseSchema } from "../agents/contract.ts";
 import { insertCheckMark } from "@open-team/db/check";
 import { CheckResponse } from "../check/contract.ts";
 import { call, checkHarness, enterWithPendingApproval } from "../check/test-helpers.ts";
-import { send, signInGuest } from "../test-helpers.ts";
+import { send, signInSecondWorkspace } from "../test-helpers.ts";
 
 const T = useTestDb();
 
@@ -46,11 +46,11 @@ describe("GET /agents", () => {
     const { db } = T();
     const { t } = checkHarness(db);
     await enterWithPendingApproval(t);
-    const guest = await signInGuest(t);
-    const res = await send(t, "GET", "/api/v1/agents", { cookie: guest.cookie });
+    const other = await signInSecondWorkspace(t);
+    const res = await send(t, "GET", "/api/v1/agents", { cookie: other.cookie });
     expect(res.status).toBe(200);
     const body = AgentLibraryResponseSchema.parse(await res.json());
-    // ゲストの新しいワークスペースには、オーナーの担当は混ざらない
+    // 別のワークスペースには、オーナーの担当は混ざらない
     expect(body.items).toEqual([]);
     expect((await send(t, "GET", "/api/v1/agents")).status).toBe(401);
   });

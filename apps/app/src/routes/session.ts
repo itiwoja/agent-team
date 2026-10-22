@@ -1,7 +1,7 @@
 // EP-01 入口・EP-02 セッション・EP-03 /me・EP-04 ログアウト（AS §2.3・§3.1・§3.2、SO §3.4・§3.6・§3.8）
 // CSRF トークンは EP-02 と EP-03 の両方で返す（M-57：入口の直後に /session だけで画面が組める）
 
-import { requestWorkspaceDeletion, revokeSession, system } from "@open-team/db";
+import { revokeSession, system } from "@open-team/db";
 import { getMemberUser } from "@open-team/db/app";
 import { AppError } from "@open-team/platform";
 import { z } from "zod";
@@ -91,8 +91,6 @@ export function sessionRoutes(r: ApiRouter, deps: AppDeps): void {
   r.post("/logout", async (c) => {
     const s = sessionOf(c);
     const now = deps.clock.now();
-    // ゲストは終わりにしたら削除予約にする（上限の枠を空ける。セッションも全部失効する）。オーナーは切るだけ
-    if (s.kind === "guest") await deps.db.transaction((tx) => requestWorkspaceDeletion(tx, s, now));
     await revokeSession(deps.db, s, now);
     clearSessionCookie(c, deps);
     deleteCookie(c, GCAL_STATE_COOKIE, { path: GCAL_STATE_COOKIE_PATH, httpOnly: true, secure: deps.env.cookieSecure, sameSite: "Lax" });

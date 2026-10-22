@@ -58,9 +58,9 @@ describe("1行の要約", () => {
 describe("本番の記録の形（2026-10-06 の確認）", () => {
   const id = "0b5c7a52-3c1e-4f0a-9d7e-2a6b1c9e8f01";
   const hash = "9f".repeat(32);
-  it("budget.exceeded の scope（spend.ts の workspace・global）", () => {
-    expect(sum("budget.exceeded", { taskId: id, scope: "workspace", limitUsd: "2.000000", spentUsd: "1.990000", estimatedUsd: "0.020000" })).toBe(
-      "ワークスペースの1日の上限で止めた · 使った額 $1.99 · 上限 $2.00",
+  it("budget.exceeded の scope（spend.ts の global）", () => {
+    expect(sum("budget.exceeded", { taskId: id, scope: "global", limitUsd: "15.000000", spentUsd: "14.990000", estimatedUsd: "0.020000" })).toBe(
+      "全体の1日の上限で止めた · 使った額 $14.99 · 上限 $15.00",
     );
   });
   it("task.status_changed：実際に出る状態と内訳を全部訳す", () => {

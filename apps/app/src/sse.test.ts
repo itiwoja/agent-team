@@ -49,7 +49,7 @@ describe("形と始まり", () => {
     const { db } = T();
     const t = await sseApp(db);
     const a = await signInOwner(t);
-    const other = await fxWorkspace(db, { kind: "guest" });
+    const other = await fxWorkspace(db, { second: true });
     const r = sseReader(await stream(t, a));
     await r.until((m) => m.length >= 1, 1_000);
     await addEvent(db, other.workspaceId, "ask.updated", { secret: "B の事象" });
@@ -124,7 +124,7 @@ describe("T-144 つなぎ直し（Last-Event-ID）", () => {
     const { db } = T();
     const t = await sseApp(db);
     const a = await signInOwner(t);
-    const other = await fxWorkspace(db, { kind: "guest" });
+    const other = await fxWorkspace(db, { second: true });
     const foreign = await addEvent(db, other.workspaceId, "ask.updated", { x: 1 });
     const r = sseReader(await stream(t, a, { "last-event-id": String(foreign.id) }));
     await r.until((m) => m.length >= 1, 1_000);
@@ -184,7 +184,7 @@ describe("守り", () => {
     const t = await sseApp(db);
     const a = await signInOwner(t);
     expect((await send(t, "GET", `/api/v1/workspaces/${a.workspaceId}/stream`)).status).toBe(401);
-    const other = await fxWorkspace(db, { kind: "guest" });
+    const other = await fxWorkspace(db, { second: true });
     expect((await stream(t, { cookie: a.cookie, workspaceId: other.workspaceId })).status).toBe(404);
   });
 

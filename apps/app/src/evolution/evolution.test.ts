@@ -29,10 +29,10 @@ const rule = (id: string, addedAt: Date) => ({
 
 async function setup(replies: ScriptedReply[] = []) {
   const { db } = T();
-  const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   const agent = await fxAgent(db, ws);
   // fxAgent の担当は supplier を付与している（ワークスペースで有効でないと定義を組み直せない）
-  const policy = defaultWorkspacePolicy("owner", ["supplier"]);
+  const policy = defaultWorkspacePolicy(["supplier"]);
   await db.transaction((tx) => insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now: T0 }));
   const llm = new ScriptedLlmClient(replies);
   const t = makeTestApp(db, { deps: { llm }, env: { gemini: { apiKey: undefined, agentModel: "gemini-2.5-flash", plannerModel: "gemini-2.5-flash", compareModels: [] } } });

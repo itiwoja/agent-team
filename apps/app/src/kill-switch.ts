@@ -1,5 +1,5 @@
 // Kill Switch（EP-27・28。FR-015、SO §3.15、AS §3.9、09_api/policies.md:71-83）
-// 発動：maintainer 以上（ゲストは owner）。1つのトランザクションで、ワークスペースの行 → タスク → 承認 → Intent の順にロックし（M-21）、
+// 発動：maintainer 以上。1つのトランザクションで、ワークスペースの行 → タスク → 承認 → Intent の順にロックし（M-21）、
 //   全タスクを halted(kill_switch)・タスクのトークンを失効、承認待ちと未実行の Intent を expired、
 //   終了したタスクの処理（順番の進め方：hooks.tasksTerminated）、監査ログ killswitch.engaged、
 //   SSE の事象 killswitch、NOTIFY ot_kill_switch（コミットで届く）。コミットのあと、このインスタンスの登録簿もすぐ中断する

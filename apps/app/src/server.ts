@@ -1,14 +1,14 @@
 // app を起動する（ローカル）。足りない環境変数があっても起動し「準備中」を返す（D-47）。
 // 準備ができていれば：Kill Switch の見張り（LISTEN ot_kill_switch＋2秒の見回り）・SSE の LISTEN を張り、
 // オーナーの初期投入（G-08。冪等）を後ろで試す（DB がまだ起きていなければ少し待ってやり直す。
-// 手で呼ぶなら POST /internal/setup/owner-workspace）。tick（毎分）とゲストの掃除（毎時）はこのプロセスのタイマーで回す
+// 手で呼ぶなら POST /internal/setup/owner-workspace）。tick（毎分）と掃除（毎時）はこのプロセスのタイマーで回す
 
 import { serve } from "@hono/node-server";
 import { describeMissing } from "@open-team/platform";
 import { createApp } from "./app.ts";
 import { createAppDeps, type AppDeps } from "./deps.ts";
 import { readAppEnv } from "./env.ts";
-import { runGuestCleanup, runTick } from "./tick.ts";
+import { runCleanup, runTick } from "./tick.ts";
 import { ensureOwnerWorkspace, OwnerSetupError } from "./owner-setup.ts";
 import { settleDrivingRuns, stopStartingAskTasks } from "./asks/run.ts";
 import { startKillWatch, type KillWatch } from "./registry.ts";
@@ -78,7 +78,7 @@ if (missing.length === 0) {
   void setupOwnerInBackground(deps);
   timers.push(startPeriodic(deps, "tick", TICK_INTERVAL_MS, () => runTick(deps)));
   // 掃除は DATABASE_URL_MAINT（ot_retention）がなければ回さない
-  if (env.databaseUrlMaint) timers.push(startPeriodic(deps, "ゲストの掃除", CLEANUP_INTERVAL_MS, () => runGuestCleanup(deps)));
+  if (env.databaseUrlMaint) timers.push(startPeriodic(deps, "掃除", CLEANUP_INTERVAL_MS, () => runCleanup(deps)));
 }
 
 // SIGTERM・SIGINT を受けたら、動いているものを止め、接続を閉じる

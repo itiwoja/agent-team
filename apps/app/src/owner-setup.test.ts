@@ -43,7 +43,7 @@ describe("ensureOwnerWorkspace（G-08）", () => {
     expect(p.rows[0]?.version).toBe(1);
     expect(p.rows[0]?.policy.budget.per_day_usd).toBe(10);
     expect(p.rows[0]?.policy.autonomy.mcp_write).toBe("approve");
-    expect(p.rows[0]?.policy_hash).toBe(hashCanonical(defaultWorkspacePolicy("owner")));
+    expect(p.rows[0]?.policy_hash).toBe(hashCanonical(defaultWorkspacePolicy()));
   });
 
   it("監査ログは workspace.created とポリシー（origin: seed）だけで、ハッシュチェーンが通る。2回目は増えない", async () => {

@@ -8,7 +8,7 @@ import { describe, expect, it } from "vitest";
 import { chooseInstallation } from "../connectors/github.ts";
 import type { AppEnv, GithubConnectEnv } from "../env.ts";
 import { ensureOwnerWorkspace } from "../owner-setup.ts";
-import { fakeGatewayClient, makeTestApp, ORIGIN, send, signInGuest, signInOwner, type TestApp } from "../test-helpers.ts";
+import { fakeGatewayClient, makeTestApp, ORIGIN, send, signInOwner, type TestApp } from "../test-helpers.ts";
 
 const T = useTestDb();
 
@@ -246,15 +246,6 @@ describe("main への書き込みの許可・切断", () => {
 
     await connect(t, s);
     expect((await one<{ a: boolean }>(db, "SELECT allow_protected_write AS a FROM connector_credentials WHERE revoked_at IS NULL"))?.a).toBe(false);
-  });
-
-  it("ゲストのワークスペースでもつなげる", async () => {
-    const { db } = T();
-    const github = fakeGithub();
-    const t = makeTestApp(db, { env: { githubConnect: GITHUB }, deps: { gatewayClient: githubGateway(db, fakeGatewayClient(db)), githubFetch: github.fetch } });
-    const s = await signInGuest(t);
-    expect((await connect(t, s)).headers.get("location")).toBe("/?connected=github");
-    expect((await one<{ workspace_id: string }>(db, "SELECT workspace_id FROM connector_credentials"))?.workspace_id).toBe(s.workspaceId);
   });
 });
 

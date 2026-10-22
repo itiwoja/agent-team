@@ -1,5 +1,5 @@
 // 承認・チェック・counts・セッションの応答の契約（フロント apps/web が合わせる1か所。zod のスキーマと型）
-// 06 ask-and-check.md（SCR-019）・09_api/approvals.md（API-017・019）・tasks.md（API-016）・15 §ゲストのワークスペース
+// 06 ask-and-check.md（SCR-019）・09_api/approvals.md（API-017・019）・tasks.md（API-016）
 // - ここは「応答の形」だけ。文言は reasons.ts が reasonCode から固定の文で作る（LLM に書かせない）
 // - 行のキー（item key）は '<種類>:<UUID>'。報告は check_marks のキーと同じ（answer / task、育つ：skill_proposal / evolution）。
 //   承認は approval:<approvalId>、質問は ask_question:<askId> / unknown_outcome:<intentId>
@@ -327,7 +327,7 @@ export const CheckCountsEvent = CheckCounts;
 /** POST /api/v1/entry の応答（next は "/"：A-102） */
 export const EntryResponse = z.object({
   state: z.literal("signed_in"),
-  workspaceKind: z.enum(["owner", "guest"]),
+  workspaceKind: z.enum(["owner"]),
   next: z.string(),
 });
 export type EntryResponse = z.infer<typeof EntryResponse>;
@@ -335,7 +335,7 @@ export type EntryResponse = z.infer<typeof EntryResponse>;
 /** GET /api/v1/session（signed_in） */
 export const SessionSignedIn = z.object({
   state: z.literal("signed_in"),
-  workspaceKind: z.enum(["owner", "guest"]),
+  workspaceKind: z.enum(["owner"]),
   csrfToken: z.string(),
 });
 export type SessionSignedIn = z.infer<typeof SessionSignedIn>;

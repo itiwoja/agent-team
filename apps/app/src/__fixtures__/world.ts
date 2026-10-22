@@ -247,7 +247,7 @@ export async function seedAgent(
   o: { workspacePolicy?: WorkspacePolicy; now?: Date } = {},
 ): Promise<SeededAgent> {
   const now = o.now ?? T0;
-  const workspacePolicy = o.workspacePolicy ?? defaultWorkspacePolicy(ws.kind, WORLD_CONNECTORS.map((c) => c.slug));
+  const workspacePolicy = o.workspacePolicy ?? defaultWorkspacePolicy(WORLD_CONNECTORS.map((c) => c.slug));
   const composed = composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy, agent: def });
   if (composed.violations.length > 0) throw new Error(`定義がポリシーを超えている：${composed.violations.map((v) => v.path).join("・")}`);
   const effective = Object.fromEntries(Object.entries(composed.jobs).map(([slug, r]) => [slug, { policy: r.effective, hash: r.effectivePolicyHash as Hex64 }]));
@@ -336,15 +336,13 @@ export interface StartWorldOptions {
   agentDefinition?: (h: { placeOrderHash: ToolHash }) => AgentDefinitionInput;
   /** gateway の環境を足す */
   gatewayEnv?: Partial<GatewayEnv>;
-  /** ワークスペースの種別（既定 owner。kind は後から変えられない） */
-  workspaceKind?: "owner" | "guest";
 }
 
 /** 試験の世界を起こす */
 export async function startTestWorld(db: Db, o: StartWorldOptions = {}): Promise<TestWorld> {
   const clock = manualClock(T0);
   const logs = memoryLogger({ service: "app" });
-  const ws = await fxWorkspace(db, { kind: o.workspaceKind ?? "owner", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   const mcp = await startMcpServer();
 
   // gateway（app.request につなぐ。コネクタへの MCP は本物の HTTP）
@@ -382,7 +380,7 @@ export async function startTestWorld(db: Db, o: StartWorldOptions = {}): Promise
 
   await seedConnectors(db, gatewayClient, ws, mcp.url);
   // ワークスペースのポリシー：既定に例のコネクタを有効にしたもの（つないだあとの状態）
-  const workspacePolicy = defaultWorkspacePolicy(ws.kind, WORLD_CONNECTORS.map((c) => c.slug));
+  const workspacePolicy = defaultWorkspacePolicy(WORLD_CONNECTORS.map((c) => c.slug));
   await db.transaction((tx) =>
     insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: workspacePolicy as unknown as JsonObject, policyHash: hashCanonical(workspacePolicy), createdBy: null, now: T0 }),
   );

@@ -163,18 +163,16 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
 export type SessionState =
   | { state: "signed_out"; /** ローカルの起動ならトークンなしで入れる（POST /entry/local） */ localEntry?: boolean }
   | { state: "setup_required"; missing: string[] }
-  | { state: "signed_in"; workspaceKind: "owner" | "guest"; csrfToken: string };
+  | { state: "signed_in"; workspaceKind: "owner"; csrfToken: string };
 
 export interface WorkspaceView {
   id: string;
-  kind: "owner" | "guest";
+  kind: "owner";
   role: "owner" | "maintainer" | "viewer" | string;
   timezone: string;
   maxConcurrentTasks: number;
   killSwitch: { engaged: boolean; engagedAt: string | null; engagedBy: string | null; reason: string | null };
-  guest: { expiresAt: string; daysLeft: number } | null;
   budget: { todayCostUsd: string; perDayUsd: string; remainingUsd: string };
-  seedVersion: string | null;
   /** Google カレンダー（available＝この環境で使えるか。connected・email＝つながっているか） */
   google: { available: boolean; connected: boolean; email: string | null };
   /**

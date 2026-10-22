@@ -18,7 +18,7 @@ async function owner(t: TestApp) {
   const o = await signInOwner(t);
   const ws: FxWorkspace = { workspaceId: o.workspaceId, userId: o.userId, kind: "owner", ctx: { workspaceId: o.workspaceId, kind: "owner", userId: o.userId } };
   // パックを入れるのにワークスペースのポリシーが要る
-  const policy = defaultWorkspacePolicy("owner");
+  const policy = defaultWorkspacePolicy();
   await t.deps.db.transaction((tx) =>
     insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now: new Date() }),
   );

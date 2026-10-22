@@ -173,12 +173,9 @@ const BUDGET_ITEM: Record<string, string> = {
   agent_day_usd: "エージェントの1日の費用の上限",
 };
 
-/** 費用の守り（packages/edge/src/spend.ts の SpendScope）。workspace はゲストのワークスペースだけに効く */
+/** 費用の守り（packages/edge/src/spend.ts の SpendScope） */
 const BUDGET_SCOPE: Record<string, string> = {
   global: "全体の1日の上限",
-  workspace: "ワークスペースの1日の上限",
-  // 古い記録の名前
-  guest: "ワークスペースの1日の上限",
 };
 
 const BREAKER: Record<string, string> = {
@@ -435,7 +432,7 @@ function summarizeKnown(type: string, p: Payload): string | null {
     case "job.created":
       return join(["仕事の型を作った", str(p.slug)]);
     case "workspace.created":
-      return p.kind === "guest" ? "ゲストのワークスペースを作った" : "ワークスペースを作った";
+      return "ワークスペースを作った";
     case "policy.snapshot_created":
       return join(["決まりを保存した", num(p.version) !== null && `版 ${num(p.version)}`]);
     case "connector.registered":

@@ -1,7 +1,7 @@
 // 依頼を作る（FR-061・API-072・073）：依頼を generating で作り、設定プランナーが編成を作り、足りない担当を作って（使い回す担当には仕事を足して）、
 // すぐ動かす（確認の ○ は挟まない：D-67）。生成は裏で進み、結果は SSE の ask.*（contract.ts）で届く。
 // - 外部（Gemini）はトランザクションの外。編成の保存（担当・仕事・スナップショット・依頼の状態・事象）は1つのトランザクション（G-14）
-// - Gemini は edge の callGemini を通す：Kill Switch・費用の上限（全体 $15・ゲスト $4。BR-62）・usage_records（phase = planner、ask_id）
+// - Gemini は edge の callGemini を通す：Kill Switch・費用の上限（全体 $15。BR-62）・usage_records（phase = planner、ask_id）
 // - 生成の打ち切りは30秒（A-98）。Kill Switch は登録簿（kind = ask_generate）の中断で止まる
 // - 質問は1つまで（BR-49）：質問を載せて生成を一度終え、API-073 の答えで続きを作る（プロセスの中で待たない）
 
@@ -177,8 +177,8 @@ export async function loadMaterials(deps: Pick<AppDeps, "db"> & { sandbox?: AppD
     connectors,
     policyLines: policyLinesOf(policy),
     answered: ask.question !== null && ask.question_answer !== null ? { question: ask.question.text, answer: ask.question_answer } : null,
-    // 作業場：プロバイダーがあり、オーナーのワークスペース（edge の sandboxAllowed と同じ）
-    sandbox: deps.sandbox != null && ctx.kind === "owner",
+    // 作業場：プロバイダーがあるか（edge の sandboxAllowed と同じ）
+    sandbox: deps.sandbox != null,
   };
   return { input, policy, catalog: catalogOf(connectorRows, toolRows) };
 }
@@ -266,7 +266,7 @@ export async function materializeFormation(
       let name = p.proposed.agent.name;
       for (let n = 2; (await findAgentByName(tx, ctx, name)) !== null; n += 1) name = `${p.proposed.agent.name}${n}`;
       const role = p.role !== null && (AGENT_ROLES as readonly string[]).includes(p.role) ? p.role : null;
-      const initial = initialAgentDefinition({ name, role, workspacePolicy: a.policy, workspaceKind: ctx.kind });
+      const initial = initialAgentDefinition({ name, role, workspacePolicy: a.policy });
       const grants = { ...(initial.grants.connectors ?? {}) } as Record<string, { grant: string[] }>;
       for (const [slug2, tools] of Object.entries(p.grants)) grants[slug2] = { grant: [...tools] };
       const base: AgentDefinitionInput = { ...(initial as unknown as AgentDefinitionInput), grants: { ...(initial.grants.web === undefined ? {} : { web: initial.grants.web }), connectors: grants } };

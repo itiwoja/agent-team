@@ -74,7 +74,7 @@ export async function ensureOwnerWorkspace(deps: OwnerSetupDeps, opts: { now?: D
   const policyCreated = await deps.db
     .transaction(async (tx) => {
       await lockWorkspace(tx, ctx);
-      const policy = defaultWorkspacePolicy("owner");
+      const policy = defaultWorkspacePolicy();
       const policyHash = hashCanonical(policy);
       const p = await insertWorkspacePolicyIfMissing(tx, ctx, { policy: policy as unknown as JsonObject, policyHash, createdBy: null, now });
       if (p.created) {

@@ -51,7 +51,7 @@ export interface AppEnv {
   /** COOKIE_SECURE（既定 true。http の LAN などで使うときだけ "false"） */
   cookieSecure: boolean;
   databaseUrl: string | undefined;
-  /** 掃除（ot_retention）の接続（EP-48。次の段階） */
+  /** 掃除（ot_retention）の接続（EP-48。古い入口の試行・冪等性のキー・SSE の事象を消す） */
   databaseUrlMaint: string | undefined;
   appBaseUrl: string | undefined;
   gatewayUrl: string | undefined;

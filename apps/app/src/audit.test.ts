@@ -99,7 +99,7 @@ describe("EP-43 一覧", () => {
     const { db } = T();
     const t = makeTestApp(db);
     const a = await signInOwner(t);
-    const other = await fxWorkspace(db, { kind: "guest", audit: true });
+    const other = await fxWorkspace(db, { second: true, audit: true });
     expect((await send(t, "GET", `/api/v1/workspaces/${other.workspaceId}/audit-logs`, { cookie: a.cookie })).status).toBe(404);
     expect((await send(t, "GET", `/api/v1/workspaces/${a.workspaceId}/audit-logs`)).status).toBe(401);
   });

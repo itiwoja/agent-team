@@ -77,7 +77,7 @@ describe("generateAsk の失敗", () => {
 
 describe("policyLinesOf", () => {
   it("ポリシーの要約を固定の文で作る（書き込みは確認が要る・予算・使えるコネクタ）", () => {
-    const lines = policyLinesOf(defaultWorkspacePolicy("owner"));
+    const lines = policyLinesOf(defaultWorkspacePolicy());
     expect(lines).toContain("書き込み（発注・送信など）は送る前の確認が要る");
     expect(lines.join("\n")).toMatch(/予算は \$0\.5、1日は \$10/);
     expect(lines.at(-1)).toMatch(/^使えるコネクタ：/);

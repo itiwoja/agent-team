@@ -1,4 +1,4 @@
-// GitHub の接続（18 §3.6、D-119）。ゲストのワークスペースでもオーナーでも同じ（セッション必須）
+// GitHub の接続（18 §3.6、D-119）。セッション必須
 //   GET    /api/v1/connect/github/start?mode=install|authorize  state を Cookie に置いて GitHub App のインストール（既定）か認可の画面へ
 //   GET    /api/v1/connect/github/callback                       state を照合 → code を交換 → 本人とインストールを確かめる → 1トランザクション → 同期・分類
 //   DELETE /api/v1/connect/github                                切断（DB だけ。アンインストールは利用者が GitHub の画面で行う）

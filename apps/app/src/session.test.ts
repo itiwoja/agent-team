@@ -189,16 +189,6 @@ describe("EP-02 セッション・ローリング", () => {
     t.clock.advance(7 * DAY);
     expect((await send(t, "GET", "/api/v1/me", { cookie: a.cookie })).status).toBe(401);
   });
-
-  it("T-23・SO-SES-04 削除予約のワークスペースのセッション → 401", async () => {
-    const { db } = T();
-    const t = makeTestApp(db);
-    const ws = await fxWorkspace(db, { kind: "guest", now: T0 });
-    const s = await issueSession(db, { workspaceId: ws.workspaceId, userId: ws.userId, ipHash: null, userAgent: null, now: T0 });
-    expect((await send(t, "GET", "/api/v1/me", { cookie: s.cookieValue })).status).toBe(200);
-    await db.query("UPDATE workspaces SET delete_requested_at = $2 WHERE id = $1", [ws.workspaceId, T0]);
-    expect((await send(t, "GET", "/api/v1/me", { cookie: s.cookieValue })).status).toBe(401);
-  });
 });
 
 describe("EP-03 /me・EP-26 ワークスペース", () => {
@@ -209,7 +199,7 @@ describe("EP-03 /me・EP-26 ワークスペース", () => {
     expect(await errCode(res)).toBe("UNAUTHORIZED");
   });
 
-  it("/me の形（オーナー：guest は null、ポリシーがなければ既定の per_day_usd 10、今日の費用は usage_records の合計）", async () => {
+  it("/me の形（オーナー：ポリシーがなければ既定の per_day_usd 10、今日の費用は usage_records の合計）", async () => {
     const { db } = T();
     const t = makeTestApp(db);
     const a = await signInOwner(t);
@@ -224,19 +214,17 @@ describe("EP-03 /me・EP-26 ワークスペース", () => {
         timezone: "Asia/Tokyo",
         maxConcurrentTasks: 3,
         killSwitch: { engaged: false, engagedAt: null, engagedBy: null, reason: null },
-        guest: null,
         budget: { todayCostUsd: "0.000000", perDayUsd: "10.000000", remainingUsd: "10.000000" },
-        seedVersion: null,
         google: { available: false, connected: false, email: null },
         github: { available: false, connected: false, login: null, allowProtectedWrite: false, settingsUrl: null },
       },
     });
   });
 
-  it("T-24 ゲスト（作った直後）：guest.daysLeft = 7、ポリシーの per_day_usd 1 → perDayUsd '1.000000'、今日の費用を引いた残り", async () => {
+  it("T-24 ポリシーの per_day_usd 1 → perDayUsd '1.000000'、今日の費用を引いた残り", async () => {
     const { db } = T();
     const t = makeTestApp(db);
-    const ws = await fxWorkspace(db, { kind: "guest", now: T0 });
+    const ws = await fxWorkspace(db, { now: T0 });
     await db.query(
       `INSERT INTO workspace_policies (workspace_id, version, policy, policy_hash, created_at) VALUES ($1, 1, $2, $3, $4)`,
       [ws.workspaceId, { version: 1, budget: { per_task_usd: 0.5, per_day_usd: 1, max_steps: 40, max_minutes: 15 } }, "a".repeat(64), T0],
@@ -249,11 +237,9 @@ describe("EP-03 /me・EP-26 ワークスペース", () => {
     );
     const s = await issueSession(db, { workspaceId: ws.workspaceId, userId: ws.userId, ipHash: null, userAgent: null, now: T0 });
     const me = (await (await send(t, "GET", "/api/v1/me", { cookie: s.cookieValue })).json()) as {
-      workspace: { guest: { daysLeft: number; expiresAt: string }; budget: Record<string, string>; seedVersion: string };
+      workspace: { budget: Record<string, string> };
     };
-    expect(me.workspace.guest).toEqual({ daysLeft: 7, expiresAt: new Date(T0.getTime() + 7 * DAY).toISOString() });
     expect(me.workspace.budget).toEqual({ todayCostUsd: "0.270000", perDayUsd: "1.000000", remainingUsd: "0.730000" });
-    expect(me.workspace.seedVersion).toBe("2026-10-12.1");
   });
 
   it("EP-26 自分のワークスペース → WorkspaceView、別のワークスペースの ID → 404、uuid の形でない → 400、セッションなし → 401", async () => {
@@ -263,7 +249,7 @@ describe("EP-03 /me・EP-26 ワークスペース", () => {
     const ok = await send(t, "GET", `/api/v1/workspaces/${a.workspaceId}`, { cookie: a.cookie });
     expect(ok.status).toBe(200);
     expect(((await ok.json()) as { id: string }).id).toBe(a.workspaceId);
-    const other = await fxWorkspace(db, { kind: "guest" });
+    const other = await fxWorkspace(db, { second: true });
     expect((await send(t, "GET", `/api/v1/workspaces/${other.workspaceId}`, { cookie: a.cookie })).status).toBe(404);
     expect((await send(t, "GET", `/api/v1/workspaces/${a.workspaceId.toUpperCase()}`, { cookie: a.cookie })).status).toBe(200);
     expect((await send(t, "GET", "/api/v1/workspaces/not-a-uuid", { cookie: a.cookie })).status).toBe(400);
