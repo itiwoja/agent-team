@@ -10,8 +10,12 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@open-team/gcal-core": "workspace:*",
+    "@open-team/github-core": "workspace:*",
     "@open-team/kernel": "workspace:*",
-    "hono": "^4.13.11"
+    "@open-team/platform": "workspace:*",
+    "hono": "^4.13.11",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.4.0",

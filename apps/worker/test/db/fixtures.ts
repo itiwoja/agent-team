@@ -1,5 +1,6 @@
 // 試験用の行を作る道具（packages/db/src/testing-fixtures.ts の WorkspaceDO 版）。どれも制約を満たす最小の行を作り、ID を返す。
-// inWorkspace(fn) は試験ごとに新しい WorkspaceDO を作り、その中（runInDurableObject）で fn(db, ws) を呼ぶ
+// inWorkspace(fn) は試験ごとに新しい WorkspaceDO を作り、その中（runInDurableObject）で fn(db, ws) を呼ぶ。
+// inNamedWorkspace(ws, fn) はワークスペースの ID の名前で引いた WorkspaceDO（ログインで作ったもの。経路の試験用）の中で呼ぶ
 
 import { env } from "cloudflare:workers";
 import { runInDurableObject } from "cloudflare:test";
@@ -42,6 +43,19 @@ export async function inWorkspace<T>(fn: (db: WsDb, ws: FxWorkspace) => T | Prom
   return runInDurableObject(stub, async (_instance, state) => {
     const db = wsDbOf(state.storage);
     return fn(db, fxWorkspace(db, o));
+  });
+}
+
+/**
+ * ワークスペースの ID の名前で引いた WorkspaceDO の中で fn を呼ぶ（経路の試験で、ログインしたセッションのワークスペースに行を入れる）。
+ * ワークスペースの行がまだなければ入れる（init と同じ。2回目以降は何もしない）
+ */
+export async function inNamedWorkspace<T>(ws: FxWorkspace, fn: (db: WsDb, ws: FxWorkspace) => T | Promise<T>, o: { now?: Date } = {}): Promise<T> {
+  const stub = env.WORKSPACE.get(env.WORKSPACE.idFromName(ws.workspaceId));
+  return runInDurableObject(stub, async (_instance, state) => {
+    const db = wsDbOf(state.storage);
+    initWorkspace(db, { workspaceId: ws.workspaceId, ownerUserId: ws.userId, now: o.now ?? FIXED_NOW });
+    return fn(db, ws);
   });
 }
 
@@ -368,20 +382,23 @@ export function fxApproval(
 /** 費用の行（既定はタスクの中の Gemini の呼び出し。1万マイクロドル = $0.01） */
 export function fxUsage(
   db: WsDb,
-  o: { taskId?: Uuid | null; agentId?: Uuid | null; askId?: Uuid | null; costMicroUsd?: MicroUsd; createdAt?: Date },
+  o: { taskId?: Uuid | null; agentId?: Uuid | null; askId?: Uuid | null; costMicroUsd?: MicroUsd; createdAt?: Date; phase?: "plan" | "planner"; model?: string; latencyMs?: number },
 ): void {
   const cost = o.costMicroUsd ?? 10_000;
   run(
     db,
     `INSERT INTO usage_records (id, task_id, agent_id, ask_id, provider, model, phase, input_tokens, output_tokens,
                                 estimated_cost_micro_usd, cost_micro_usd, latency_ms, prompt_hash, created_at)
-     VALUES (?, ?, ?, ?, 'google', 'gemini-test-001', 'plan', 100, 50, ?, ?, 10, ?, ?)`,
+     VALUES (?, ?, ?, ?, 'google', ?, ?, 100, 50, ?, ?, ?, ?, ?)`,
     newId(),
     o.taskId ?? null,
     o.agentId ?? null,
     o.askId ?? null,
+    o.model ?? "gemini-test-001",
+    o.phase ?? "plan",
     cost,
     cost,
+    o.latencyMs ?? 10,
     fxHash("prompt"),
     o.createdAt ?? FIXED_NOW,
   );
