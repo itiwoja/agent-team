@@ -27,7 +27,7 @@ pnpm dev
 | `INTERNAL_SHARED_TOKEN` | app・gateway | サービス間の共有トークン。両方とも同じ値 |
 | `GATEWAY_URL` | app | `http://localhost:8082` |
 | `GEMINI_API_KEY` | app | Gemini API のキー（[Google AI Studio](https://aistudio.google.com/apikey) で作る）。無ければ Gemini を呼ぶ機能は使えない |
-| `DATABASE_URL_MAINT` | app | 任意。ゲストの掃除（`ot_retention` のロール）に使う DB の接続。あるときだけ毎時の掃除が動く |
+| `DATABASE_URL_MAINT` | app | 任意。掃除（`ot_retention` のロール。24時間より古い入口の試行・冪等性のキー・SSE の事象を消す）に使う DB の接続。あるときだけ毎時の掃除が動く |
 
 - `app` はプロセスの中のタイマーで、毎分の tick（承認の期限切れ・止まったタスクの拾い直しなど）を動かす。
 - 環境変数が足りなくても `app` は起動し「準備中」を返す（足りない名前だけログに出る）。`gateway` は足りないと起動しない。
