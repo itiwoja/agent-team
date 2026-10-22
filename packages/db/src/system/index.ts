@@ -7,3 +7,4 @@ export * from "./agents.ts";
 export * from "./costs.ts";
 export * from "./scans.ts";
 export * from "./sandbox.ts";
+export * from "./evolution.ts";

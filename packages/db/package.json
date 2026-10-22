@@ -13,6 +13,7 @@
     "./asks": "./src/repo/asks.ts",
     "./agents": "./src/repo/agents.ts",
     "./sandbox": "./src/repo/sandbox.ts",
+    "./evolution": "./src/repo/evolution.ts",
     "./rehearsal": "./src/repo/rehearsal.ts",
     "./rehearsal-tighten": "./src/repo/rehearsal-tighten.ts",
     "./testing": "./src/testing.ts"

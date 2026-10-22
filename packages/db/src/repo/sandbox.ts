@@ -12,6 +12,7 @@ import type {
   SandboxCommandRow,
   SandboxSessionRow,
   SandboxTool,
+  SkillOrigin,
   Uuid,
 } from "../types.ts";
 import type { WsCtx } from "../workspace.ts";
@@ -265,20 +266,58 @@ export async function pruneAgentSnapshots(q: Queryable, ctx: WsCtx, agentId: Uui
 
 // ---- スキル ----
 
-export async function insertAgentSkill(tx: Tx, ctx: WsCtx, v: { agentId: Uuid; name: string; description: string; body: string; packId: string | null; now: Date }): Promise<AgentSkillRow> {
+/**
+ * スキルを足す。同じ名前があれば中身と出どころを新しい値で上書きし、外していたら（removed_at）使える状態に戻す。
+ * origin 以下は育ったスキル（learned）を承認して足すときに渡す（省略は pack のまま）
+ */
+export async function insertAgentSkill(
+  tx: Tx,
+  ctx: WsCtx,
+  v: {
+    agentId: Uuid;
+    name: string;
+    description: string;
+    body: string;
+    packId: string | null;
+    now: Date;
+    origin?: SkillOrigin;
+    approvedBy?: Uuid | null;
+    approvedAt?: Date | null;
+    approvedDigest?: string | null;
+    proposalId?: Uuid | null;
+  },
+): Promise<AgentSkillRow> {
   const r = await tx.query<AgentSkillRow>(
-    `INSERT INTO agent_skills (workspace_id, agent_id, name, description, body, pack_id, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
-     ON CONFLICT (agent_id, name) DO UPDATE SET description = EXCLUDED.description, body = EXCLUDED.body, pack_id = EXCLUDED.pack_id
+    `INSERT INTO agent_skills (workspace_id, agent_id, name, description, body, pack_id, created_at, origin, approved_by, approved_at, approved_digest, proposal_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+     ON CONFLICT (agent_id, name) DO UPDATE SET description = EXCLUDED.description, body = EXCLUDED.body, pack_id = EXCLUDED.pack_id,
+       origin = EXCLUDED.origin, approved_by = EXCLUDED.approved_by, approved_at = EXCLUDED.approved_at, approved_digest = EXCLUDED.approved_digest,
+       proposal_id = EXCLUDED.proposal_id, removed_at = NULL
      RETURNING *`,
-    [ctx.workspaceId, v.agentId, v.name, v.description, v.body, v.packId, v.now],
+    [
+      ctx.workspaceId,
+      v.agentId,
+      v.name,
+      v.description,
+      v.body,
+      v.packId,
+      v.now,
+      v.origin ?? "pack",
+      v.approvedBy ?? null,
+      v.approvedAt ?? null,
+      v.approvedDigest ?? null,
+      v.proposalId ?? null,
+    ],
   );
   return r.rows[0]!;
 }
 
-/** 担当のスキル（名前の順） */
+/** 担当のスキル（名前の順）。整理で外したもの（removed_at）は含めない */
 export async function listAgentSkills(q: Queryable, ctx: WsCtx, agentId: Uuid): Promise<AgentSkillRow[]> {
-  const r = await q.query<AgentSkillRow>("SELECT * FROM agent_skills WHERE workspace_id = $1 AND agent_id = $2 ORDER BY name", [ctx.workspaceId, agentId]);
+  const r = await q.query<AgentSkillRow>(
+    "SELECT * FROM agent_skills WHERE workspace_id = $1 AND agent_id = $2 AND removed_at IS NULL ORDER BY name",
+    [ctx.workspaceId, agentId],
+  );
   return r.rows;
 }
 

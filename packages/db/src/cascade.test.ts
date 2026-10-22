@@ -115,6 +115,9 @@ export async function fullWorkspace(db: Db, kind: "guest" | "owner"): Promise<Fx
     [W, t1.taskId],
   );
   await db.query("INSERT INTO agent_skills (workspace_id, agent_id, name, description, body) SELECT $1, agent_id, '採点', '採点の手順', '# 採点' FROM tasks WHERE id = $2", [W, t1.taskId]);
+  // スキルの案・整理の記録（0022）
+  await db.query("INSERT INTO skill_proposals (workspace_id, agent_id, status) SELECT $1, agent_id, 'skipped' FROM tasks WHERE id = $2", [W, t1.taskId]);
+  await db.query("INSERT INTO agent_evolution_events (workspace_id, agent_id, kind, items) SELECT $1, agent_id, 'pruned', '[]' FROM tasks WHERE id = $2", [W, t1.taskId]);
   await db.query("INSERT INTO pack_installs (workspace_id, pack_id, pack_version) VALUES ($1, 'teacher', 1)", [W]);
   await db.query(
     "INSERT INTO idempotency_keys (workspace_id, key, method, path, request_hash, response_status, response_body) VALUES ($1, gen_random_uuid(), 'POST', '/x', $2, 200, '{}')",

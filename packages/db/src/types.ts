@@ -73,6 +73,7 @@ export const CHANGE_ORIGINS = [
   "approval_rule",
   "ask",
   "rehearsal_tighten",
+  "prune",
 ] as const;
 export type ChangeOrigin = (typeof CHANGE_ORIGINS)[number];
 export const CLASSIFICATIONS = ["narrow", "neutral", "widen"] as const;
@@ -369,6 +370,60 @@ export interface AgentSkillRow {
   description: string;
   body: string;
   pack_id: string | null;
+  created_at: Date;
+  /** 出どころ。learned は承認した人がいて、approved_digest が今の中身と合うときだけ信頼される（0022） */
+  origin: SkillOrigin;
+  approved_by: Uuid | null;
+  approved_at: Date | null;
+  /** 承認したときの (名前, 説明, 本文) の SHA-256（小文字16進64桁） */
+  approved_digest: string | null;
+  proposal_id: Uuid | null;
+  /** 本番のタスクで load_skill で読んだ最後の時刻 */
+  last_used_at: Date | null;
+  /** 整理で外した時刻。NULL なら使える */
+  removed_at: Date | null;
+}
+
+export const SKILL_ORIGINS = ["pack", "learned"] as const;
+export type SkillOrigin = (typeof SKILL_ORIGINS)[number];
+
+export type SkillProposalStatus = "proposed" | "approved" | "rejected" | "skipped";
+
+/** skill_proposals：繰り返しの作業からできたスキルの案（skipped は「繰り返しの手順はない」の印） */
+export interface SkillProposalRow {
+  id: Uuid;
+  workspace_id: Uuid;
+  agent_id: Uuid;
+  status: SkillProposalStatus;
+  name: string | null;
+  description: string | null;
+  body: string | null;
+  reason: string | null;
+  source_task_ids: Uuid[];
+  created_at: Date;
+  decided_by: Uuid | null;
+  decided_at: Date | null;
+  skill_id: Uuid | null;
+}
+
+/** agent_evolution_events.items の1件 */
+export interface EvolutionItem {
+  type: "skill" | "rule";
+  /** skill は agent_skills.id、rule はルールの id */
+  id: string;
+  label: string;
+  /** 戻した時刻（ISO）。まだなら null */
+  restoredAt: string | null;
+}
+
+/** agent_evolution_events：整理の記録（知らせと「戻す」の元） */
+export interface AgentEvolutionEventRow {
+  id: Uuid;
+  workspace_id: Uuid;
+  agent_id: Uuid;
+  kind: "pruned";
+  items: EvolutionItem[];
+  config_change_id: Uuid | null;
   created_at: Date;
 }
 
@@ -1182,6 +1237,8 @@ export const WORKSPACE_TABLES = [
   "sandbox_commands",
   "agent_workspace_snapshots",
   "agent_skills",
+  "skill_proposals",
+  "agent_evolution_events",
   "pack_installs",
   "workspace_events",
   "check_marks",

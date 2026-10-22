@@ -49,7 +49,7 @@ export async function listAgentLibrary(q: Queryable, ctx: WsCtx): Promise<AgentL
               WHERE m.workspace_id = a.workspace_id AND m.agent_id = a.id AND m.is_new ORDER BY k.created_at, k.id LIMIT 1) AS born_ask_id,
             (SELECT count(*)::int FROM agent_config_changes c WHERE c.workspace_id = a.workspace_id AND c.agent_id = a.id AND c.origin = 'approval_rule' AND c.status = 'applied') AS allowed_rule_count,
             (SELECT count(*)::int FROM agent_config_changes c WHERE c.workspace_id = a.workspace_id AND c.agent_id = a.id AND c.origin = 'rehearsal_tighten' AND c.status = 'applied') AS tightened_count,
-            (SELECT count(*)::int FROM agent_skills s WHERE s.workspace_id = a.workspace_id AND s.agent_id = a.id) AS skill_count,
+            (SELECT count(*)::int FROM agent_skills s WHERE s.workspace_id = a.workspace_id AND s.agent_id = a.id AND s.removed_at IS NULL) AS skill_count,
             t.task_count, t.last_active_at, t.running, t.awaiting_approval
        FROM agents a
        LEFT JOIN LATERAL (
