@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { canonicalJson } from "./canonical.ts";
-import { compose, composeAll, composeBoundary, effectivePolicyHash, withCandidateRules } from "./compose.ts";
+import { compose, composeAll, composeBoundary, effectivePolicyHash } from "./compose.ts";
 import type { ComposeInput, PolicyViolation } from "./compose.ts";
 import { decide } from "./decide.ts";
 import { evaluateGuard, mergeGuards } from "./guards.ts";
@@ -23,6 +23,9 @@ import type { AgentDefinitionInput, TemplateName, TemplateSpec, WorkspacePolicy 
 import { EMPTY_TAINT, OPERATION_TYPES } from "./types.ts";
 import type { AutonomyLevel, Counters, DecideResult, EffectivePolicy, Flags, Guard, JsonObject, OperationType, ToolHash, ToolInfo } from "./types.ts";
 
+/** 試験の例のコネクタ（ワークスペースで有効にするもの） */
+const EXAMPLE_CONNECTORS = ["bank", "mail", "store", "supplier"];
+
 // ---- フィクスチャ（KC §6 の前提：DEFAULT_CEILINGS、ゲストの ws、§2.4 の仕入れ係（M-36 の付与）） ----
 
 const H = (c: string): ToolHash => `sha256:${c.repeat(64)}`;
@@ -35,7 +38,7 @@ const T_PO: ToolInfo = {
   toolHash: H("a"),
   argRoles: { supplier_id: "destination", "items[].sku": "option", "items[].quantity": "option", "items[].unit_price": "option", note: "content" },
 };
-const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy("guest")); // connectors.enabled = [bank, mail, store, supplier]
+const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS));
 /** 試験の ws は1日 $1 に固定する（D-105 でゲストの既定は 2 になったが、ここの期待値・保存したハッシュは per_day_usd 1 の ws で作った） */
 function pinDay1(w: WorkspacePolicy): WorkspacePolicy {
   return { ...w, budget: { ...w.budget, per_day_usd: 1 } };
@@ -70,7 +73,7 @@ const COUNTERS: Counters = {
   intentsCount: 0,
   unknownOutcomeKeys: [],
 };
-const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running" };
 
 function def(f?: (d: any) => void, base: AgentDefinitionInput = BUYER): AgentDefinitionInput {
   const d = structuredClone(base) as any;
@@ -203,12 +206,12 @@ describe("6.2 予算・Breaker・回数（KC §3.3 B2〜B5）", () => {
     expect(r.violations).toMatchObject([{ path: "budget.per_day_usd", defined: 2, limit: 1, by: "policy" }]);
   });
   it("D-105・D-106：ゲストの既定の ws（per_day 4）で定義 per_day_usd 4 → per_day_usd = 4・agent_day_usd = 4、違反なし", () => {
-    const r = run(def((d) => (d.budget.per_day_usd = 4)), defaultWorkspacePolicy("guest"));
+    const r = run(def((d) => (d.budget.per_day_usd = 4)), defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS));
     expect(r.effective.budget).toMatchObject({ per_day_usd: 4, agent_day_usd: 4 });
     expect(r.violations).toEqual([]);
   });
   it("オーナーの ws（per_day 10）では per_day_usd = 10・agent_day_usd = 1（両方が別々に効く）", () => {
-    expect(eff(BUYER, defaultWorkspacePolicy("owner")).budget).toMatchObject({ per_day_usd: 10, agent_day_usd: 1 });
+    expect(eff(BUYER, defaultWorkspacePolicy("owner", EXAMPLE_CONNECTORS)).budget).toMatchObject({ per_day_usd: 10, agent_day_usd: 1 });
   });
   it("C-28：定義 max_steps 41・ws 40 → 40、違反", () => {
     const r = run(def((d) => (d.budget.max_steps = 41)));
@@ -656,9 +659,6 @@ describe("6.6 ルールの一致（合成した実効ポリシーで decide の�
     expect(e.rules.items).toHaveLength(1);
     expect(decideWrite(e, PO, A(), T_PO)).toMatchObject({ decision: "approve", reasonCode: "approval_required" });
   });
-  it("合格証がなければ一致しても certificate_missing（M-18・D-78）", () => {
-    expect(decideWrite(withRule(), PO, A(), T_PO, { ...FLAGS, certificateValid: false })).toMatchObject({ decision: "approve", reasonCode: "certificate_missing" });
-  });
 });
 
 describe("6.7 ハッシュ（effectivePolicyHash。KC §3.4・M-07）", () => {
@@ -749,33 +749,6 @@ describe("6.7 ハッシュ（effectivePolicyHash。KC §3.4・M-07）", () => {
 const GOLDEN_BUYER_JSON =
   '{"approvers":[],"autonomy":{"edit_code":"auto","mcp_read":"auto","mcp_write":"approve","memory_write":"auto","merge":"deny","notify":"auto","open_pr":"approve","payment":"handoff","read":"auto","run_shell":"deny","run_tests":"auto","shell_network":"deny","web_read":"auto"},"breakers":{"denied_attempts_max":3,"same_action_repeat":5,"step_cost_usd_max":0.5},"budget":{"agent_day_usd":1,"max_minutes":15,"max_steps":40,"per_day_usd":1,"per_task_usd":0.2},"guards":[],"max_intents_per_task":5,"max_runs_per_day":10,"mcp":{"deliverWrite":true,"grants":{"bank":["register_payee"],"store":["get_inventory"],"supplier":["list_products","place_order"]},"llmRead":true,"llmWrite":true},"rules":{"enabled":true,"items":[]},"tools":["finish","mcp_call","notify","submit_report"],"version":1,"web":{"allow_domains":[],"deny_domains":["*.internal","localhost"],"max_fetches_per_task":30}}';
 const GOLDEN_BUYER_HASH = "39245be8eabba98aac54ece210997e27700afeab6953172fdd528bb5ad1d9a06";
-
-describe("候補のルールで試すときの実効ポリシー（G-03 withCandidateRules）", () => {
-  const base = eff(BUYER);
-  const cand = { action: PO, match: { supplier_id: " supplier-01 ", "items[].sku": ["MILK", "BEAN"] }, free: ["items[].unit_price", "items[].quantity"], tool_hash: H("a") };
-  const args = { supplier_id: "supplier-01", items: [{ sku: "BEAN", quantity: 20, unit_price: 2100 }, { sku: "MILK", quantity: 1, unit_price: 200 }] };
-  it("id は 'cand-<n>'、match は正規化（配列は並べ替え・重複は残す）、free は昇順。policyHash を計算し直す", () => {
-    const r = withCandidateRules(base, [cand]);
-    expect(r.effective.rules.items).toEqual([
-      { id: "cand-1", action: PO, match: { supplier_id: "supplier-01", "items[].sku": ["BEAN", "MILK"] }, free: ["items[].quantity", "items[].unit_price"], tool_hash: H("a") },
-    ]);
-    expect(r.effectivePolicyHash).toBe(effectivePolicyHash(r.effective));
-    expect(r.effectivePolicyHash).not.toBe(effectivePolicyHash(base));
-    expect(base.rules.items).toEqual([]); // 元の実効ポリシーは変えない
-  });
-  it("候補のルールで、ガードがなければ値上がりの発注も allow になる（すり抜けを見せる：15:393）", () => {
-    const { effective } = withCandidateRules(base, [cand]);
-    expect(decideWrite(effective, PO, args, T_PO)).toMatchObject({ decision: "allow", reasonCode: "rule_matched", matchedRule: "rules.items[0]" });
-    expect(decideWrite(base, PO, args, T_PO).decision).toBe("approve");
-  });
-  it("定義のルールと合わせて id の昇順。候補がなければハッシュは変わらない。id が重なれば例外", () => {
-    const withRule = eff(def((d) => (d.rules = [{ id: "r-7f3a", action: PO, match: { supplier_id: "s" }, free: [], tool_hash: H("a"), added_by: "u", added_at: "2026-10-03T00:00:00Z" }])));
-    expect(withCandidateRules(withRule, [cand, cand]).effective.rules.items.map((r) => r.id)).toEqual(["cand-1", "cand-2", "r-7f3a"]);
-    expect(withCandidateRules(base, []).effectivePolicyHash).toBe(effectivePolicyHash(base));
-    const clash = eff(def((d) => (d.rules = [{ id: "cand-1", action: PO, match: {}, free: [], tool_hash: H("a"), added_by: "u", added_at: "2026-10-03T00:00:00Z" }])));
-    expect(() => withCandidateRules(clash, [cand])).toThrow(TypeError);
-  });
-});
 
 describe("出力と入力を共有しない", () => {
   it("compose は入力を変えない。仕事どうしの実効ポリシーは別のオブジェクト", () => {

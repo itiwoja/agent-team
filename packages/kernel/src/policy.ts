@@ -286,17 +286,14 @@ export const workspacePolicySchema = z.strictObject({
 /** 日の区切り（per_day_usd の「当日」）。すべてのワークスペース（オーナーも）を Asia/Tokyo で作る（M-59） */
 export const DAY_BOUNDARY_TIMEZONE = "Asia/Tokyo";
 
-/** sim-world の仕入れ係の世界のコネクタ（MT §2.10 の SHOP_CONNECTORS の slug。KC §8 #7） */
-export const SIM_SHOP_CONNECTOR_SLUGS: readonly string[] = deepFreeze(["bank", "mail", "store", "supplier"]);
-
 /**
  * 0-H で投入するワークスペースのポリシー（KC §2.3。例の値は policy-and-schema.md:43-65）。
  * オーナーとゲストの差は per_day_usd だけ（オーナー 10：M-59、ゲスト 4：BR-62・D-105・D-106。edge のゲスト1日 $4 と同じ値）。
- * ゲストの Web は BR-64 で gateway・edge が別に拒否するのでここは変えない。全体 $15・リハーサル $3 は compose の外（M-19・D-104・D-106）
+ * ゲストの Web は BR-64 で gateway・edge が別に拒否するのでここは変えない。全体 $15 は compose の外（M-19・D-104・D-106）
  */
 export function defaultWorkspacePolicy(
   kind: "owner" | "guest",
-  enabledConnectors: readonly string[] = SIM_SHOP_CONNECTOR_SLUGS,
+  enabledConnectors: readonly string[] = [],
 ): WorkspacePolicy {
   return {
     version: 1,
@@ -407,8 +404,7 @@ export interface AgentDefinition {
 
 /**
  * 最初の境界（agents.md:61-70、A-79）。ワークスペースのポリシーより低い場合はそちらに合わせる（initialAgentDefinition）。
- * guest_per_day_usd：ゲストのワークスペースで作る担当の1日（D-105・D-106）。ゲストのワークスペースの1日（4）と同じにし、
- * 自分の依頼のリハーサル1回（約 $2。担当が1人でも全部を負う）と本番の実行が1日に収まるようにする。オーナーは budget.per_day_usd（1）のまま
+ * guest_per_day_usd：ゲストのワークスペースで作る担当の1日（D-105・D-106）。ゲストのワークスペースの1日（4）と同じ。オーナーは budget.per_day_usd（1）のまま
  */
 export const INITIAL_AGENT_BOUNDARY = deepFreeze({
   autonomy: { web_read: "auto", memory_write: "auto" } satisfies Partial<Record<OperationType, AutonomyLevel>>,

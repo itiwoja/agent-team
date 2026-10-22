@@ -87,7 +87,7 @@ describe("canOfferRemember（MT §3.7、09_api/approvals.md:125-132。外れた�
     expect(offer({ isHandoffOnly: true })).toEqual({ ok: false, failed: [4] });
   });
 
-  it("RU-18：試し実行（リハーサルの走行を含む is_dry_run）→ 条件5", () => {
+  it("RU-18：試し実行（is_dry_run）→ 条件5", () => {
     expect(offer({ isDryRun: true })).toEqual({ ok: false, failed: [5] });
   });
 

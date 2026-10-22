@@ -56,7 +56,7 @@ const COUNTERS: Counters = {
   intentsCount: 0,
   unknownOutcomeKeys: [],
 };
-const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running" };
 const cmd = (command: string, commandOperation?: Subject["commandOperation"]): Subject => ({
   kind: "tool_call",
   actionType: "run_command",

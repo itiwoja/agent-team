@@ -308,7 +308,7 @@ export function handoffMark(fromTask: TaintState): "外部の内容を含む" | 
 /**
  * 設定の変更案を確認カードにするか（MT §3.16、BR-47・BR-51。classify() の外の判定：KC §3）。
  * byUserDirectAction = true（出さない）にするのは、押したこと自体がその変更の承認になる操作だけ：
- * 確認カードの承認・[以後も許可]（BR-47 ①）・リハーサルの [適用]（narrow だけ）・ルールの [取り消す]。
+ * 確認カードの承認・[以後も許可]（BR-47 ①）・ルールの [取り消す]。
  * 詳細設定での直接の編集は false で渡す（D-13：設定変更として保存し、classify が widen なら確認カード。MT §3.16-1 より D-13 を正とした）。
  * widen は出す（BR-47）。きっかけのタスク（agent_config_changes.source_task_id）が汚染されていれば neutral・narrow でも出す（BR-51）
  */

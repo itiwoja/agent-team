@@ -1,7 +1,7 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
-import { CHANGE_KINDS, CHANGE_ORDER, checkTighteningProposal, classify, ruleRecordChanges } from "./classify.ts";
-import type { ChangeItem, ClassifyContext, ClassifyResult, SlippedWrite } from "./classify.ts";
+import { CHANGE_KINDS, CHANGE_ORDER, classify } from "./classify.ts";
+import type { ChangeItem, ClassifyContext, ClassifyResult } from "./classify.ts";
 import { compose, composeAll, effectivePolicyHash } from "./compose.ts";
 import { decide, recheckIntent } from "./decide.ts";
 import { AUTONOMY_STRICTNESS, DEFAULT_CEILINGS, TEMPLATES, defaultWorkspacePolicy, initialAgentDefinition, validateAgentDefinition } from "./policy.ts";
@@ -9,7 +9,10 @@ import type { AgentDefinitionInput, ConnectorCatalog, WorkspacePolicy } from "./
 import { EMPTY_TAINT, OPERATION_TYPES } from "./types.ts";
 import type { Counters, EffectivePolicy, Flags, Guard, JsonObject, Subject, ToolHash, ToolInfo } from "./types.ts";
 
-// ---- フィクスチャ（KC §6 の前提：DEFAULT_CEILINGS、ゲストの ws、§2.4 の仕入れ係（M-36 の付与）、sim-world の4つのコネクタ） ----
+/** 試験の例のコネクタ（ワークスペースで有効にするもの） */
+const EXAMPLE_CONNECTORS = ["bank", "mail", "store", "supplier"];
+
+// ---- フィクスチャ（KC §6 の前提：DEFAULT_CEILINGS、ゲストの ws、§2.4 の仕入れ係（M-36 の付与）、例の4つのコネクタ） ----
 
 const H = (c: string): ToolHash => `sha256:${c.repeat(64)}`;
 const PO = "mcp.supplier.place_order";
@@ -31,7 +34,7 @@ const TOOLS: ConnectorCatalog = {
   mail: { connected: true, tools: { list_inbox: read("3"), send: T_MS } },
   bank: { connected: true, tools: { register_payee: T_BP } },
 };
-const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy("guest"));
+const WS: WorkspacePolicy = pinDay1(defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS));
 /** 試験の ws は1日 $1 に固定する（D-105 でゲストの既定は 2 になったが、ここの期待値・保存したハッシュは per_day_usd 1 の ws で作った） */
 function pinDay1(w: WorkspacePolicy): WorkspacePolicy {
   return { ...w, budget: { ...w.budget, per_day_usd: 1 } };
@@ -79,7 +82,7 @@ const COUNTERS: Counters = {
   intentsCount: 0,
   unknownOutcomeKeys: [],
 };
-const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running" };
 
 function def(f?: (d: any) => void, base: AgentDefinitionInput = BUYER): AgentDefinitionInput {
   const d = structuredClone(base) as any;
@@ -407,9 +410,9 @@ describe("6.8 classify（項目ごと。KC §3.8）", () => {
     const writeOnly = def((d) => (d.grants.connectors = { supplier: { grant: ["place_order"] } }));
     expect(cls(tpl("briefer", writeOnly), tpl("researcher", writeOnly), ctx).widenItems).toEqual([]);
   });
-  it("締める提案：テンプレートを変える案は narrow にならないので残らない（researcher → assistant は widen、assistant → researcher は neutral）", () => {
-    expect(checkTighteningProposal({ before: tpl("researcher"), after: BUYER, ctx: CTX })).toMatchObject({ ok: false, reason: "not_narrow", result: { classification: "widen" } });
-    expect(checkTighteningProposal({ before: BUYER, after: tpl("researcher"), ctx: CTX })).toMatchObject({ ok: false, reason: "not_narrow", result: { classification: "neutral" } });
+  it("テンプレートを変える：researcher → assistant は widen、assistant → researcher は neutral", () => {
+    expect(cls(tpl("researcher"), BUYER)).toMatchObject({ classification: "widen" });
+    expect(cls(BUYER, tpl("researcher"))).toMatchObject({ classification: "neutral" });
   });
   it("K-44：届け先 notify を追加 → neutral／deliver_added_notify", () => {
     expect(cls(BUYER, def((d) => (d.jobs[0].deliver = [{ to: "notify" }])))).toMatchObject({ classification: "neutral", items: [{ kind: "deliver_added_notify", jobId: "reorder" }] });
@@ -494,7 +497,7 @@ describe("6.8 classify（項目ごと。KC §3.8）", () => {
     ]);
   });
   it("K-55：入力に ws は1つだけ（ws の変化は classify の対象外）。どの ws でも同じ定義なら項目なし", () => {
-    for (const ws of [WS, defaultWorkspacePolicy("owner"), { ...WS, autonomy: { ...WS.autonomy, mcp_read: "deny" as const } }]) {
+    for (const ws of [WS, defaultWorkspacePolicy("owner", EXAMPLE_CONNECTORS), { ...WS, autonomy: { ...WS.autonomy, mcp_read: "deny" as const } }]) {
       expect(cls(BUYER_R, BUYER_R, { ...CTX, workspacePolicy: ws }).items).toEqual([]);
     }
   });
@@ -572,99 +575,6 @@ describe("6.8 classify（項目ごと。KC §3.8）", () => {
   it("分類と種類の表（CHANGE_KINDS・CHANGE_ORDER）", () => {
     expect(CHANGE_ORDER).toEqual({ narrow: 0, neutral: 1, widen: 2 });
     expect(new Set(CHANGE_KINDS).size).toBe(CHANGE_KINDS.length);
-  });
-});
-
-describe("6.9 リハーサルの締める提案（FR-045。checkTighteningProposal）と合格証", () => {
-  // before ＝ 仕入れ係＋ルール r-1（sku 固定・数量と単価は変わってよい）
-  const before = BUYER_R;
-  const qty20 = guard("items[].quantity", { max: 20 });
-  const price800 = guard("items[].unit_price", { max: 800 });
-  const check = (after: unknown, extra: { slipped?: SlippedWrite[]; candidateRules?: Parameters<typeof checkTighteningProposal>[0]["candidateRules"] } = {}) =>
-    checkTighteningProposal({ before, after, ctx: CTX, ...extra });
-  it("P-01：ガード items[].quantity max 20 を追加 → narrow → 残す", () => {
-    const r = check(withGuards([qty20], before));
-    expect(r.ok).toBe(true);
-    if (r.ok) expect(r.result.classification).toBe("narrow");
-  });
-  it("P-02・P-03：単価 max 800、数量＋単価 → narrow → 残す", () => {
-    expect(check(withGuards([price800], before)).ok).toBe(true);
-    expect(check(withGuards([qty20, price800], before)).ok).toBe(true);
-  });
-  it("P-04：ルールの items[].quantity を固定に戻す → narrow", () => {
-    const after = def((d) => ((d.rules[0].free = ["items[].unit_price"]), (d.rules[0].match["items[].quantity"] = [20])), before);
-    expect(check(after)).toMatchObject({ ok: true, result: { classification: "narrow", items: [{ kind: "rule_option_fixed" }] } });
-  });
-  it("P-05：ルールの取り消し（承認への引き戻し）→ narrow", () => {
-    expect(check(def((d) => (d.rules = []), before))).toMatchObject({ ok: true, result: { classification: "narrow" } });
-  });
-  it("P-06：mcp_read auto → approve → narrow", () => {
-    expect(check(def((d) => (d.autonomy = { mcp_read: "approve" }), before))).toMatchObject({ ok: true });
-  });
-  it("P-07：ガード max 20 → 50 → widen → 捨てる（15:124）", () => {
-    const r = checkTighteningProposal({ before: withGuards([qty20], before), after: withGuards([guard("items[].quantity", { max: 50 })], before), ctx: CTX });
-    expect(r).toMatchObject({ ok: false, reason: "not_narrow", result: { classification: "widen" } });
-  });
-  it("P-08：ガード追加＋指示の変更 → neutral → 捨てる", () => {
-    expect(check(def((d) => ((d.jobs[0].guards = [qty20]), (d.jobs[0].instructions = "x")), before))).toMatchObject({
-      ok: false,
-      reason: "not_narrow",
-      result: { classification: "neutral" },
-    });
-  });
-  it("P-09：空の提案 → neutral → 捨てる", () => {
-    expect(check(before)).toMatchObject({ ok: false, reason: "not_narrow", result: { classification: "neutral", items: [] } });
-  });
-  it("ルールの追加は narrow でなくても先に adds_rule で捨てる（BR-57）", () => {
-    const after = def((d) => ((d.jobs[0].guards = [qty20]), d.rules.push({ ...R1, id: "r-2", match: { supplier_id: "supplier-02", "items[].sku": ["BEAN"] } })), before);
-    expect(check(after)).toMatchObject({ ok: false, reason: "adds_rule" });
-  });
-  it("スキーマに通らない案（数値と候補の両方・宛先に付けたガード・未知のキー）は schema_invalid", () => {
-    expect(check(withGuards([guard("items[].quantity", { max: 20, in: ["1"] })], before))).toMatchObject({ ok: false, reason: "schema_invalid" });
-    expect(check(withGuards([guard("supplier_id", { in: ["supplier-01"] })], before))).toMatchObject({ ok: false, reason: "schema_invalid" });
-    expect(check({ ...before, shadow: true })).toMatchObject({ ok: false, reason: "schema_invalid" });
-  });
-  it("compose の違反が残る案は exceeds_policy", () => {
-    const badBefore = def((d) => (d.budget.per_day_usd = 2), before);
-    expect(checkTighteningProposal({ before: badBefore, after: withGuards([qty20], badBefore), ctx: CTX })).toMatchObject({ ok: false, reason: "exceeds_policy" });
-  });
-  // すり抜け：候補のルール（単価も変わってよい）で値上がり3倍の発注が allow になった（15:393、G-03）
-  const cand = [{ action: PO, match: { supplier_id: "supplier-01", "items[].sku": ["BEAN"] }, free: ["items[].quantity", "items[].unit_price"], tool_hash: H("a") }];
-  const slipped: SlippedWrite[] = [{ jobId: "reorder", subject: poSubject(order(20, 2100)) }];
-  it("すり抜けた書き込みを案を当てた実効ポリシーで判定し直し、allow のままなら not_blocking（SW §4.4.6 ④）", () => {
-    expect(checkTighteningProposal({ before: BUYER, after: withGuards([qty20]), ctx: CTX, slipped, candidateRules: cand })).toMatchObject({
-      ok: false,
-      reason: "not_blocking",
-      stillAllowed: [0],
-    });
-    expect(checkTighteningProposal({ before: BUYER, after: withGuards([price800]), ctx: CTX, slipped, candidateRules: cand })).toMatchObject({ ok: true });
-  });
-  it("仕事を消す案では、その仕事の書き込みはもう起きない（塞がる）", () => {
-    const twoJobs = def((d) => d.jobs.push({ id: "spare", kind: "once", template: "assistant", instructions: "x" }));
-    const r = checkTighteningProposal({ before: twoJobs, after: BUYER, ctx: CTX, slipped: [{ jobId: "spare", subject: poSubject(order(20, 2100)) }], candidateRules: cand });
-    expect(r.ok).toBe(true);
-  });
-  it("P-10：[適用]（narrow）を反映 → 合格証は切れない（widen の項目なし）。hasNarrow なので走っているタスクは cancelled（policy_narrowed：D-46）", () => {
-    const r = check(withGuards([qty20], before));
-    expect(r.ok && r.result).toMatchObject({ classification: "narrow", widenItems: [], hasNarrow: true });
-  });
-  it("P-11：[以後も許可] でルール追加（widen）を反映 → 合格証が切れる → 次の判定は certificate_missing", () => {
-    const r = cls(BUYER, BUYER_R);
-    expect(r).toMatchObject({ classification: "widen", widenItems: [{ kind: "rule_added" }] });
-    const policy = compose({ ceilings: DEFAULT_CEILINGS, workspacePolicy: WS, agent: BUYER_R }, "reorder").effective;
-    const revoked = decide(policy, poSubject(order(20)), COUNTERS, { ...FLAGS, certificateValid: false }, EMPTY_TAINT);
-    expect(revoked).toMatchObject({ decision: "approve", reasonCode: "certificate_missing", matchedRule: "rules.items[0]" });
-    expect(decide(policy, poSubject(order(20)), COUNTERS, FLAGS, EMPTY_TAINT)).toMatchObject({ decision: "allow", reasonCode: "rule_matched" });
-  });
-  it("P-12：P-01 を適用したあとの再試験で、20個の発注はガードを通り（ちょうど）、21個は guard_exceeded", () => {
-    const policy = compose({ ceilings: DEFAULT_CEILINGS, workspacePolicy: WS, agent: withGuards([qty20], before) }, "reorder").effective;
-    expect(decide(policy, poSubject(order(20)), COUNTERS, FLAGS, EMPTY_TAINT)).toMatchObject({ decision: "allow", reasonCode: "rule_matched" });
-    expect(decide(policy, poSubject(order(21)), COUNTERS, FLAGS, EMPTY_TAINT)).toMatchObject({
-      decision: "approve",
-      reasonCode: "guard_exceeded",
-      matchedRule: "guards[0]",
-      detail: { kind: "guard", argPath: "items[0].quantity", value: 21 },
-    });
   });
 });
 
@@ -800,13 +710,13 @@ for (const supplier_id of ["s1", "s2"]) {
 }
 const PCTX: ClassifyContext = { ...CTX, tools: PTOOLS };
 const allowedCache = new Map<string, boolean[]>();
-/** 手順4〜11（recheckIntent。合格証は有効）で allow になる呼び出し。同じ実効ポリシーは使い回す */
+/** 手順4〜11（recheckIntent）で allow になる呼び出し。同じ実効ポリシーは使い回す */
 const allowedSet = (e: EffectivePolicy, kind: Subject["kind"]): boolean[] => {
   const key = `${kind}:${effectivePolicyHash(e)}`;
   const hit = allowedCache.get(key);
   if (hit !== undefined) return hit;
   const out = SUBJECT_ARGS.map(
-    (args) => recheckIntent(e, { ...poSubject(args, kind), tool: T_PO_RUSH }, { unknownOutcomeKeys: [], certificateValid: true }).decision === "allow",
+    (args) => recheckIntent(e, { ...poSubject(args, kind), tool: T_PO_RUSH }, { unknownOutcomeKeys: [] }).decision === "allow",
   );
   allowedCache.set(key, out);
   return out;
@@ -991,65 +901,3 @@ describe("SG-09：ルールの出どころの記録は照合・ガード・class
   });
 });
 
-describe("SG-09：ルールの記録は作るとき以外は変えられない（ruleRecordChanges・checkTighteningProposal）", () => {
-  const PROV = { source_intent_id: "11111111-1111-4111-8111-111111111111", created_while_tainted: true };
-  const before = def((d) => (d.rules = [{ ...R1, ...PROV }]));
-  const qty20 = guard("items[].quantity", { max: 20 });
-  /** 締める変更（ガードの追加）に、ルール r-1 への手を混ぜた案 */
-  const tightenAnd = (f: (r: any) => void) =>
-    def((d) => {
-      d.jobs[0].guards = [qty20];
-      f(d.rules[0]);
-    }, before);
-  const check = (after: unknown) => checkTighteningProposal({ before, after, ctx: CTX });
-
-  it("記録を消す・偽る差分を混ぜると changes_rule_record で拒否（classify は narrow のまま）", () => {
-    const r = check(
-      tightenAnd((x) => {
-        x.created_while_tainted = false;
-        delete x.source_intent_id;
-      }),
-    );
-    expect(r).toMatchObject({
-      ok: false,
-      reason: "changes_rule_record",
-      result: { classification: "narrow" },
-      changes: [
-        { ruleId: "r-1", field: "created_while_tainted" },
-        { ruleId: "r-1", field: "source_intent_id" },
-      ],
-    });
-  });
-  it("added_by・added_at・labels の書き換え、記録の項目を新しく足すのも拒否", () => {
-    expect(check(tightenAnd((x) => (x.added_by = "u-2")))).toMatchObject({ ok: false, reason: "changes_rule_record", changes: [{ ruleId: "r-1", field: "added_by" }] });
-    expect(check(tightenAnd((x) => (x.added_at = "2020-01-01T00:00:00Z")))).toMatchObject({ ok: false, reason: "changes_rule_record" });
-    expect(check(tightenAnd((x) => (x.labels = { supplier_id: "別の店" })))).toMatchObject({ ok: false, reason: "changes_rule_record", changes: [{ field: "labels" }] });
-    expect(check(tightenAnd((x) => delete x.labels))).toMatchObject({ ok: false, reason: "changes_rule_record", changes: [{ field: "labels" }] });
-    // 記録より前のルールに記録を後から付ける（偽る）のも書き換え
-    const legacyBefore = BUYER_R;
-    const forged = def((d) => {
-      d.jobs[0].guards = [qty20];
-      d.rules[0].created_while_tainted = false;
-    }, legacyBefore);
-    expect(checkTighteningProposal({ before: legacyBefore, after: forged, ctx: CTX })).toMatchObject({ ok: false, reason: "changes_rule_record" });
-  });
-  it("記録だけを変える案（classify では neutral）も changes_rule_record", () => {
-    expect(check(def((d) => (d.rules[0].created_while_tainted = false), before))).toMatchObject({ ok: false, reason: "changes_rule_record", result: { classification: "neutral" } });
-  });
-  it("ルールを丸ごと取り消す・判定に効く項目を締める・記録に触れない締める変更は今までどおり通る", () => {
-    expect(check(def((d) => (d.rules = []), before))).toMatchObject({ ok: true, result: { classification: "narrow" } });
-    expect(check(tightenAnd(() => {}))).toMatchObject({ ok: true });
-    const fixQty = tightenAnd((x) => {
-      x.free = ["items[].unit_price"];
-      x.match["items[].quantity"] = [20];
-    });
-    expect(check(fixQty)).toMatchObject({ ok: true });
-  });
-  it("ruleRecordChanges：同じ定義・正規化の違い（空白・並び）だけなら空。新しいルールは対象外", () => {
-    expect(ruleRecordChanges(before, structuredClone(before))).toEqual([]);
-    expect(ruleRecordChanges(BUYER, before)).toEqual([]);
-    expect(ruleRecordChanges(before, BUYER)).toEqual([]);
-    const reordered = def((d) => (d.rules[0] = Object.fromEntries(Object.entries(d.rules[0]).reverse())), before);
-    expect(ruleRecordChanges(before, reordered)).toEqual([]);
-  });
-});

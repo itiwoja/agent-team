@@ -272,7 +272,7 @@ const COUNTERS: Counters = {
   intentsCount: 0,
   unknownOutcomeKeys: ["b".repeat(64), "a".repeat(64), "c".repeat(64)],
 };
-const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running" };
 const TAINT: TaintState = { tainted: false, sources: [] };
 
 describe("computeInputsHash（KD §3.3-3）", () => {
@@ -350,15 +350,14 @@ describe("computeInputsHash（KD §3.3-3）", () => {
       computeInputsHash(POLICY, { ...SUBJECT, args: b }, COUNTERS, FLAGS, TAINT),
     );
   });
-  it("X1・X2：汚染・origin・合格証は入る", () => {
+  it("X1・X2：汚染・origin は入る", () => {
     expect(computeInputsHash(POLICY, SUBJECT, COUNTERS, FLAGS, { tainted: true, sources: [] })).not.toBe(h0);
     expect(computeInputsHash(POLICY, { ...SUBJECT, origin: "deliver" }, COUNTERS, FLAGS, TAINT)).not.toBe(h0);
-    expect(computeInputsHash(POLICY, SUBJECT, COUNTERS, { ...FLAGS, certificateValid: false }, TAINT)).not.toBe(h0);
   });
   it("recheckIntent の inputsHash は decide のものと区別でき、unknownOutcomeKeys の順序によらない", () => {
-    const r = computeRecheckInputsHash(POLICY, SUBJECT, { unknownOutcomeKeys: ["b".repeat(64), "a".repeat(64)], certificateValid: true });
+    const r = computeRecheckInputsHash(POLICY, SUBJECT, { unknownOutcomeKeys: ["b".repeat(64), "a".repeat(64)] });
     expect(r).toMatch(HEX64);
     expect(r).not.toBe(h0);
-    expect(computeRecheckInputsHash(POLICY, SUBJECT, { unknownOutcomeKeys: ["a".repeat(64), "b".repeat(64)], certificateValid: true })).toBe(r);
+    expect(computeRecheckInputsHash(POLICY, SUBJECT, { unknownOutcomeKeys: ["a".repeat(64), "b".repeat(64)] })).toBe(r);
   });
 });

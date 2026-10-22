@@ -31,7 +31,7 @@ import type {
   ToolInfo,
 } from "./types.ts";
 
-// ---- フィクスチャ（MT §2.7 の形。sim-world の仕入れ係の世界：MT §2.10） ----
+// ---- フィクスチャ（MT §2.7 の形。仕入れ係の例） ----
 const AT = "2026-10-03T09:00:00.000Z";
 const NOW = "2026-10-03T09:30:00.000Z";
 const MAIL: DirectTaintSource = { kind: "mcp_read", connectorId: "c-mail", connectorSlug: "mail", connectorName: "メール", tool: "list_inbox", at: AT };
@@ -426,7 +426,7 @@ describe("BR-39・D-58：汚染は decide() の判定を変えない（RU-09・K
     intentsCount: 0,
     unknownOutcomeKeys: [],
   };
-  const flags: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+  const flags: Flags = { killSwitchEngaged: false, taskStatus: "running" };
   const subject = (args: JsonObject): Subject => ({ kind: "tool_call", actionType: "mcp_call", action: PO, args, paths: [], tool, origin: "agent" });
 
   it("どの汚染の状態でも、宛先・数量によらず decision・reasonCode・matchedRule は汚染なしと同じ", () => {

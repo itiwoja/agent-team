@@ -190,8 +190,6 @@ export interface ConfirmPresentation {
   secondLines: string[];
   /** 汚染の1行（宛先の下）。開いた行でも出す */
   taintLine: string | null;
-  /** certificate_missing のとき開いた中に出す文（BR-70 の4つに入らないので行は閉じたまま） */
-  certificateNote: string | null;
 }
 
 /** 開いた行を先に寄せるのは、送る前の確認の開いた行がこの数以上のときだけ（ask-and-check.md:136） */
@@ -227,9 +225,6 @@ export function sortCheckItems<T extends { kind: "confirm" | "question" | "repor
   });
 }
 
-/** certificate_missing の注記（UI §4.6.3-9 の提案の文） */
-export const CERTIFICATE_MISSING_NOTE = "安全チェックがまだなので確認に回しています";
-
 /**
  * 送る前の確認の出し方（BR-70・D-59、UI §4.6.3、IA §3.11）。操作（○ と5秒の取り消し）は変えず、押す前に目に入るものだけ変える。
  * 複数のきっかけに当たれば全部をこの順で出す：ガード → 結果の分からない書き込み → widen → 初めての宛先
@@ -264,6 +259,5 @@ export function buildConfirmPresentation(i: ConfirmPresentationInput): ConfirmPr
     reasonLines,
     secondLines,
     taintLine: i.taint !== null && isTainted(i.taint) ? taintReasonLine(i.taint) : null,
-    certificateNote: i.reasonCode === "certificate_missing" ? CERTIFICATE_MISSING_NOTE : null,
   };
 }

@@ -4,7 +4,7 @@ import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import { argPathsByRole, argRoleAt, effectiveArgRoles, normalizeForMatch } from "./args.ts";
 import { canonicalJson, hashCanonical } from "./canonical.ts";
-import { checkTighteningProposal, classify } from "./classify.ts";
+import { classify } from "./classify.ts";
 import type { ClassifyContext } from "./classify.ts";
 import { compose } from "./compose.ts";
 import { decide, recheckIntent } from "./decide.ts";
@@ -32,6 +32,9 @@ import type {
   ToolHash,
   ToolInfo,
 } from "./types.ts";
+
+/** 試験の例のコネクタ（ワークスペースで有効にするもの） */
+const EXAMPLE_CONNECTORS = ["bank", "mail", "store", "supplier"];
 
 // ---- フィクスチャ ----
 
@@ -65,7 +68,7 @@ const C0: Counters = {
   intentsCount: 0,
   unknownOutcomeKeys: [],
 };
-const F0: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+const F0: Flags = { killSwitchEngaged: false, taskStatus: "running" };
 const X0: TaintState = { tainted: false, sources: [] };
 const mailTool = (argRoles: Record<string, unknown>, over: Partial<ToolInfo> = {}): ToolInfo => ({
   classification: "write",
@@ -172,7 +175,7 @@ describe("ルールの tool_hash（MT §3.6-4・RU-04）と手順4-4 のツー�
     const p = policyOf({ rules: [R_OWNER], tools: "finish,mcp_call" });
     const r = decide(p, mailCall(tool, { to: "owner@example.com", body: "x" }), C0, F0, X0);
     expect(brief(r)).toEqual(["deny", "not_granted", "tools"]);
-    expect(brief(recheckIntent(p, mailCall(tool, { to: "owner@example.com", body: "x" }), { unknownOutcomeKeys: [], certificateValid: true }))).toEqual([
+    expect(brief(recheckIntent(p, mailCall(tool, { to: "owner@example.com", body: "x" }), { unknownOutcomeKeys: [] }))).toEqual([
       "deny",
       "not_granted",
       "tools",
@@ -223,7 +226,7 @@ const TOOLS: ConnectorCatalog = {
   supplier: { connected: true, tools: { list_products: read("2"), place_order: T_PO } },
   mail: { connected: true, tools: { list_inbox: read("3"), send: T_MS } },
 };
-const CTX: ClassifyContext = { ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy("guest"), tools: TOOLS };
+const CTX: ClassifyContext = { ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy("guest", EXAMPLE_CONNECTORS), tools: TOOLS };
 const ruleInput = (match: Record<string, Json>, free: string[], id = "r-1") => ({
   id,
   action: PO,
@@ -253,18 +256,18 @@ const poCall = (quantity: number): Subject => ({
   origin: "agent",
 });
 const effectiveOf = (d: AgentDefinitionInput) => compose({ ceilings: CTX.ceilings, workspacePolicy: CTX.workspacePolicy, agent: d }, "reorder").effective;
-const judge = (d: AgentDefinitionInput, s: Subject) => recheckIntent(effectiveOf(d), s, { unknownOutcomeKeys: [], certificateValid: true });
+const judge = (d: AgentDefinitionInput, s: Subject) => recheckIntent(effectiveOf(d), s, { unknownOutcomeKeys: [] });
 
 describe("classify：free と match の両方にあるキー（無効なルール：match_bad_key）を外して有効にする変更は widen（KC §3.8 ルールの細目）", () => {
   // 穴：重なったキーは前後とも FREE と読むので、重なりを外す変更が引数の状態の比較に出ず、項目なしの neutral になった。
-  // 何も許さなかったルールが数量を自由にして有効になるのに、確認カードも合格証の失効（BR-81）もなかった
+  // 何も許さなかったルールが数量を自由にして有効になるのに、確認カードが出なかった
   const overlapping = buyer({ rules: [ruleInput({ supplier_id: "supplier-01", "items[].sku": ["BEAN"], "items[].quantity": [20] }, ["items[].quantity", "items[].unit_price"])] });
   const fixedUp = buyer({ rules: [ruleInput({ supplier_id: "supplier-01", "items[].sku": ["BEAN"] }, ["items[].quantity", "items[].unit_price"])] });
   it("前提：重なったルールは無効で何も許さず、重なりを外すと数量 200 が allow になる（実際に広がる）", () => {
     expect(brief(judge(overlapping, poCall(200)))).toEqual(APPROVAL);
     expect(brief(judge(fixedUp, poCall(200)))).toEqual(["allow", "rule_matched", "rules.items[0]"]);
   });
-  it("K-24 系：重なりを外す変更 → widen（rule_changed）。確認カードと合格証の失効の対象になる", () => {
+  it("K-24 系：重なりを外す変更 → widen（rule_changed）。確認カードの対象になる", () => {
     const r = classify({ before: overlapping, after: fixedUp, ctx: CTX });
     expect(r.classification).toBe("widen");
     expect(r.widenItems.map((i) => [i.kind, i.path])).toEqual([["rule_changed", "rules[r-1]"]]);
@@ -277,11 +280,6 @@ describe("classify：free と match の両方にあるキー（無効なルー�
     const overlapping2 = buyer({ rules: [ruleInput({ supplier_id: "supplier-01", "items[].sku": ["BEAN"], "items[].quantity": [5] }, ["items[].quantity", "items[].unit_price"])] });
     expect(classify({ before: overlapping, after: overlapping2, ctx: CTX }).widenItems).toEqual([]);
     expect(classify({ before: fixedUp, after: overlapping, ctx: CTX }).widenItems).toEqual([]);
-  });
-  it("FR-045：重なりを外す案は締める提案として残らない（narrow でない）", () => {
-    const r = checkTighteningProposal({ before: overlapping, after: fixedUp, ctx: CTX });
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toBe("not_narrow");
   });
 });
 
@@ -493,7 +491,6 @@ const arbCaseX = fc
     guardPick: mostlyNone<Guard[]>([], fc.subarray(GUARD_POOL_X, { minLength: 1, maxLength: 3 })),
     unknownPick: mostlyNone<Array<"base" | "call" | "other">>([], fc.subarray(["base", "call", "other"] as const, { minLength: 1 })),
     kind: fc.constantFrom<Subject["kind"]>("tool_call", "tool_call", "intent"),
-    cert: mostlyNone(true, fc.constant(false)),
     rulesEnabled: mostlyNone(true, fc.constant(false)),
   })
   .map((c) => {
@@ -519,11 +516,11 @@ const arbCaseX = fc
     };
     const subject: Subject = { kind: c.kind, actionType: "mcp_call", action: SVC, args: args as JsonObject, paths: [], tool, origin: c.kind === "intent" ? "deliver" : "agent" };
     const counters: Counters = { ...C0, unknownOutcomeKeys: c.unknownPick.map((k) => keys[k]) };
-    return { policy, subject, counters, flags: { ...F0, certificateValid: c.cert }, rawGuards: c.guardPick, rule };
+    return { policy, subject, counters, flags: F0, rawGuards: c.guardPick, rule };
   });
 
-describe("性質：mcp_write の allow を判定と独立に書いた照合で確かめ直す（KD §6.5 X6、BR-39・BR-56・BR-61・BR-68・BR-69・BR-81、M-09〜M-12）", () => {
-  it("X6（独立の照合）：allow なら、合格証・rules.enabled・ルールが宛先と free でない option を完全一致で固定・余計な引数なし・ガードの範囲内・宛先が結果不明でない", () => {
+describe("性質：mcp_write の allow を判定と独立に書いた照合で確かめ直す（KD §6.5 X6、BR-39・BR-56・BR-61・BR-68・BR-69、M-09〜M-12）", () => {
+  it("X6（独立の照合）：allow なら、rules.enabled・ルールが宛先と free でない option を完全一致で固定・余計な引数なし・ガードの範囲内・宛先が結果不明でない", () => {
     let allowed = 0;
     fc.assert(
       fc.property(arbCaseX, (c) => {
@@ -532,7 +529,6 @@ describe("性質：mcp_write の allow を判定と独立に書いた照合で�
         allowed++;
         const args = c.subject.args as Obj;
         const tool = c.subject.tool!;
-        expect(c.flags.certificateValid).toBe(true);
         expect(c.policy.rules.enabled).toBe(true);
         expect(c.policy.rules.items.some((rule) => specRuleAllows(rule, SVC, args, tool)), JSON.stringify({ roles: tool.argRoles, args, rule: c.rule })).toBe(true);
         expect(specGuardsOk(c.rawGuards, SVC, args)).toBe(true);
@@ -549,7 +545,6 @@ describe("性質：mcp_write の allow を判定と独立に書いた照合で�
         const args = c.subject.args as Obj;
         const tool = c.subject.tool!;
         const ok =
-          c.flags.certificateValid &&
           c.policy.rules.enabled &&
           c.policy.rules.items.some((rule) => specRuleAllows(rule, SVC, args, tool)) &&
           specGuardsOk(c.rawGuards, SVC, args) &&

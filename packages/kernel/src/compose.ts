@@ -39,7 +39,7 @@ export interface ComposeInput {
   workspacePolicy: WorkspacePolicy;
   /** リポジトリのポリシーはフェーズ1（開発テンプレート）。0-H で値が来たら例外（KC §6.3 C-51） */
   repoPolicy?: undefined;
-  /** 適用済みでも変更案（未適用）でもよい（リハーサルは変更案を試す） */
+  /** 適用済みでも変更案（未適用）でもよい */
   agent: AgentDefinitionInput;
   /** 既定は TEMPLATES */
   templates?: Readonly<Record<TemplateName, TemplateSpec>>;
@@ -379,7 +379,7 @@ function projectEffective(p: EffectivePolicy) {
 
 /**
  * policyHash（KC §3.4、governance.md:97）：実効ポリシーの正規形 JSON（RFC 8785 相当）の SHA-256。小文字16進64桁で接頭辞なし（M-07）。
- * intentHash の effectivePolicyHash・action_intents.policy_hash・合格証の policy_hash・スナップショットに使う。
+ * intentHash の effectivePolicyHash・action_intents.policy_hash・スナップショットに使う。
  * 集合の配列は compose が昇順に並べてあるので、入力の順が違っても同じ値になる。NaN などは例外
  */
 export function effectivePolicyHash(effective: EffectivePolicy): Hex64 {
@@ -437,39 +437,4 @@ export function composeAll(input: ComposeInput): ComposeAllResult {
   const b = boundaryOf(input.ceilings, input.workspacePolicy, agent);
   const jobs: Record<string, ComposeResult> = Object.fromEntries(agent.jobs.map((job) => [job.id, resultFor(b, job, input, templates)]));
   return { boundary: b.boundary, jobs, violations: b.violations, clamped: b.clamped };
-}
-
-// ---- 候補のルールで試すときの実効ポリシー（G-03） ----
-
-/** リハーサルの「押そうとしているルール」（SW:503-507 の形＋走行の開始時の今の tool_hash） */
-export interface CandidateRule {
-  action: string;
-  match: Readonly<Record<ArgPath, Json>>;
-  free?: readonly ArgPath[];
-  tool_hash: ToolHash;
-}
-
-/**
- * 候補のルールを実効ポリシーの rules.items に足し、policyHash を計算し直す（G-03）。
- * id は入力の順に 'cand-1'・'cand-2'…。項目は compose と同じく id の昇順。候補は本番の定義に入れない（BR-57）。
- * 走行の開始時に仕事ごとに呼び、rehearsal_runs.effective_policies に保存して、リハーサルの判定と intentHash に使う
- */
-export function withCandidateRules(
-  effective: EffectivePolicy,
-  candidates: readonly CandidateRule[],
-): { effective: EffectivePolicy; effectivePolicyHash: Hex64 } {
-  const added = candidates.map(
-    (c, i): EffectiveRule => ({
-      id: `cand-${i + 1}`,
-      action: c.action,
-      match: Object.fromEntries(Object.entries(c.match).map(([k, v]) => [k, normalizeForMatch(v)])),
-      free: uniqueSorted(c.free ?? []),
-      tool_hash: c.tool_hash,
-    }),
-  );
-  const ids = new Set(effective.rules.items.map((r) => r.id));
-  for (const r of added) if (ids.has(r.id)) throw new TypeError(`withCandidateRules: ルールの id ${r.id} が既にある`);
-  const items = [...effective.rules.items, ...added].sort((a, b) => compareText(a.id, b.id));
-  const next: EffectivePolicy = { ...effective, rules: { enabled: effective.rules.enabled, items } };
-  return { effective: next, effectivePolicyHash: effectivePolicyHash(next) };
 }

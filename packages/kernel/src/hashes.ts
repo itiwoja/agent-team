@@ -70,7 +70,7 @@ export function repeatKeyOf(subject: Pick<Subject, "actionType" | "action" | "ar
   return hashCanonical({ action: subject.action ?? subject.actionType ?? null, args: subject.args });
 }
 
-// ここから inputsHash（KD §3.3-3）：型にあるキーだけを取り出す（shadow などを誤って渡しても値が変わらない）
+// ここから inputsHash（KD §3.3-3）：型にあるキーだけを取り出す（余計なキーを誤って渡しても値が変わらない）
 
 function projectPolicy(p: EffectivePolicy) {
   return {
@@ -212,7 +212,7 @@ export function computeInputsHash(
       intentsCount: counters.intentsCount,
       unknownOutcomeKeys: sortedKeys(counters.unknownOutcomeKeys),
     },
-    flags: { killSwitchEngaged: flags.killSwitchEngaged, taskStatus: flags.taskStatus, certificateValid: flags.certificateValid },
+    flags: { killSwitchEngaged: flags.killSwitchEngaged, taskStatus: flags.taskStatus },
     taint: projectTaint(taint),
   });
 }
@@ -221,11 +221,11 @@ export function computeInputsHash(
 export function computeRecheckInputsHash(
   policy: EffectivePolicy,
   subject: Subject,
-  ctx: { unknownOutcomeKeys: readonly Hex64[]; certificateValid: boolean },
+  ctx: { unknownOutcomeKeys: readonly Hex64[] },
 ): Hex64 {
   return hashCanonical({
     policy: projectPolicy(policy),
     subject: projectSubject(subject),
-    recheck: { unknownOutcomeKeys: sortedKeys(ctx.unknownOutcomeKeys), certificateValid: ctx.certificateValid },
+    recheck: { unknownOutcomeKeys: sortedKeys(ctx.unknownOutcomeKeys) },
   });
 }

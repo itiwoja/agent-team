@@ -11,7 +11,6 @@ import {
   DEFAULT_CEILINGS,
   GENERAL_TEMPLATE_NAMES,
   INITIAL_AGENT_BOUNDARY,
-  SIM_SHOP_CONNECTOR_SLUGS,
   TEMPLATES,
   TEMPLATE_NAMES,
   clampAutonomyToCeiling,
@@ -218,15 +217,15 @@ describe("ワークスペースのポリシーの既定値（KC §2.3・M-59・B
       budget: { per_task_usd: 0.5, per_day_usd: 4, max_steps: 40, max_minutes: 15 },
       breakers: { same_action_repeat: 5, denied_attempts_max: 3, step_cost_usd_max: 0.5 },
       web: { deny_domains: ["*.internal", "localhost"], max_fetches_per_task: 30 },
-      connectors: { enabled: ["bank", "mail", "store", "supplier"] },
+      connectors: { enabled: [] },
       rules: { enabled: true, max_per_agent: 20 },
       approvers: [],
       max_intents_per_task: 5,
     });
     expect(DEFAULT_BREAKERS).toEqual({ same_action_repeat: 5, denied_attempts_max: 3, step_cost_usd_max: 0.5 });
   });
-  it("有効なコネクタは sim-world の仕入れ係の世界だけ（BR-64・BR-66）。渡せば差し替え（trim・昇順・重複なし）", () => {
-    expect(SIM_SHOP_CONNECTOR_SLUGS).toEqual(["bank", "mail", "store", "supplier"]);
+  it("有効なコネクタの既定は空。渡せば差し替え（trim・昇順・重複なし）", () => {
+    expect(defaultWorkspacePolicy("owner").connectors.enabled).toEqual([]);
     expect(defaultWorkspacePolicy("guest", [" news ", "mail", "mail"]).connectors.enabled).toEqual(["mail", "news"]);
   });
   it("日の区切りは Asia/Tokyo（M-59）", () => {

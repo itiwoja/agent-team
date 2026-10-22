@@ -1,6 +1,6 @@
 // decide()（FR-004。KD §3.2 の手順1〜11 を M-01・M-14・M-18・M-19 で直したもの）と、実行前の再判定 recheckIntent()（M-20）
 // 純粋関数：I/O・Date.now・Math.random を使わず、入力を変えない。保存・カウンタの更新・汚染の記録は呼び出し側（ADR-001）
-// 汚染（taint）は inputsHash にだけ入り、どの手順の条件にも出てこない（BR-39・D-58）。shadow は入力に取らない（BR-67・D-62）
+// 汚染（taint）は inputsHash にだけ入り、どの手順の条件にも出てこない（BR-39・D-58）
 // SG-07：run_command を run_tests と run_shell のどちらとして判定するかは、edge が判定の入力を作るときに operationOfCommand(command, 汚染)
 // で決めて subject.commandOperation に入れる。汚染が効くのは「どの操作として判定するか」だけで、ここの手順の条件には出てこない
 // matchedRule のパスは cross-check §4.2。判定できない入力（有限でない数値など）は例外にし、呼び出し側は許可しない（NFR-005）
@@ -81,7 +81,6 @@ function parseMcpAction(action: string | undefined): { connector: string; tool: 
 interface ActionContext {
   intentsCount: number | null;
   unknownOutcomeKeys: readonly Hex64[];
-  certificateValid: boolean;
 }
 
 /** 手順4〜11（decide と recheckIntent で共有） */
@@ -128,7 +127,7 @@ function judgeAction(policy: EffectivePolicy, subject: Subject, ctx: ActionConte
       return out("deny", "not_granted", "mcp.deliverWrite", { kind: "not_granted", what: "deliver_write" });
     }
 
-    // 5 ツールの状態（ルールがあっても、合格証があっても deny）。needs_review が先（gov:66 の順）
+    // 5 ツールの状態（ルールがあっても deny）。needs_review が先（gov:66 の順）
     if (tool.status !== "ok") return out("deny", "tool_needs_review");
     if (tool.connectorEnabled !== true) return out("deny", "connector_disabled");
     mcp = { action: subject.action as string, tool };
@@ -161,13 +160,13 @@ function judgeAction(policy: EffectivePolicy, subject: Subject, ctx: ActionConte
   if (op !== "mcp_write") return out("approve", "approval_required", autonomyPath);
   if (mcp === null) return out("deny", "unknown_action"); // mcp_write は mcp_call からしか導かれない
 
-  // 9 結果の分からない書き込み（BR-68・D-61）。ルール・合格証・ガードの範囲内でも approve
+  // 9 結果の分からない書き込み（BR-68・D-61）。ルール・ガードの範囲内でも approve
   const key = destinationKey(mcp.action, subject.args, mcp.tool.argRoles);
   if (ctx.unknownOutcomeKeys.includes(key)) {
     return out("approve", "unknown_outcome_pending", null, { kind: "unknown_outcome", destinationKey: key });
   }
 
-  // 10 ガード（BR-61）。ルールの有無・合格証の有無にかかわらず効く
+  // 10 ガード（BR-61）。ルールの有無にかかわらず効く
   const violation = firstGuardViolation(policy.guards, mcp.action, subject.args);
   if (violation !== null) {
     const guard = policy.guards[violation.index]!;
@@ -198,8 +197,6 @@ function judgeAction(policy: EffectivePolicy, subject: Subject, ctx: ActionConte
   // 一致したルールの id も結果に付ける（SG-09：判定の記録から「最後に使った時刻」を引けるように）。判定そのものは変えない
   const ruleId = policy.rules.items[search.index]?.id;
   const withRuleId = (r: DecideResult): DecideResult => (typeof ruleId === "string" ? { ...r, matchedRuleId: ruleId } : r);
-  // 合格証は一致したときだけ確かめる（M-18）。一致しない承認は approval_required のまま（ADR-039:31）
-  if (ctx.certificateValid !== true) return withRuleId(out("approve", "certificate_missing", rulePath));
   return withRuleId(out("allow", "rule_matched", rulePath));
 }
 
@@ -219,7 +216,7 @@ export function decide(
   if (TERMINAL_STATUSES.has(flags.taskStatus)) return out("halt", "task_terminated");
 
   // 2 予算。「超える（>）」で止める（ちょうどは通す）。金額はマイクロドルの整数で比べる。
-  //   全体 $10/日・リハーサル1回 $0.5 は decide の外（checkSpend・canStartWork。M-19）
+  //   全体 $10/日は decide の外（checkSpend・canStartWork。M-19）
   const b = policy.budget;
   const adding = Math.max(0, subject.estimatedCostUsd ?? 0); // 負の見積もりで予算をすり抜けさせない
   const est = toMicroUsd(adding);
@@ -292,7 +289,6 @@ export function decide(
     {
       intentsCount: num(counters.intentsCount),
       unknownOutcomeKeys: counters.unknownOutcomeKeys,
-      certificateValid: flags.certificateValid,
     },
     out,
   );
@@ -306,13 +302,13 @@ export function decide(
 export function recheckIntent(
   policy: EffectivePolicy,
   subject: Subject,
-  ctx: { unknownOutcomeKeys: readonly Hex64[]; certificateValid: boolean },
+  ctx: { unknownOutcomeKeys: readonly Hex64[] },
 ): DecideResult {
   const out = makeOut(computeRecheckInputsHash(policy, subject, ctx), operationField(subject));
   return judgeAction(
     policy,
     subject,
-    { intentsCount: null, unknownOutcomeKeys: ctx.unknownOutcomeKeys, certificateValid: ctx.certificateValid },
+    { intentsCount: null, unknownOutcomeKeys: ctx.unknownOutcomeKeys },
     out,
   );
 }
