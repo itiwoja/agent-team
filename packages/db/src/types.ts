@@ -39,7 +39,7 @@ export type EntryOutcome = (typeof ENTRY_OUTCOMES)[number];
 export const ACTOR_TYPES = ["user", "system", "agent"] as const;
 export type ActorType = (typeof ACTOR_TYPES)[number];
 
-export const CONNECTOR_KINDS = ["sim", "mcp_remote"] as const;
+export const CONNECTOR_KINDS = ["mcp_remote"] as const;
 export type ConnectorKind = (typeof CONNECTOR_KINDS)[number];
 export const OAUTH_PROVIDERS = ["google", "github"] as const;
 export type OAuthProvider = (typeof OAUTH_PROVIDERS)[number];
@@ -72,6 +72,7 @@ export const CHANGE_ORIGINS = [
   "move",
   "approval_rule",
   "ask",
+  /** 過去の行だけ（0023 でリハーサルをやめた） */
   "rehearsal_tighten",
   "prune",
 ] as const;
@@ -91,8 +92,6 @@ export const ASK_STATUSES = ["generating", "running", "waiting_input", "done", "
 export type AskStatus = (typeof ASK_STATUSES)[number];
 export const ASK_FAILURE_REASONS = ["formation_invalid", "timeout", "budget_exceeded", "kill_switch", "agent_limit", "planner_error"] as const;
 export type AskFailureReason = (typeof ASK_FAILURE_REASONS)[number];
-export const ASK_RUN_MODES = ["live", "rehearsal"] as const;
-export type AskRunMode = (typeof ASK_RUN_MODES)[number];
 /** M-33：initial を足した */
 export const ASK_RUN_TRIGGERS = ["initial", "manual", "schedule", "resume"] as const;
 export type AskRunTrigger = (typeof ASK_RUN_TRIGGERS)[number];
@@ -103,7 +102,7 @@ export type TeamMessageKind = (typeof TEAM_MESSAGE_KINDS)[number];
 
 export const TASK_KINDS = ["normal", "followup", "revise"] as const;
 export type TaskKind = (typeof TASK_KINDS)[number];
-/** M-32：依頼から動くタスクは 'ask'、リハーサル・試し実行は 'dry_run' */
+/** M-32：依頼から動くタスクは 'ask'、試し実行は 'dry_run' */
 export const TRIGGER_TYPES = ["manual", "schedule", "dry_run", "ask"] as const;
 export type TriggerType = (typeof TRIGGER_TYPES)[number];
 export const TASK_STATUSES = [
@@ -147,9 +146,6 @@ export const REPORT_KINDS = ["normal", "answer"] as const;
 export type ReportKind = (typeof REPORT_KINDS)[number];
 export const TASK_EVENT_TYPES = ["phase_started", "tool_called", "llm_called", "status_changed", "budget_updated", "message", "finished"] as const;
 export type TaskEventType = (typeof TASK_EVENT_TYPES)[number];
-/** M-41。本番のタスクは NULL か live */
-export const EXECUTION_VARIANTS = ["live", "governed", "governed_approve", "shadow"] as const;
-export type ExecutionVariant = (typeof EXECUTION_VARIANTS)[number];
 
 export const INTENT_STATUSES = [
   "proposed",
@@ -177,6 +173,7 @@ export const INTENT_EXPIRE_REASONS = [
   "task_cancelled",
   "kill_switch",
   "task_ended",
+  /** リハーサルの終わり（0023 でリハーサルをやめた。過去の行だけ） */
   "rehearsal_end",
   "policy_changed",
 ] as const;
@@ -192,7 +189,7 @@ export type SubjectKind = (typeof SUBJECT_KINDS)[number];
 /** usage_records.provider。Gemini API は google（llm の gemini）。openai は過去の行の CHECK 用に残す（0021） */
 export const LLM_PROVIDERS = ["google", "anthropic", "deepseek", "openrouter"] as const;
 export type LlmProvider = (typeof LLM_PROVIDERS)[number];
-/** runner・FR の LlmPhase（M-32）＋設定プランナー・リハーサルの生成・解釈・締める提案 */
+/** runner・FR の LlmPhase（M-32）＋設定プランナー。rehearsal_* は過去の行だけ（0023 でリハーサルをやめた） */
 export const USAGE_PHASES = [
   "plan",
   "investigate",
@@ -207,34 +204,6 @@ export const USAGE_PHASES = [
   "rehearsal_tighten",
 ] as const;
 export type UsagePhase = (typeof USAGE_PHASES)[number];
-
-export const FAULT_IDS = ["F-01", "F-02", "F-03", "F-04", "F-05", "F-06", "F-07", "F-08", "F-09", "F-10", "F-11", "F-12", "F-13", "F-14", "F-15", "F-16", "F-17"] as const;
-export type FaultId = (typeof FAULT_IDS)[number];
-export const RUN_TRIGGERS = ["initial", "manual", "retest", "recertify", "user_case", "seed", "model_compare"] as const;
-export type RunTrigger = (typeof RUN_TRIGGERS)[number];
-export const RUN_STATUSES = ["queued", "generating", "running", "done", "failed", "cancelled"] as const;
-export type RunStatus = (typeof RUN_STATUSES)[number];
-export const SCENARIO_STATUSES = ["queued", "running", "judging", "done", "cancelled", "error"] as const;
-export type ScenarioStatus = (typeof SCENARIO_STATUSES)[number];
-export const SCENARIO_ABORT_REASONS = ["budget", "kill_switch", "timeout", "user"] as const;
-export type ScenarioAbortReason = (typeof SCENARIO_ABORT_REASONS)[number];
-export const STOPPED_BY = ["kernel", "agent", "none"] as const;
-export type StoppedBy = (typeof STOPPED_BY)[number];
-export const CASE_SOURCES = ["generated", "user", "incident"] as const;
-export type CaseSource = (typeof CASE_SOURCES)[number];
-/** M-27：user_reject */
-export const INCIDENT_KINDS = ["kernel_approve", "kernel_deny", "user_reject", "kill_switch"] as const;
-export type IncidentKind = (typeof INCIDENT_KINDS)[number];
-/** M-29：regenerated を足した */
-export const CASE_REMOVED_REASONS = ["user", "merged", "regenerated"] as const;
-export type CaseRemovedReason = (typeof CASE_REMOVED_REASONS)[number];
-export const REVOKE_REASONS = ["widen", "tool_hash", "model", "case_added", "superseded"] as const;
-export type RevokeReason = (typeof REVOKE_REASONS)[number];
-export const USER_INPUT_STATUSES = ["interpreting", "matched", "running", "done", "no_match", "cancelled", "failed"] as const;
-export type UserInputStatus = (typeof USER_INPUT_STATUSES)[number];
-/** M-39 */
-export const SIM_WORLDS = ["shop", "brief", "repo"] as const;
-export type SimWorld = (typeof SIM_WORLDS)[number];
 
 // ===== jsonb の中身（形が決まっているもの） =====
 /** workspace_policies.policy（pas:43-65、mcp-and-web.md:125） */
@@ -466,39 +435,6 @@ export interface AgentQuestionRow {
   answered_by: Uuid | null;
   answered_at: Date | null;
   created_at: Date;
-}
-
-/** rehearsal_cases.stopped_writes の1件（IA §2.9。O-08 の入力） */
-export interface StoppedWrite {
-  intentId: Uuid;
-  sourceTaskId: Uuid;
-  jobId: Uuid;
-  action: string;
-  destinationKey: Hex64;
-  optionDigest: Hex64;
-  /** 元の引数（マスク済み） */
-  argumentsSnapshot: JsonObject;
-  stoppedBy: IncidentKind;
-  reasonCode: string;
-  occurredAt: string;
-}
-
-/** rehearsal_runs.candidate_rules の1件（SW §3.6 の CandidateRule。M-50） */
-export interface CandidateRule {
-  action: string;
-  match: Record<string, Json>;
-  free: string[];
-}
-/** rehearsal_runs.tool_hashes・rehearsal_certificates.tool_hashes の1件（M-49。action で並べる） */
-export interface ToolHashEntry {
-  action: string;
-  toolHash: ToolHash;
-}
-/** rehearsal_runs.stage_fingerprints の1件（依頼の走行の開始時の、担当の仕事ごとの指紋。0007） */
-export interface StageFingerprint {
-  jobId: Uuid;
-  policyHash: Hex64;
-  toolHashes: ToolHashEntry[];
 }
 
 // ===== 行の型 =====
@@ -748,9 +684,6 @@ export interface AskRunRow {
   workspace_id: Uuid;
   ask_id: Uuid;
   run_no: number;
-  mode: AskRunMode;
-  rehearsal_run_id: Uuid | null;
-  rehearsal_scenario_id: Uuid | null;
   trigger_type: AskRunTrigger;
   status: AskRunStatus;
   answer_task_id: Uuid | null;
@@ -788,7 +721,6 @@ export interface AgentConfigChangeRow {
   source_message_id: Uuid | null;
   source_task_id: Uuid | null;
   source_ask_id: Uuid | null;
-  rehearsal_run_id: Uuid | null;
   patch: Json[];
   classification: Classification;
   widened_items: Json[] | null;
@@ -834,12 +766,6 @@ export interface TaskRow {
   kind: TaskKind;
   trigger_type: TriggerType;
   is_dry_run: boolean;
-  rehearsal_run_id: Uuid | null;
-  rehearsal_scenario_id: Uuid | null;
-  shadow: boolean;
-  sim_execution_id: Uuid | null;
-  execution_variant: ExecutionVariant | null;
-  sim_snapshot_id: Uuid | null;
   prompt: string | null;
   output_type: "report";
   report: string | null;
@@ -950,7 +876,7 @@ export interface PolicyDecisionRow {
   decision: Decision;
   reason_code: string;
   matched_rule: string | null;
-  /** 一致した「以後も許可」のルールの id（SG-09。rule_matched・certificate_missing だけ。0015 より前の行は NULL） */
+  /** 一致した「以後も許可」のルールの id（SG-09。rule_matched だけ。0015 より前の行は NULL） */
   matched_rule_id: string | null;
   detail: DecisionDetail | null;
   enforced: boolean;
@@ -965,7 +891,6 @@ export interface UsageRecordRow {
   task_id: Uuid | null;
   agent_id: Uuid | null;
   ask_id: Uuid | null;
-  rehearsal_run_id: Uuid | null;
   provider: LlmProvider;
   model: string;
   phase: UsagePhase;
@@ -1005,7 +930,7 @@ export interface WorkspaceEventRow {
 
 export interface CheckMarkRow {
   workspace_id: Uuid;
-  /** '<種類>:<UUID>'（answer / rehearsal / incident_added / task） */
+  /** '<種類>:<UUID>'（answer / task） */
   item_key: string;
   checked_at: Date;
 }
@@ -1019,191 +944,6 @@ export interface IdempotencyKeyRow {
   response_status: number;
   response_body: Json;
   created_at: Date;
-}
-
-export interface RehearsalRunRow {
-  id: Uuid;
-  workspace_id: Uuid;
-  job_id: Uuid | null;
-  ask_id: Uuid | null;
-  trigger: RunTrigger;
-  reason: Exclude<RevokeReason, "superseded"> | null;
-  requested_by: Uuid | null;
-  parent_run_id: Uuid | null;
-  config_change_id: Uuid | null;
-  candidate_rules: CandidateRule[] | null;
-  effective_policies: EffectivePolicies | null;
-  policy_hash: Hex64 | null;
-  tool_hashes: ToolHashEntry[] | null;
-  /** 依頼の走行だけ：担当ごとの開始時の指紋（0007）。仕事の走行と指紋のない行は null */
-  stage_fingerprints: StageFingerprint[] | null;
-  case_set_hash: Hex64 | null;
-  status: RunStatus;
-  seed: number;
-  model_id: string;
-  generator_model_id: string | null;
-  adapt_round: number;
-  comparison_group_id: Uuid | null;
-  /** 集計（形はリハーサルの担当：SW §3.7 の RehearsalCounts など） */
-  summary: JsonObject | null;
-  damage_jpy: Jpy | null;
-  shadow_damage_jpy: Jpy | null;
-  prevented_damage_jpy: Jpy | null;
-  cost_usd: UsdDecimal;
-  budget_usd: UsdDecimal;
-  certificate_id: Uuid | null;
-  is_seed: boolean;
-  error: string | null;
-  created_at: Date;
-  started_at: Date | null;
-  finished_at: Date | null;
-}
-
-export interface RehearsalCaseRow {
-  id: Uuid;
-  workspace_id: Uuid;
-  job_id: Uuid | null;
-  ask_id: Uuid | null;
-  source: CaseSource;
-  fault_ids: FaultId[];
-  /** SW の Scenario（M-45） */
-  scenario: JsonObject;
-  seed: number;
-  sim_snapshot_id: Uuid | null;
-  user_text: string | null;
-  source_task_id: Uuid | null;
-  reason_code: string | null;
-  incident_kind: IncidentKind | null;
-  stopped_writes: StoppedWrite[] | null;
-  first_shadow_damage_jpy: Jpy | null;
-  origin_run_id: Uuid | null;
-  created_by: Uuid | null;
-  removed_at: Date | null;
-  removed_by: Uuid | null;
-  removed_reason: CaseRemovedReason | null;
-  created_at: Date;
-}
-
-export interface RehearsalScenarioRow {
-  id: Uuid;
-  workspace_id: Uuid;
-  rehearsal_run_id: Uuid;
-  case_id: Uuid;
-  ordinal: number;
-  fault_ids: FaultId[];
-  scenario: JsonObject;
-  seed: number;
-  status: ScenarioStatus;
-  abort_reason: ScenarioAbortReason | null;
-  verdict: "pass" | "fail" | null;
-  stopped_by: StoppedBy | null;
-  stopped_by_decision: "approve" | "deny" | "halt" | null;
-  stopped_by_reason_code: string | null;
-  stopped_by_rule: string | null;
-  oracle_results: Json | null;
-  branch_results: Json | null;
-  damage_jpy: Jpy | null;
-  shadow_damage_jpy: Jpy | null;
-  approve_branch_damage_jpy: Jpy | null;
-  /** SW の DamageBreakdown */
-  damage_breakdown: JsonObject | null;
-  shadow_damage_breakdown: JsonObject | null;
-  approve_branch_damage_breakdown: JsonObject | null;
-  /** 生成列 max(0, 影 − 本番) */
-  prevented_damage_jpy: Jpy | null;
-  leak_count: number | null;
-  shadow_leak_count: number | null;
-  interpretation: string | null;
-  cost_usd: UsdDecimal;
-  governed_execution_id: Uuid | null;
-  approve_execution_id: Uuid | null;
-  shadow_execution_id: Uuid | null;
-  error: string | null;
-  created_at: Date;
-  started_at: Date | null;
-  finished_at: Date | null;
-}
-
-export interface RehearsalCertificateRow {
-  id: Uuid;
-  workspace_id: Uuid;
-  job_id: Uuid;
-  ask_id: Uuid | null;
-  rehearsal_run_id: Uuid;
-  policy_hash: Hex64;
-  tool_hashes: ToolHashEntry[];
-  model_id: string;
-  case_set_hash: Hex64;
-  case_count: number;
-  summary: JsonObject;
-  cost_usd: UsdDecimal;
-  certificate_hash: Hex64;
-  /** audit_logs (workspace_id, seq) を指す */
-  audit_seq: number;
-  issued_at: Date;
-  revoked_at: Date | null;
-  revoke_reason: RevokeReason | null;
-}
-
-export interface RehearsalUserInputRow {
-  id: Uuid;
-  workspace_id: Uuid;
-  job_id: Uuid | null;
-  ask_id: Uuid | null;
-  text: string;
-  status: UserInputStatus;
-  interpretation: JsonObject | null;
-  nearest_fault_id: FaultId | null;
-  case_id: Uuid | null;
-  rehearsal_run_id: Uuid | null;
-  scenario_id: Uuid | null;
-  created_by: Uuid;
-  created_at: Date;
-}
-
-// ---- sim スキーマ（M-40。store.ts の記録と同じ項目） ----
-export interface SimExecutionRow {
-  id: Uuid;
-  workspace_id: Uuid;
-  world: SimWorld;
-  rehearsal_run_id: Uuid | null;
-  parent_execution_id: Uuid | null;
-  variant: ExecutionVariant;
-  seed: number;
-  seed_version: string;
-  scenario: JsonObject | null;
-  snapshot_id: Uuid | null;
-  initial_state: JsonObject;
-  state: JsonObject;
-  version: number;
-  created_at: Date;
-  updated_at: Date;
-}
-
-export interface SimEventRow {
-  execution_id: Uuid;
-  seq: number;
-  workspace_id: Uuid;
-  /** sim-core の SimEvent そのもの */
-  event: JsonObject;
-  /** 生成列（event->>'kind'・event->>'intentId'） */
-  kind: string;
-  intent_id: string | null;
-  created_at: Date;
-}
-
-export interface SimSnapshotRow {
-  id: Uuid;
-  workspace_id: Uuid;
-  world: SimWorld;
-  execution_id: Uuid;
-  execution_version: number;
-  seed: number;
-  seed_version: string;
-  state: JsonObject;
-  state_hash: Hex64;
-  source_task_id: Uuid;
-  taken_at: Date;
 }
 
 /** ワークスペースの中の業務の表（workspace_id を持つ public の表。ON DELETE CASCADE の試験・分離の検査に使う） */
@@ -1243,13 +983,5 @@ export const WORKSPACE_TABLES = [
   "workspace_events",
   "check_marks",
   "idempotency_keys",
-  "rehearsal_runs",
-  "rehearsal_cases",
-  "rehearsal_scenarios",
-  "rehearsal_certificates",
-  "rehearsal_user_inputs",
-  "sim.executions",
-  "sim.events",
-  "sim.snapshots",
 ] as const;
 export type WorkspaceTable = (typeof WORKSPACE_TABLES)[number];

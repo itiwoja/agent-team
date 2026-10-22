@@ -9,9 +9,6 @@ import {
   fxAsk,
   fxConnector,
   fxIntent,
-  fxRehearsalCase,
-  fxRehearsalRun,
-  fxSimExecution,
   fxTask,
   fxWorkspace,
   useTestDb,
@@ -66,17 +63,6 @@ describe("別のワークスペースの行を指せない（複合 FK）", () =
       ),
       "approvals_intent_fk",
     );
-  });
-
-  it("A の走行・試験に B の仕事、A の sim の走行に B の走行、A のタスクに B の sim の走行は付けられない", async () => {
-    const { db } = T();
-    const { a, b, agentA, agentB } = await twoWorkspaces(db);
-    await expectFk(fxRehearsalRun(db, a, { jobId: agentB.jobId }), "rehearsal_runs_job_fk");
-    await expectFk(fxRehearsalCase(db, a, { jobId: agentB.jobId }), "rehearsal_cases_job_fk");
-    const runB = await fxRehearsalRun(db, b, { jobId: agentB.jobId });
-    await expectFk(fxSimExecution(db, a, { rehearsalRunId: runB.runId }), "sim_executions_rehearsal_run_fk");
-    const liveB = await fxSimExecution(db, b);
-    await expectFk(fxTask(db, a, agentA, { simExecutionId: liveB.executionId }), "tasks_sim_execution_fk");
   });
 });
 

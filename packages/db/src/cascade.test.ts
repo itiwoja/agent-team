@@ -1,6 +1,5 @@
 // ON DELETE CASCADE の試験（db-schema.md §7.2 の T-30・T-31、15:375「ゲストの掃除はワークスペースの行を1つ消すだけ」）
 import { describe, expect, it } from "vitest";
-import { appendAuditLog } from "./audit.ts";
 import type { Db } from "./client.ts";
 import { insertGoogleCredential, upsertOAuthConnector } from "./repo/credentials.ts";
 import { issueSession } from "./session.ts";
@@ -14,13 +13,7 @@ import {
   fxConnector,
   fxHash,
   fxIntent,
-  fxRehearsalCase,
-  fxRehearsalRun,
-  fxRehearsalScenario,
-  fxSimExecution,
-  fxSimSnapshot,
   fxTask,
-  fxToolHash,
   fxUsage,
   fxWorkspace,
   openRoleDb,
@@ -32,7 +25,7 @@ import { WORKSPACE_TABLES } from "./types.ts";
 const T = useTestDb();
 const NOW = new Date("2026-10-12T09:00:00.000Z");
 
-/** 全部の表（sim を含む）に行を入れたワークスペース */
+/** 全部の表に行を入れたワークスペース */
 export async function fullWorkspace(db: Db, kind: "guest" | "owner"): Promise<FxWorkspace> {
   const ws = await fxWorkspace(db, { kind, audit: true });
   const W = ws.workspaceId;
@@ -66,14 +59,12 @@ export async function fullWorkspace(db: Db, kind: "guest" | "owner"): Promise<Fx
     inbox.agentId,
     askId,
   ]);
-  const live = await fxSimExecution(db, ws);
   const t1 = await fxTask(db, ws, inbox, { askId, askRunId, status: "completed", tainted: true });
   await db.query("UPDATE tasks SET report = '新しいメール3通', report_kind = 'normal', report_sources = $2 WHERE id = $1", [
     t1.taskId,
     [{ kind: "mcp", connector: "mail", tool: "list_inbox" }],
   ]);
-  const snap = await fxSimSnapshot(db, ws, { executionId: live.executionId, sourceTaskId: t1.taskId });
-  const t2 = await fxTask(db, ws, buyer, { askId, askRunId, status: "awaiting_approval", simSnapshotId: snap.snapshotId, tainted: true });
+  const t2 = await fxTask(db, ws, buyer, { askId, askRunId, status: "awaiting_approval", tainted: true });
   await db.query("UPDATE tasks SET input_task_ids = ARRAY[$2]::uuid[] WHERE id = $1", [t2.taskId, t1.taskId]);
   await db.query("UPDATE ask_runs SET answer_task_id = $2, answered_at = $3, answer = $4 WHERE id = $1", [askRunId, t2.taskId, NOW, { text: "回答" }]);
   await db.query("INSERT INTO task_events (workspace_id, task_id, type, payload) VALUES ($1, $2, 'status_changed', '{}')", [W, t2.taskId]);
@@ -123,69 +114,11 @@ export async function fullWorkspace(db: Db, kind: "guest" | "owner"): Promise<Fx
     "INSERT INTO idempotency_keys (workspace_id, key, method, path, request_hash, response_status, response_body) VALUES ($1, gen_random_uuid(), 'POST', '/x', $2, 200, '{}')",
     [W, fxHash("req")],
   );
-  // リハーサル（順番の依頼全体）・試験・状況・リハーサルのタスク・sim の走行と事象・合格証・自分の言葉の悪い日
-  const run = await fxRehearsalRun(db, ws, { askId, status: "done", trigger: "seed" });
-  const gen = await fxRehearsalCase(db, ws, { askId });
-  await fxRehearsalCase(db, ws, { askId, source: "incident", simSnapshotId: snap.snapshotId, sourceTaskId: t2.taskId });
-  await fxRehearsalCase(db, ws, { askId, source: "user" });
-  const sc = await fxRehearsalScenario(db, ws, { runId: run.runId, caseId: gen.caseId });
-  const governed = await fxSimExecution(db, ws, { rehearsalRunId: run.runId, variant: "governed" });
-  const shadow = await fxSimExecution(db, ws, { rehearsalRunId: run.runId, variant: "shadow" });
-  const fork = await db.query<{ id: string }>(
-    `INSERT INTO sim.executions (workspace_id, world, rehearsal_run_id, parent_execution_id, variant, seed, seed_version, initial_state, state)
-     VALUES ($1, 'shop', $2, $3, 'governed_approve', 7, '2026-10-12.1', '{}', '{}') RETURNING id`,
-    [W, run.runId, governed.executionId],
-  );
-  await db.query("UPDATE rehearsal_scenarios SET governed_execution_id = $2, shadow_execution_id = $3, approve_execution_id = $4 WHERE id = $1", [
-    sc.scenarioId,
-    governed.executionId,
-    shadow.executionId,
-    fork.rows[0]?.id,
-  ]);
-  await db.query("INSERT INTO sim.events (execution_id, seq, workspace_id, event) VALUES ($1, 1, $2, $3)", [
-    governed.executionId,
-    W,
-    { seq: 1, at: "2026-10-12T18:00:00+09:00", kind: "tool_call", caller: "sa-gateway" },
-  ]);
-  await fxTask(db, ws, buyer, {
-    status: "completed",
-    rehearsalRunId: run.runId,
-    rehearsalScenarioId: sc.scenarioId,
-    simExecutionId: governed.executionId,
-  });
-  await fxTask(db, ws, buyer, {
-    status: "completed",
-    rehearsalRunId: run.runId,
-    rehearsalScenarioId: sc.scenarioId,
-    simExecutionId: shadow.executionId,
-    shadow: true,
-  });
-  await fxUsage(db, ws, { rehearsalRunId: run.runId });
   await db.query(
-    `INSERT INTO agent_config_changes (workspace_id, agent_id, job_id, origin, rehearsal_run_id, patch, classification, status, snapshot_id, decided_at)
-     VALUES ($1, $2, $3, 'rehearsal_tighten', $4, '[]', 'narrow', 'applied', $5, now())`,
-    [W, buyer.agentId, buyer.jobId, run.runId, buyer.snapshotId],
+    `INSERT INTO agent_config_changes (workspace_id, agent_id, job_id, origin, patch, classification, status, snapshot_id, decided_at)
+     VALUES ($1, $2, $3, 'manual', '[]', 'narrow', 'applied', $4, now())`,
+    [W, buyer.agentId, buyer.jobId, buyer.snapshotId],
   );
-  const cert = await db.transaction(async (tx) => {
-    const log = await appendAuditLog(
-      tx,
-      W,
-      { eventType: "rehearsal.certificate_issued", actorType: "system", actorId: "app", payload: { jobId: buyer.jobId } },
-      NOW,
-    );
-    return tx.query<{ id: string }>(
-      `INSERT INTO rehearsal_certificates (workspace_id, job_id, ask_id, rehearsal_run_id, policy_hash, tool_hashes, model_id, case_set_hash,
-                                           case_count, summary, cost_usd, certificate_hash, audit_seq)
-       VALUES ($1, $2, $3, $4, $5, $6, 'm', $7, 3, '{}', '0.100000', $8, $9) RETURNING id`,
-      [W, buyer.jobId, askId, run.runId, fxHash("p"), [{ action: "mcp.supplier.place_order", toolHash: fxToolHash("t") }], fxHash("cs"), fxHash("cert"), log.seq],
-    );
-  });
-  await db.query("UPDATE rehearsal_runs SET certificate_id = $2 WHERE id = $1", [run.runId, cert.rows[0]?.id]);
-  await db.query("INSERT INTO rehearsal_user_inputs (workspace_id, ask_id, text, status, nearest_fault_id, created_by) VALUES ($1, $2, '店長の名前で', 'no_match', 'F-06', $3)", [
-    W,
-    askId,
-    ws.userId,
-  ]);
   return ws;
 }
 
@@ -198,7 +131,7 @@ async function counts(db: Db, workspaceId: string): Promise<Record<string, numbe
 }
 
 describe("ゲストのワークスペースの削除（T-30・T-31）", () => {
-  it("T-30 全部の表と sim.* に行のあるゲストを、GUC をそのワークスペースにして消すと全部0件、オーナーは残る（ot_retention の権限で）", async () => {
+  it("T-30 全部の表に行のあるゲストを、GUC をそのワークスペースにして消すと全部0件、オーナーは残る（ot_retention の権限で）", async () => {
     const { db, url } = T();
     const owner = await fullWorkspace(db, "owner");
     const guest = await fullWorkspace(db, "guest");

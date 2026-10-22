@@ -1,11 +1,10 @@
 // edge（packages/edge）の業務の問い合わせ（formation-runtime.md §3.10〜3.12、G-01、M-14、SO §3.10・§3.12）
 // 約束は README §1：業務の関数は (q, ctx: WsCtx, …) で、SQL を必ず workspace_id で絞る。書いて整合が要る関数は Tx を受ける。
 // 例外はタスクのトークンからタスクを引く findTaskByTokenHash だけ（WsCtx を作る入口。resolveSession と同じ役目：README §1-2・§1-4）。
-// トランザクションの中で外部（Gemini・gateway・sim-world）を呼ばない（G-14）。ロックの順はワークスペース → タスク → 承認 → Intent（M-21）
+// トランザクションの中で外部（Gemini・gateway）を呼ばない（G-14）。ロックの順はワークスペース → タスク → 承認 → Intent（M-21）
 
 import type { Hex64, JsonObject, TaintState } from "@open-team/kernel";
 import type { Queryable, Tx } from "../client.ts";
-import { execContextSql, type ExecContext } from "../exec-context.ts";
 import type {
   ActionIntentRow,
   AgentJobRow,
@@ -15,14 +14,12 @@ import type {
   AskRow,
   ConnectorRow,
   ConnectorToolRow,
-  EffectivePolicies,
   HaltReason,
   IntentExpireReason,
   IntentStatus,
   LlmProvider,
   MemberRole,
   PolicyDecisionRow,
-  RehearsalCertificateRow,
   ReportKind,
   ReportMeta,
   ReportSource,
@@ -222,12 +219,12 @@ export async function saveTaskReport(
   return res.rowCount > 0;
 }
 
-/** 同じワークスペースで動いている本番のタスクの数（BR-08。リハーサルのタスクは別枠：M-48） */
+/** 同じワークスペースで動いているタスクの数（BR-08） */
 export async function countActiveLiveTasks(q: Queryable, ctx: WsCtx): Promise<number> {
   const r = await one<{ n: number }>(
     q,
     `SELECT count(*)::int AS n FROM tasks
-      WHERE workspace_id = $1 AND status IN ('provisioning', 'running') AND rehearsal_run_id IS NULL`,
+      WHERE workspace_id = $1 AND status IN ('provisioning', 'running')`,
     [ctx.workspaceId],
   );
   return r?.n ?? 0;
@@ -247,16 +244,6 @@ export async function getAgentSnapshotRow(q: Queryable, ctx: WsCtx, snapshotId: 
 
 export async function getAgentJobRow(q: Queryable, ctx: WsCtx, jobId: Uuid): Promise<AgentJobRow | null> {
   return one<AgentJobRow>(q, "SELECT * FROM agent_jobs WHERE id = $2 AND workspace_id = $1", [ctx.workspaceId, jobId]);
-}
-
-/** 走行の実効ポリシー（G-03：候補のルールを足したもの。仕事の slug → { policy, hash }）。走行がない・まだ入っていなければ null */
-export async function getRehearsalRunPolicies(q: Queryable, ctx: WsCtx, runId: Uuid): Promise<EffectivePolicies | null> {
-  const r = await one<{ effective_policies: EffectivePolicies | null }>(
-    q,
-    "SELECT effective_policies FROM rehearsal_runs WHERE id = $2 AND workspace_id = $1",
-    [ctx.workspaceId, runId],
-  );
-  return r?.effective_policies ?? null;
 }
 
 export async function getAskRow(q: Queryable, ctx: WsCtx, askId: Uuid): Promise<AskRow | null> {
@@ -337,7 +324,7 @@ export async function findConnectorTool(q: Queryable, ctx: WsCtx, slug: string, 
   return tool === null ? null : { connector, tool };
 }
 
-/** slug のコネクタとそのツールすべて（付与されたツールの一覧・合格証の tool_hashes の比べ方に使う） */
+/** slug のコネクタとそのツールすべて（付与されたツールの一覧に使う） */
 export async function listConnectorToolsBySlugs(q: Queryable, ctx: WsCtx, slugs: readonly string[]): Promise<ConnectorToolHit[]> {
   if (slugs.length === 0) return [];
   const connectors = await q.query<ConnectorRow>(
@@ -397,21 +384,10 @@ export async function sumAgentDayCostUsd(q: Queryable, ctx: WsCtx, agentId: Uuid
   return r?.usd ?? "0.000000";
 }
 
-/** リハーサルの走行の費用（BR-62 の1回 $0.5） */
-export async function sumRehearsalRunCostUsd(q: Queryable, ctx: WsCtx, runId: Uuid): Promise<UsdDecimal> {
-  const r = await one<{ usd: string }>(
-    q,
-    `SELECT COALESCE(sum(cost_usd), 0)::numeric(16,6)::text AS usd FROM usage_records WHERE workspace_id = $1 AND rehearsal_run_id = $2`,
-    [ctx.workspaceId, runId],
-  );
-  return r?.usd ?? "0.000000";
-}
-
 export interface UsageRecordInput {
   taskId: Uuid | null;
   agentId: Uuid | null;
   askId: Uuid | null;
-  rehearsalRunId: Uuid | null;
   provider: LlmProvider;
   model: string;
   phase: UsagePhase;
@@ -423,18 +399,17 @@ export interface UsageRecordInput {
   promptHash: string;
 }
 
-/** 費用の行（TBL-011。持ち主は task・agent・ask・rehearsal_run のどれか1つ以上） */
+/** 費用の行（TBL-011。持ち主は task・agent・ask のどれか1つ以上） */
 export async function insertUsageRecord(q: Queryable, ctx: WsCtx, u: UsageRecordInput, now: Date): Promise<void> {
   await q.query(
-    `INSERT INTO usage_records (workspace_id, task_id, agent_id, ask_id, rehearsal_run_id, provider, model, phase, input_tokens,
+    `INSERT INTO usage_records (workspace_id, task_id, agent_id, ask_id, provider, model, phase, input_tokens,
                                 output_tokens, estimated_cost_usd, cost_usd, latency_ms, prompt_hash, created_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
     [
       ctx.workspaceId,
       u.taskId,
       u.agentId,
       u.askId,
-      u.rehearsalRunId,
       u.provider,
       u.model,
       u.phase,
@@ -450,7 +425,7 @@ export async function insertUsageRecord(q: Queryable, ctx: WsCtx, u: UsageRecord
 }
 
 // ===================================================================
-// Intent・承認・合格証（G-01 の intentsCount・unknownOutcomeKeys・certificateValid、M-14 の recordMcpIntent）
+// Intent・承認（G-01 の intentsCount・unknownOutcomeKeys、M-14 の recordMcpIntent）
 // ===================================================================
 
 /** そのタスクの Intent の行数（denied を含む全状態：KD §8-6） */
@@ -471,29 +446,16 @@ export async function listTaskIntentStatuses(q: Queryable, ctx: WsCtx, taskId: U
   return r.rows.map((x) => x.status);
 }
 
-/**
- * 同じ仕事の unknown_outcome の destination_key（BR-68）。範囲は本番どうし（rehearsal_run_id IS NULL）か
- * 同じ sim の走行どうし（M-17：execContextOf の文脈）。重複なし・昇順
- */
-export async function listUnknownOutcomeKeys(q: Queryable, ctx: WsCtx, jobId: Uuid, ec: ExecContext): Promise<Hex64[]> {
-  const c = execContextSql(ec, "t", 3);
+/** 同じ仕事の unknown_outcome の destination_key（BR-68）。重複なし・昇順 */
+export async function listUnknownOutcomeKeys(q: Queryable, ctx: WsCtx, jobId: Uuid): Promise<Hex64[]> {
   const r = await q.query<{ destination_key: Hex64 }>(
     `SELECT DISTINCT i.destination_key
-       FROM action_intents i JOIN tasks t ON t.id = i.task_id AND t.workspace_id = i.workspace_id
-      WHERE i.workspace_id = $1 AND i.job_id = $2 AND i.status = 'unknown_outcome' AND ${c.sql}
+       FROM action_intents i
+      WHERE i.workspace_id = $1 AND i.job_id = $2 AND i.status = 'unknown_outcome'
       ORDER BY i.destination_key`,
-    [ctx.workspaceId, jobId, ...c.params],
-  );
-  return r.rows.map((x) => x.destination_key);
-}
-
-/** 仕事の有効な合格証（revoked_at IS NULL。仕事ごとに1つ：DB T-06）。なければ null */
-export async function getActiveCertificate(q: Queryable, ctx: WsCtx, jobId: Uuid): Promise<RehearsalCertificateRow | null> {
-  return one<RehearsalCertificateRow>(
-    q,
-    "SELECT * FROM rehearsal_certificates WHERE workspace_id = $1 AND job_id = $2 AND revoked_at IS NULL",
     [ctx.workspaceId, jobId],
   );
+  return r.rows.map((x) => x.destination_key);
 }
 
 /** その仕事で人が承認したことのある宛先か（BR-70 の「初めての宛先」の反対。MT §3.15） */

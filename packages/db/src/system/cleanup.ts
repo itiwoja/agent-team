@@ -2,7 +2,7 @@
 // 1. 候補：kind = 'guest' かつ（削除予約あり か last_seen_at < now − 7日）。7日ちょうどは消さない。オーナーは条件で除く
 // 2. 終わっていないタスクか executing の Intent が残っていれば、止めて（Kill Switch と同じ停止）削除予約を入れ、今回は消さない。
 //    ただし削除予約から graceMs（既定10分）を過ぎていれば消す（止まらないタスクで掃除が終わらないのを防ぐ）
-// 3. 消すときは1ワークスペース1トランザクション：GUC ot.audit_purge_workspace（M-56）→ ワークスペースを DELETE（全表と sim.* へ
+// 3. 消すときは1ワークスペース1トランザクション：GUC ot.audit_purge_workspace（M-56）→ ワークスペースを DELETE（全表へ
 //    カスケード。監査ログも消える）→ 所属のなくなったゲストの利用者を DELETE
 // 4. 24時間より古い entry_attempts・idempotency_keys・workspace_events を消す
 

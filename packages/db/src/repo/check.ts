@@ -18,8 +18,6 @@ import type {
   ConnectorToolRow,
   EffectivePolicies,
   IntentStatus,
-  RehearsalCaseRow,
-  RehearsalRunRow,
   SkillProposalRow,
   TaskRow,
   Uuid,
@@ -39,7 +37,7 @@ async function maybe<T extends object>(q: Queryable, text: string, params: reado
 export interface ApprovalBundle {
   approval: ApprovalRow;
   intent: ActionIntentRow;
-  task: Pick<TaskRow, "id" | "agent_id" | "agent_snapshot_id" | "job_id" | "ask_id" | "requester_id" | "tainted" | "status" | "is_dry_run" | "rehearsal_run_id" | "shadow">;
+  task: Pick<TaskRow, "id" | "agent_id" | "agent_snapshot_id" | "job_id" | "ask_id" | "requester_id" | "tainted" | "status" | "is_dry_run">;
   agentName: string | null;
   askText: string | null;
   connector: ConnectorRow | null;
@@ -65,7 +63,7 @@ export async function loadApprovalBundles(q: Queryable, ctx: WsCtx, approvals: r
   const taskIds = [...new Set(approvals.map((a) => a.task_id))];
   const tasks = (
     await q.query<ApprovalBundle["task"]>(
-      `SELECT id, agent_id, agent_snapshot_id, job_id, ask_id, requester_id, tainted, status, is_dry_run, rehearsal_run_id, shadow
+      `SELECT id, agent_id, agent_snapshot_id, job_id, ask_id, requester_id, tainted, status, is_dry_run
          FROM tasks WHERE workspace_id = $1 AND id = ANY($2::uuid[])`,
       [ctx.workspaceId, taskIds],
     )
@@ -104,7 +102,7 @@ export async function loadApprovalBundles(q: Queryable, ctx: WsCtx, approvals: r
   return out;
 }
 
-/** 承認の一覧（新しい順）。試し実行・リハーサル・影は承認の行を持たない（DB §4.6）ので入らない */
+/** 承認の一覧（新しい順）。試し実行は承認の行を持たない（DB §4.6）ので入らない */
 export async function listApprovalBundles(q: Queryable, ctx: WsCtx, f: ApprovalFilter = {}): Promise<ApprovalBundle[]> {
   const where: string[] = ["a.workspace_id = $1"];
   const params: unknown[] = [ctx.workspaceId];
@@ -231,12 +229,12 @@ export interface AnswerRunRow {
 const REQUEST_TEXT_SQL = `(SELECT t.prompt FROM tasks t WHERE t.workspace_id = r.workspace_id AND t.ask_run_id = r.id AND t.kind = 'normal' AND t.prompt IS NOT NULL
                             ORDER BY t.created_at, t.id LIMIT 1) AS request_text`;
 
-/** 未チェックの依頼の回答（本番の実行だけ。新しい順） */
+/** 未チェックの依頼の回答（新しい順） */
 export async function listUncheckedAnswers(q: Queryable, ctx: WsCtx, limit: number): Promise<AnswerRunRow[]> {
   const r = await q.query<AskRunRow & { ask_text: string; request_text: string | null }>(
     `SELECT r.*, a.text AS ask_text, ${REQUEST_TEXT_SQL}
        FROM ask_runs r JOIN asks a ON a.workspace_id = r.workspace_id AND a.id = r.ask_id
-      WHERE r.workspace_id = $1 AND r.mode = 'live' AND r.answered_at IS NOT NULL
+      WHERE r.workspace_id = $1 AND r.answered_at IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM check_marks m WHERE m.workspace_id = r.workspace_id AND m.item_key = 'answer:' || r.id::text)
       ORDER BY r.answered_at DESC, r.id DESC LIMIT $2`,
     [ctx.workspaceId, limit],
@@ -248,86 +246,12 @@ export async function getAnswerRun(q: Queryable, ctx: WsCtx, runId: Uuid): Promi
   const r = await maybe<AskRunRow & { ask_text: string; request_text: string | null }>(
     q,
     `SELECT r.*, a.text AS ask_text, ${REQUEST_TEXT_SQL} FROM ask_runs r JOIN asks a ON a.workspace_id = r.workspace_id AND a.id = r.ask_id
-      WHERE r.workspace_id = $1 AND r.id = $2 AND r.mode = 'live' AND r.answered_at IS NOT NULL`,
+      WHERE r.workspace_id = $1 AND r.id = $2 AND r.answered_at IS NOT NULL`,
     [ctx.workspaceId, runId],
   );
   if (r === null) return null;
   const { ask_text, request_text, ...run } = r;
   return { run: run as AskRunRow, askText: ask_text, requestText: request_text };
-}
-
-export interface RehearsalReportRow {
-  run: RehearsalRunRow;
-  /** 仕事の担当名（仕事の走行）か依頼の文（依頼の走行） */
-  subjectName: string | null;
-  agentId: Uuid | null;
-}
-
-const REHEARSAL_DONE = ["done", "failed"];
-
-function rehearsalSelect(extraWhere: string): string {
-  return `SELECT r.*, COALESCE(ag.name, ak.text) AS subject_name, ag.id AS subject_agent_id
-            FROM rehearsal_runs r
-            LEFT JOIN agent_jobs j ON j.workspace_id = r.workspace_id AND j.id = r.job_id
-            LEFT JOIN agents ag ON ag.workspace_id = j.workspace_id AND ag.id = j.agent_id
-            LEFT JOIN asks ak ON ak.workspace_id = r.workspace_id AND ak.id = r.ask_id
-           WHERE r.workspace_id = $1 ${extraWhere}`;
-}
-type RehearsalJoin = RehearsalRunRow & { subject_name: string | null; subject_agent_id: Uuid | null };
-const splitRehearsal = (x: RehearsalJoin): RehearsalReportRow => {
-  const { subject_name, subject_agent_id, ...run } = x;
-  return { run: run as RehearsalRunRow, subjectName: subject_name, agentId: subject_agent_id };
-};
-
-/**
- * 未チェックのリハーサルの結果（終わった走行。仕事を選んだ・生成の元になった走行も、初回の走行だけ数えない親子の整理は呼び出し側）。
- * 事前に走らせた結果（is_seed。ゲストのデモ用のデータ：D-97）は「新しく届いた報告」ではないので出さない（結果は依頼のページ SCR-021 に出る）
- */
-export async function listUncheckedRehearsals(q: Queryable, ctx: WsCtx, limit: number): Promise<RehearsalReportRow[]> {
-  const r = await q.query<RehearsalJoin>(
-    `${rehearsalSelect(`AND r.status = ANY($2::text[]) AND NOT r.is_seed AND NOT EXISTS (SELECT 1 FROM check_marks m WHERE m.workspace_id = r.workspace_id AND m.item_key = 'rehearsal:' || r.id::text)`)}
-      ORDER BY r.finished_at DESC NULLS LAST, r.id DESC LIMIT $3`,
-    [ctx.workspaceId, REHEARSAL_DONE, limit],
-  );
-  return r.rows.map(splitRehearsal);
-}
-
-export async function getRehearsalReportRow(q: Queryable, ctx: WsCtx, runId: Uuid): Promise<RehearsalReportRow | null> {
-  const r = await maybe<RehearsalJoin>(q, `${rehearsalSelect("AND r.id = $2 AND r.status = ANY($3::text[])")}`, [ctx.workspaceId, runId, REHEARSAL_DONE]);
-  return r === null ? null : splitRehearsal(r);
-}
-
-export interface IncidentCaseReportRow {
-  row: RehearsalCaseRow;
-  agentName: string | null;
-  agentId: Uuid | null;
-}
-
-type IncidentJoin = RehearsalCaseRow & { agent_name: string | null; agent_id: Uuid | null };
-const splitIncident = (x: IncidentJoin): IncidentCaseReportRow => {
-  const { agent_name, agent_id, ...row } = x;
-  return { row: row as RehearsalCaseRow, agentName: agent_name, agentId: agent_id };
-};
-const INCIDENT_SELECT = `SELECT c.*, ag.name AS agent_name, ag.id AS agent_id
-   FROM rehearsal_cases c
-   LEFT JOIN agent_jobs j ON j.workspace_id = c.workspace_id AND j.id = c.job_id
-   LEFT JOIN agents ag ON ag.workspace_id = j.workspace_id AND ag.id = j.agent_id
-  WHERE c.workspace_id = $1 AND c.source = 'incident'`;
-
-/** 未チェックの「止まった発注を試験に入れた」（外されていない incident の試験） */
-export async function listUncheckedIncidentCases(q: Queryable, ctx: WsCtx, limit: number): Promise<IncidentCaseReportRow[]> {
-  const r = await q.query<IncidentJoin>(
-    `${INCIDENT_SELECT} AND c.removed_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM check_marks m WHERE m.workspace_id = c.workspace_id AND m.item_key = 'incident_added:' || c.id::text)
-      ORDER BY c.created_at DESC, c.id DESC LIMIT $2`,
-    [ctx.workspaceId, limit],
-  );
-  return r.rows.map(splitIncident);
-}
-
-export async function getIncidentCaseReportRow(q: Queryable, ctx: WsCtx, caseId: Uuid): Promise<IncidentCaseReportRow | null> {
-  const r = await maybe<IncidentJoin>(q, `${INCIDENT_SELECT} AND c.id = $2`, [ctx.workspaceId, caseId]);
-  return r === null ? null : splitIncident(r);
 }
 
 // ---- 育つ（0022）：スキルの案・整理の記録の報告 ----
@@ -408,7 +332,7 @@ const splitTask = (x: TaskJoin): TaskReportRow => {
 };
 const ENDED_TASK_SELECT = `SELECT t.*, ag.name AS agent_name FROM tasks t
    LEFT JOIN agents ag ON ag.workspace_id = t.workspace_id AND ag.id = t.agent_id
-  WHERE t.workspace_id = $1 AND t.ask_run_id IS NULL AND NOT t.is_dry_run AND t.rehearsal_run_id IS NULL AND NOT t.shadow
+  WHERE t.workspace_id = $1 AND t.ask_run_id IS NULL AND NOT t.is_dry_run
     AND t.status IN ('succeeded', 'completed', 'failed')`;
 
 /** 未チェックの、依頼に属さない仕事の終了（依頼の仕事は回答の行が代わりに出る） */
@@ -459,7 +383,7 @@ export async function listUnknownOutcomeIntents(q: Queryable, ctx: WsCtx, limit:
        JOIN tasks t ON t.workspace_id = i.workspace_id AND t.id = i.task_id
        LEFT JOIN agents ag ON ag.workspace_id = t.workspace_id AND ag.id = t.agent_id
       WHERE i.workspace_id = $1 AND i.status = 'unknown_outcome' AND i.resolution IS NULL
-        AND NOT t.is_dry_run AND t.rehearsal_run_id IS NULL AND NOT t.shadow
+        AND NOT t.is_dry_run
       ORDER BY i.updated_at DESC, i.id DESC LIMIT $2`,
     [ctx.workspaceId, limit],
   );
@@ -499,7 +423,7 @@ export async function listRunningTasks(q: Queryable, ctx: WsCtx, limit: number):
               WHERE e.workspace_id = t.workspace_id AND e.task_id = t.id AND e.type = 'tool_called' ORDER BY e.id DESC LIMIT 1) AS last_tool
        FROM tasks t JOIN agents ag ON ag.workspace_id = t.workspace_id AND ag.id = t.agent_id
       WHERE t.workspace_id = $1 AND t.status IN ('queued', 'provisioning', 'running', 'executing')
-        AND NOT t.is_dry_run AND t.rehearsal_run_id IS NULL AND NOT t.shadow
+        AND NOT t.is_dry_run
       ORDER BY t.queued_at DESC, t.id DESC LIMIT $2`,
     [ctx.workspaceId, limit],
   );
@@ -647,7 +571,7 @@ export async function listStalledApprovedIntents(q: Queryable, olderThan: Date, 
        JOIN tasks t ON t.workspace_id = i.workspace_id AND t.id = i.task_id
        JOIN workspaces w ON w.id = i.workspace_id
       WHERE i.status = 'approved' AND i.enforced AND i.updated_at < $1
-        AND NOT t.is_dry_run AND t.rehearsal_run_id IS NULL AND NOT t.shadow
+        AND NOT t.is_dry_run
         AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
       ORDER BY i.updated_at LIMIT $2`,
     [olderThan, limit],
@@ -661,9 +585,9 @@ export async function getCheckMark(q: Queryable, ctx: WsCtx, key: string): Promi
   return r.rows[0]?.checked_at ?? null;
 }
 
-/** 本番のタスクか（試し実行・リハーサル・影は取り消し・承認の対象にしない。リハーサルの実行は別の経路：BR-67①） */
-export function isProductionTask(t: Pick<TaskRow, "is_dry_run" | "rehearsal_run_id" | "shadow">): boolean {
-  return !t.is_dry_run && t.rehearsal_run_id === null && !t.shadow;
+/** 本番のタスクか（試し実行は取り消し・承認の対象にしない） */
+export function isProductionTask(t: Pick<TaskRow, "is_dry_run">): boolean {
+  return !t.is_dry_run;
 }
 
 /**

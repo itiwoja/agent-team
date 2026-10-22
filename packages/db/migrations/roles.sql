@@ -2,10 +2,9 @@
 -- 番号つきのマイグレーションのあとに毎回流す（冪等）。環境変数 OT_DB_SKIP_ROLES=1 で飛ばせる。
 -- ロールは NOLOGIN で作る。ログインはインフラが `ALTER ROLE ot_app LOGIN PASSWORD ...` か、ログイン用の利用者に
 -- `GRANT ot_app TO <利用者>` で付ける。流す利用者にロールを作る権限（CREATEROLE）がなければ作らず、あるロールにだけ GRANT する。
---   ot_app        app。業務の表の読み書き。audit_logs は INSERT・SELECT だけ、workspaces・users の DELETE なし、sim は snapshots の SELECT だけ
+--   ot_app        app。業務の表の読み書き。audit_logs は INSERT・SELECT だけ、workspaces・users の DELETE なし
 --                 connector_credentials は書くだけ（refresh_token_enc は読めない。更新は revoked_at と allow_protected_write だけ）
 --   ot_gateway    gateway。読み取り＋Intent・承認・タスク・ツールの更新、監査ログ・判定の INSERT。DELETE なし
---   ot_sim        sim-world。sim スキーマだけ（sim.events は更新しない）
 --   ot_retention  ゲストの掃除（DB §2・SO §4.6 の ot_maint と同じ役目。名前は 08ddl:111）。workspaces・users などの DELETE
 -- 表の所有者はマイグレーションを流す利用者（本番は ot_migrator）。ON DELETE CASCADE と FK の確認は所有者の権限で走る。
 
@@ -15,7 +14,7 @@ DECLARE
   can_create boolean;
 BEGIN
   SELECT rolsuper OR rolcreaterole INTO can_create FROM pg_roles WHERE rolname = current_user;
-  FOREACH r IN ARRAY ARRAY['ot_app', 'ot_gateway', 'ot_sim', 'ot_retention'] LOOP
+  FOREACH r IN ARRAY ARRAY['ot_app', 'ot_gateway', 'ot_retention'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
       IF coalesce(can_create, false) THEN
         BEGIN
@@ -49,9 +48,6 @@ BEGIN
   REVOKE UPDATE, DELETE ON public.agent_snapshots, public.workspace_policies FROM ot_app;
   -- 入口の試行は足して数えるだけ（消すのは掃除）
   REVOKE UPDATE, DELETE ON public.entry_attempts FROM ot_app;
-  -- 止めた実行を試験にするとき、タスク開始時の店舗の写しを読む（FR-066、incident-hook の getSimSnapshot）。sim の他の表・書き込みは不可
-  GRANT USAGE ON SCHEMA sim TO ot_app;
-  GRANT SELECT ON sim.snapshots TO ot_app;
   -- Google カレンダーの資格情報（design 16 §3.3）。上の ALL TABLES の後で付け直す（冪等）。
   -- 暗号文（refresh_token_enc）は読めない。復号は gateway（ot_gateway は SELECT のまま）。更新は revoked_at と allow_protected_write だけ
   -- 表の権限は REVOKE ALL にしない（ACL の項目が消えて付け直すと並びが変わり、2度目の流しで権限の写しがずれる）
@@ -82,20 +78,6 @@ BEGIN
   GRANT UPDATE ON public.action_intents, public.approvals, public.tasks, public.connectors, public.connector_tools TO ot_gateway;
   -- 監査ログの採番だけ（列ごとの権限。SO §4.6）
   GRANT UPDATE (audit_seq, audit_last_hash) ON public.workspaces TO ot_gateway;
-END
-$$;
-
--- ---- ot_sim ----
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ot_sim') THEN
-    RETURN;
-  END IF;
-  GRANT USAGE ON SCHEMA sim TO ot_sim;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA sim TO ot_sim;
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA sim TO ot_sim;
-  -- 事象は追記だけ（トリガーでも守る）
-  REVOKE UPDATE ON sim.events FROM ot_sim;
 END
 $$;
 

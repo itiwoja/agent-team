@@ -34,7 +34,7 @@ export async function scanAgentsForSkillLearning(
        JOIN tasks t ON t.workspace_id = a.workspace_id AND t.agent_id = a.id
       WHERE w.kind = 'owner' AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL AND a.status <> 'removed'
         AND t.status IN ('succeeded','completed') AND t.report IS NOT NULL
-        AND NOT t.is_dry_run AND t.rehearsal_run_id IS NULL AND NOT t.shadow
+        AND NOT t.is_dry_run
         AND t.finished_at >= $1 AND t.finished_at <= $2
         AND t.finished_at > coalesce((SELECT max(p.created_at) FROM skill_proposals p WHERE p.workspace_id = a.workspace_id AND p.agent_id = a.id), '-infinity'::timestamptz)
         AND NOT EXISTS (SELECT 1 FROM skill_proposals p WHERE p.workspace_id = a.workspace_id AND p.agent_id = a.id AND p.status = 'proposed')

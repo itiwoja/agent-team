@@ -170,12 +170,11 @@ describe("成功したタスクの数え方", () => {
     expect(recent[0]).toMatchObject({ report: "報告" });
   });
 
-  it("リハーサルのタスクと shadow は listRecentLiveSucceededTasks に出ない", async () => {
+  it("試し実行のタスクは listRecentLiveSucceededTasks に出ない", async () => {
     const { db } = T();
     const { ws, agent } = await owner();
     const { taskId } = await fxTask(db, ws, agent, { status: "succeeded", now: ago(DAY) });
     await db.query("UPDATE tasks SET report = '報告', report_kind = 'normal' WHERE id = $1", [taskId]);
-    await db.query("UPDATE tasks SET shadow = false WHERE id = $1", [taskId]);
     expect(await listRecentLiveSucceededTasks(db, ws.ctx, agent.agentId, { since: ago(10 * DAY), limit: 5 })).toHaveLength(1);
     // 試し実行（is_dry_run）にすると外れる
     await db.query("UPDATE tasks SET is_dry_run = true, trigger_type = 'dry_run' WHERE id = $1", [taskId]);

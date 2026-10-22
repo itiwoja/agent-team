@@ -11,7 +11,7 @@ export interface AgentListRow {
   agent: AgentRow;
   jobCount: number;
   askCount: number;
-  /** 本番（trigger_type = 'ask'・リハーサルでない）のタスクの数と、最後に始めた・終わった時刻 */
+  /** 本番（trigger_type = 'ask'）のタスクの数と、最後に始めた・終わった時刻 */
   taskCount: number;
   lastActiveAt: Date | null;
   /** いま動いているか（queued〜running のタスクがある） */
@@ -24,21 +24,19 @@ export interface AgentListRow {
   bornAskId: Uuid | null;
   /** 「以後も許可」にしたルールの数（設定変更 origin = approval_rule・applied） */
   allowedRuleCount: number;
-  /** 安全チェックで権限を絞った回数（設定変更 origin = rehearsal_tighten・applied） */
-  tightenedCount: number;
   /** 持っているスキルの数 */
   skillCount: number;
 }
 
 /**
  * ワークスペースの担当（removed を除く）を、最後に動いた順 → 作った順の新しい順で返す。
- * 数えるのは本番のタスクだけ（リハーサル・影の走行は混ぜない：BR-67①）。
+ * 数えるのは試し実行でないタスクだけ。
  * 最後に動いた時刻は、終わったタスクは終わった時刻、終わっていないタスク（実行中・確認待ち）は最後に状態が変わった時刻
  */
 export async function listAgentLibrary(q: Queryable, ctx: WsCtx): Promise<AgentListRow[]> {
   const r = await q.query<
     AgentRow & { job_count: number; ask_count: number; task_count: number; last_active_at: Date | null; running: boolean; awaiting_approval: boolean;
-      reuse_count: number; born_ask_id: Uuid | null; allowed_rule_count: number; tightened_count: number; skill_count: number }
+      reuse_count: number; born_ask_id: Uuid | null; allowed_rule_count: number; skill_count: number }
   >(
     `SELECT a.id, a.workspace_id, a.slug, a.name, a.name_source, a.role, a.appearance, a.status, a.current_snapshot_id, a.disabled_by,
             a.disabled_reason, a.disabled_at, a.created_at, a.updated_at,
@@ -48,7 +46,6 @@ export async function listAgentLibrary(q: Queryable, ctx: WsCtx): Promise<AgentL
             (SELECT m.ask_id FROM ask_members m JOIN asks k ON k.workspace_id = m.workspace_id AND k.id = m.ask_id
               WHERE m.workspace_id = a.workspace_id AND m.agent_id = a.id AND m.is_new ORDER BY k.created_at, k.id LIMIT 1) AS born_ask_id,
             (SELECT count(*)::int FROM agent_config_changes c WHERE c.workspace_id = a.workspace_id AND c.agent_id = a.id AND c.origin = 'approval_rule' AND c.status = 'applied') AS allowed_rule_count,
-            (SELECT count(*)::int FROM agent_config_changes c WHERE c.workspace_id = a.workspace_id AND c.agent_id = a.id AND c.origin = 'rehearsal_tighten' AND c.status = 'applied') AS tightened_count,
             (SELECT count(*)::int FROM agent_skills s WHERE s.workspace_id = a.workspace_id AND s.agent_id = a.id AND s.removed_at IS NULL) AS skill_count,
             t.task_count, t.last_active_at, t.running, t.awaiting_approval
        FROM agents a
@@ -58,13 +55,13 @@ export async function listAgentLibrary(q: Queryable, ctx: WsCtx): Promise<AgentL
                 bool_or(x.status IN ('queued','provisioning','running')) AS running,
                 bool_or(x.status = 'awaiting_approval') AS awaiting_approval
            FROM tasks x
-          WHERE x.workspace_id = a.workspace_id AND x.agent_id = a.id AND x.rehearsal_run_id IS NULL AND NOT x.shadow AND NOT x.is_dry_run
+          WHERE x.workspace_id = a.workspace_id AND x.agent_id = a.id AND NOT x.is_dry_run
        ) t ON true
       WHERE a.workspace_id = $1 AND a.status <> 'removed'
       ORDER BY coalesce(t.last_active_at, a.created_at) DESC, a.created_at DESC, a.id`,
     [ctx.workspaceId],
   );
-  return r.rows.map(({ job_count, ask_count, task_count, last_active_at, running, awaiting_approval, reuse_count, born_ask_id, allowed_rule_count, tightened_count, skill_count, ...agent }) => ({
+  return r.rows.map(({ job_count, ask_count, task_count, last_active_at, running, awaiting_approval, reuse_count, born_ask_id, allowed_rule_count, skill_count, ...agent }) => ({
     agent,
     jobCount: job_count,
     askCount: ask_count,
@@ -75,7 +72,6 @@ export async function listAgentLibrary(q: Queryable, ctx: WsCtx): Promise<AgentL
     reuseCount: reuse_count ?? 0,
     bornAskId: born_ask_id ?? null,
     allowedRuleCount: allowed_rule_count ?? 0,
-    tightenedCount: tightened_count ?? 0,
     skillCount: skill_count ?? 0,
   }));
 }

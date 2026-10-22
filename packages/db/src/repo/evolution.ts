@@ -125,7 +125,7 @@ export interface LiveSucceededTask {
 }
 
 /**
- * 本番（is_dry_run でない・rehearsal_run_id がない・shadow でない）で成功して終わったタスク（finished_at が since より後。新しい順）。
+ * 本番（is_dry_run でない）で成功して終わったタスク（finished_at が since より後。新しい順）。
  * 成功 = succeeded か completed で報告（report）があるもの
  */
 export async function listRecentLiveSucceededTasks(
@@ -138,7 +138,7 @@ export async function listRecentLiveSucceededTasks(
     `SELECT t.id, t.finished_at, coalesce(t.prompt, k.text) AS instruction, t.report, t.report_title
        FROM tasks t LEFT JOIN asks k ON k.workspace_id = t.workspace_id AND k.id = t.ask_id
       WHERE t.workspace_id = $1 AND t.agent_id = $2 AND t.status IN ('succeeded','completed') AND t.report IS NOT NULL
-        AND NOT t.is_dry_run AND t.rehearsal_run_id IS NULL AND NOT t.shadow AND t.finished_at > $3
+        AND NOT t.is_dry_run AND t.finished_at > $3
       ORDER BY t.finished_at DESC, t.id
       LIMIT $4`,
     [ctx.workspaceId, agentId, o.since, o.limit],
@@ -154,7 +154,7 @@ export async function ruleLastMatchedAt(q: Queryable, ctx: WsCtx, agentId: Uuid)
     `SELECT d.matched_rule_id, max(d.created_at) AS last_matched_at
        FROM policy_decisions d JOIN tasks t ON t.workspace_id = d.workspace_id AND t.id = d.task_id
       WHERE d.workspace_id = $1 AND t.agent_id = $2 AND d.matched_rule_id IS NOT NULL AND d.reason_code = 'rule_matched' AND d.enforced
-        AND t.is_dry_run = false AND t.rehearsal_run_id IS NULL AND NOT t.shadow
+        AND t.is_dry_run = false
       GROUP BY d.matched_rule_id`,
     [ctx.workspaceId, agentId],
   );

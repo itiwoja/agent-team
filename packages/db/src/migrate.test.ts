@@ -14,21 +14,21 @@ const T = useTestDb({ migrate: false });
 async function schemaDump(q: Queryable): Promise<unknown> {
   const cols = await q.query(
     `SELECT table_schema, table_name, column_name, data_type, is_nullable, column_default, is_generated
-       FROM information_schema.columns WHERE table_schema IN ('public','sim') ORDER BY 1, 2, ordinal_position`,
+       FROM information_schema.columns WHERE table_schema IN ('public') ORDER BY 1, 2, ordinal_position`,
   );
   const cons = await q.query(
     `SELECT n.nspname, c.conrelid::regclass::text AS rel, c.conname, pg_get_constraintdef(c.oid) AS def
        FROM pg_constraint c JOIN pg_namespace n ON n.oid = c.connamespace
-      WHERE n.nspname IN ('public','sim') ORDER BY 1, 2, 3`,
+      WHERE n.nspname IN ('public') ORDER BY 1, 2, 3`,
   );
-  const idx = await q.query("SELECT schemaname, indexname, indexdef FROM pg_indexes WHERE schemaname IN ('public','sim') ORDER BY 1, 2");
+  const idx = await q.query("SELECT schemaname, indexname, indexdef FROM pg_indexes WHERE schemaname IN ('public') ORDER BY 1, 2");
   const trg = await q.query(
     `SELECT event_object_schema, event_object_table, trigger_name, event_manipulation, action_timing
-       FROM information_schema.triggers WHERE trigger_schema IN ('public','sim') ORDER BY 1, 2, 3, 4`,
+       FROM information_schema.triggers WHERE trigger_schema IN ('public') ORDER BY 1, 2, 3, 4`,
   );
   const acl = await q.query(
     `SELECT n.nspname, c.relname, c.relacl::text AS acl FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-      WHERE n.nspname IN ('public','sim') AND c.relkind = 'r' ORDER BY 1, 2`,
+      WHERE n.nspname IN ('public') AND c.relkind = 'r' ORDER BY 1, 2`,
   );
   return { cols: cols.rows, cons: cons.rows, idx: idx.rows, trg: trg.rows, acl: acl.rows };
 }
@@ -134,7 +134,7 @@ describe("スキーマの形（DB §2・15:368・15:384）", () => {
     try {
       const tables = await q.query<{ name: string }>(
         `SELECT n.nspname || '.' || c.relname AS name FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
-          WHERE n.nspname IN ('public','sim') AND c.relkind = 'r'
+          WHERE n.nspname IN ('public') AND c.relkind = 'r'
             AND c.relname NOT IN ('users','workspaces','entry_attempts','schema_migrations') ORDER BY 1`,
       );
       const expected = WORKSPACE_TABLES.map((t) => (t.includes(".") ? t : `public.${t}`)).sort();
@@ -183,13 +183,13 @@ describe("スキーマの形（DB §2・15:368・15:384）", () => {
     }
   });
 
-  it("ロール ot_app・ot_gateway・ot_sim・ot_retention がある（作れる利用者で流したとき）", async () => {
+  it("ロール ot_app・ot_gateway・ot_retention がある（作れる利用者で流したとき）", async () => {
     const { q, close } = await migrated();
     try {
       const r = await q.query<{ rolname: string }>(
-        "SELECT rolname FROM pg_roles WHERE rolname IN ('ot_app','ot_gateway','ot_sim','ot_retention') ORDER BY 1",
+        "SELECT rolname FROM pg_roles WHERE rolname IN ('ot_app','ot_gateway','ot_retention') ORDER BY 1",
       );
-      expect(r.rows.map((x) => x.rolname)).toEqual(["ot_app", "ot_gateway", "ot_retention", "ot_sim"]);
+      expect(r.rows.map((x) => x.rolname)).toEqual(["ot_app", "ot_gateway", "ot_retention"]);
     } finally {
       await close();
     }

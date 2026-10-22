@@ -5,7 +5,6 @@
 
 import type { Queryable } from "../client.ts";
 import type { AskStatus, Uuid, WorkspaceKind } from "../types.ts";
-import { BUDGET_TIME_ZONE } from "./costs.ts";
 
 export interface ScanHit {
   workspaceId: Uuid;
@@ -61,91 +60,19 @@ export async function scanStuckExecutingIntents(q: Queryable, updatedBefore: Dat
 }
 
 /** queued のタスク（古い順）。同時実行数（BR-08）・canStartWork は呼ぶ側。Kill Switch・削除予約のワークスペースは除く */
-export async function scanQueuedTasks(q: Queryable, limit = 100): Promise<Array<ScanHit & { queuedAt: Date; rehearsalRunId: Uuid | null }>> {
-  const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; queued_at: Date; rehearsal_run_id: Uuid | null }>(
-    `SELECT t.workspace_id, w.kind, t.id, t.queued_at, t.rehearsal_run_id
+export async function scanQueuedTasks(q: Queryable, limit = 100): Promise<Array<ScanHit & { queuedAt: Date }>> {
+  const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; queued_at: Date }>(
+    `SELECT t.workspace_id, w.kind, t.id, t.queued_at
        FROM tasks t JOIN workspaces w ON w.id = t.workspace_id
       WHERE t.status = 'queued' AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
       ORDER BY t.queued_at, t.id LIMIT $1`,
     [limit],
   );
-  return r.rows.map((x) => ({ workspaceId: x.workspace_id, workspaceKind: x.kind, id: x.id, queuedAt: x.queued_at, rehearsalRunId: x.rehearsal_run_id }));
-}
-
-/** queued の走行（再リハーサルの待ち。G-02）。Kill Switch・削除予約のワークスペースは除く */
-export async function scanQueuedRehearsalRuns(q: Queryable, limit = 50): Promise<Array<ScanHit & { createdAt: Date }>> {
-  const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; created_at: Date }>(
-    `SELECT r.workspace_id, w.kind, r.id, r.created_at
-       FROM rehearsal_runs r JOIN workspaces w ON w.id = r.workspace_id
-      WHERE r.status = 'queued' AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
-      ORDER BY r.created_at, r.id LIMIT $1`,
-    [limit],
-  );
-  return r.rows.map((x) => ({ workspaceId: x.workspace_id, workspaceKind: x.kind, id: x.id, createdAt: x.created_at }));
+  return r.rows.map((x) => ({ workspaceId: x.workspace_id, workspaceKind: x.kind, id: x.id, queuedAt: x.queued_at }));
 }
 
 /**
- * 再リハーサルの待ち：切れた合格証（広げる変更・ツールの変化・モデル・試験の追加。superseded は除く）が仕事の最新で、有効な合格証も、切れたあとの再リハーサル・最初・再試験の走行もなく（自分の言葉の悪い日 user_case の走行では外さない）、外されていない試験がある仕事（FR-067）。切れた古い順。
- * 例外（D-107）：切れたあとの走行が費用の上限で止まった（failed で、状況に abort_reason = budget がある）もので、今日（Asia/Tokyo の0時から）より前に作られたものは
- * 「走った」に数えない。費用の上限（1日の上限・リハーサル1回の上限）で止まった再リハーサルは、同じ日には拾い直さず（毎分同じ上限に当たるだけ）、翌日に1日1回やり直す
- */
-export async function scanPendingRecertifications(
-  q: Queryable,
-  limit = 20,
-  now: Date = new Date(),
-  timeZone: string = BUDGET_TIME_ZONE,
-): Promise<Array<ScanHit & { jobId: Uuid; reason: "widen" | "tool_hash" | "model" | "case_added"; revokedAt: Date; seed: number | null; requestedBy: Uuid | null }>> {
-  const r = await q.query<{
-    workspace_id: Uuid;
-    kind: WorkspaceKind;
-    id: Uuid;
-    job_id: Uuid;
-    revoke_reason: "widen" | "tool_hash" | "model" | "case_added";
-    revoked_at: Date;
-    seed: number | null;
-    requested_by: Uuid | null;
-  }>(
-    `SELECT c.workspace_id, w.kind, c.id, c.job_id, c.revoke_reason, c.revoked_at, r0.seed, r0.requested_by
-       FROM rehearsal_certificates c
-       JOIN workspaces w ON w.id = c.workspace_id
-       LEFT JOIN rehearsal_runs r0 ON r0.workspace_id = c.workspace_id AND r0.id = c.rehearsal_run_id
-      WHERE c.revoked_at IS NOT NULL AND c.revoke_reason <> 'superseded'
-        AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM rehearsal_certificates n WHERE n.workspace_id = c.workspace_id AND n.job_id = c.job_id AND (n.issued_at > c.issued_at OR n.revoked_at IS NULL))
-        AND NOT EXISTS (SELECT 1 FROM rehearsal_runs x WHERE x.workspace_id = c.workspace_id AND x.job_id = c.job_id AND x.trigger IN ('recertify','initial','retest') AND x.created_at >= c.revoked_at
-                          AND NOT (x.status = 'failed'
-                                   AND x.created_at < (date_trunc('day', $2::timestamptz AT TIME ZONE $3) AT TIME ZONE $3)
-                                   AND EXISTS (SELECT 1 FROM rehearsal_scenarios s WHERE s.workspace_id = x.workspace_id AND s.rehearsal_run_id = x.id AND s.abort_reason = 'budget')))
-        AND EXISTS (SELECT 1 FROM rehearsal_cases k WHERE k.workspace_id = c.workspace_id AND k.job_id = c.job_id AND k.removed_at IS NULL)
-      ORDER BY c.revoked_at, c.id LIMIT $1`,
-    [limit, now, timeZone],
-  );
-  return r.rows.map((x) => ({
-    workspaceId: x.workspace_id,
-    workspaceKind: x.kind,
-    id: x.id,
-    jobId: x.job_id,
-    reason: x.revoke_reason,
-    revokedAt: x.revoked_at,
-    seed: x.seed,
-    requestedBy: x.requested_by,
-  }));
-}
-
-/** 有効な合格証のうち、モデルが今のモデルと違うもの（モデルの変更で切れる：FR-067）。削除予約のワークスペースは除く */
-export async function scanModelDriftedCertificates(q: Queryable, currentModelId: string, limit = 50): Promise<Array<ScanHit & { jobId: Uuid }>> {
-  const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; job_id: Uuid }>(
-    `SELECT c.workspace_id, w.kind, c.id, c.job_id
-       FROM rehearsal_certificates c JOIN workspaces w ON w.id = c.workspace_id
-      WHERE c.revoked_at IS NULL AND c.model_id <> $1 AND w.delete_requested_at IS NULL
-      ORDER BY c.issued_at, c.id LIMIT $2`,
-    [currentModelId, limit],
-  );
-  return r.rows.map((x) => ({ workspaceId: x.workspace_id, workspaceKind: x.kind, id: x.id, jobId: x.job_id }));
-}
-
-/**
- * 動いている本番の依頼の実行（running。止まった担当の拾い直し・queued のタスクを動かす・まとめ役の待ち時間：G-02）。Kill Switch・削除予約は除く。
+ * 動いている依頼の実行（running。止まった担当の拾い直し・queued のタスクを動かす・まとめ役の待ち時間：G-02）。Kill Switch・削除予約は除く。
  * 拾った順は last_scanned_at の古い順（まだ拾っていないものが先）。拾ったものは markAskRunsScanned で印を付けて回す
  */
 export async function scanActiveAskRuns(q: Queryable, limit = 50): Promise<Array<ScanHit & { askId: Uuid; createdBy: Uuid }>> {
@@ -154,7 +81,7 @@ export async function scanActiveAskRuns(q: Queryable, limit = 50): Promise<Array
        FROM ask_runs r
        JOIN asks a ON a.workspace_id = r.workspace_id AND a.id = r.ask_id
        JOIN workspaces w ON w.id = r.workspace_id
-      WHERE r.mode = 'live' AND r.status = 'running' AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
+      WHERE r.status = 'running' AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
       ORDER BY r.last_scanned_at ASC NULLS FIRST, r.started_at, r.id LIMIT $1`,
     [limit],
   );
@@ -172,7 +99,7 @@ export async function scanAsksWithPendingReplies(q: Queryable, limit = 50): Prom
        JOIN asks a ON a.workspace_id = p.workspace_id AND a.id = p.ask_id
        JOIN workspaces w ON w.id = p.workspace_id
       WHERE p.consumed_at IS NULL AND a.status IN ('running','done') AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM ask_runs r WHERE r.workspace_id = p.workspace_id AND r.ask_id = p.ask_id AND r.mode = 'live' AND r.status IN ('running','waiting_input'))
+        AND NOT EXISTS (SELECT 1 FROM ask_runs r WHERE r.workspace_id = p.workspace_id AND r.ask_id = p.ask_id AND r.status IN ('running','waiting_input'))
       GROUP BY p.workspace_id, w.kind, p.ask_id
       ORDER BY min(p.created_at) LIMIT $1`,
     [limit],
@@ -188,14 +115,14 @@ export async function markAskRunsScanned(q: Queryable, runIds: readonly Uuid[], 
 
 /**
  * ハートビートが途絶えた本番のタスク（provisioning・running のまま、last_heartbeat_at（なければ更新の時刻）が staleBefore 以前）。
- * 動かしているプロセスが落ちた・止まったタスク。awaiting_approval・executing は除く（承認の待ち・実行の完了の待ちは別の流れ）。リハーサルは除く。
+ * 動かしているプロセスが落ちた・止まったタスク。awaiting_approval・executing は除く（承認の待ち・実行の完了の待ちは別の流れ）。
  * 候補だけを返す（ロックを取らない）。呼ぶ側がロックの中で確かめてから止める
  */
 export async function scanStaleLiveTasks(q: Queryable, staleBefore: Date, limit = 50): Promise<Array<ScanHit & { askId: Uuid | null }>> {
   const r = await q.query<{ workspace_id: Uuid; kind: WorkspaceKind; id: Uuid; ask_id: Uuid | null }>(
     `SELECT t.workspace_id, w.kind, t.id, t.ask_id
        FROM tasks t JOIN workspaces w ON w.id = t.workspace_id
-      WHERE t.status IN ('provisioning', 'running') AND t.rehearsal_run_id IS NULL
+      WHERE t.status IN ('provisioning', 'running')
         AND NOT w.kill_switch_engaged AND w.delete_requested_at IS NULL
         AND COALESCE(t.last_heartbeat_at, t.updated_at) <= $1
       ORDER BY COALESCE(t.last_heartbeat_at, t.updated_at), t.id LIMIT $2`,

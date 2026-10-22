@@ -271,7 +271,7 @@ export async function openTestDb(opts: CreateTestDatabaseOptions & { db?: DbOpti
   };
 }
 
-export type AppRole = "ot_app" | "ot_gateway" | "ot_sim" | "ot_retention";
+export type AppRole = "ot_app" | "ot_gateway" | "ot_retention";
 const TEST_LOGIN_PASSWORD = "ot-test-login";
 
 /**

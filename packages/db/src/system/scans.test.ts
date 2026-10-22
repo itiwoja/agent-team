@@ -1,8 +1,8 @@
 // ワークスペースをまたぐ走査の試験（DB §4.1 の2・§4.12、IA §3.13・3.15）
 import { describe, expect, it } from "vitest";
 import type { Uuid } from "../types.ts";
-import { fxAgent, fxApproval, fxAsk, fxAskRun, fxConnector, fxIntent, fxRehearsalCase, fxRehearsalRun, fxRehearsalScenario, fxTask, fxWorkspace, useTestDb } from "../testing.ts";
-import { markAskRunsScanned, scanActiveAskRuns, scanDueAsks, scanExpiredApprovals, scanQueuedRehearsalRuns, scanQueuedTasks, scanStaleLiveTasks, scanStuckExecutingIntents } from "./scans.ts";
+import { fxAgent, fxApproval, fxAsk, fxAskRun, fxConnector, fxIntent, fxTask, fxWorkspace, useTestDb } from "../testing.ts";
+import { markAskRunsScanned, scanActiveAskRuns, scanDueAsks, scanExpiredApprovals, scanQueuedTasks, scanStaleLiveTasks, scanStuckExecutingIntents } from "./scans.ts";
 
 const T = useTestDb();
 const NOW = new Date("2026-10-12T09:00:00.000Z");
@@ -51,7 +51,7 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     expect(await scanStuckExecutingIntents(db, new Date(NOW.getTime() - 180_000))).toEqual([]);
   });
 
-  it("queued のタスク・走行：Kill Switch と削除予約のワークスペースは除き、古い順", async () => {
+  it("queued のタスク：Kill Switch と削除予約のワークスペースは除き、古い順", async () => {
     const { db } = T();
     const ok = await fxWorkspace(db);
     const killed = await fxWorkspace(db, { killSwitchEngaged: true });
@@ -62,9 +62,6 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     await fxTask(db, ok, agentOk, { status: "running" });
     await fxTask(db, killed, agentKilled, { status: "queued" });
     expect((await scanQueuedTasks(db)).map((h) => h.id)).toEqual([t1.taskId, t2.taskId]);
-    const run = await fxRehearsalRun(db, ok, { jobId: agentOk.jobId, status: "queued" });
-    await fxRehearsalRun(db, killed, { jobId: agentKilled.jobId, status: "queued" });
-    expect((await scanQueuedRehearsalRuns(db)).map((h) => h.id)).toEqual([run.runId]);
   });
 
   it("動いている依頼の実行：拾った印（last_scanned_at）の古い順。まだ拾っていないものが先（先頭の進まない実行で詰まらない）", async () => {
@@ -84,7 +81,7 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     expect((await scanActiveAskRuns(db, 1)).map((h) => h.id)).toEqual([runs[0]]);
   });
 
-  it("ハートビートの途絶えた本番のタスク（provisioning・running）：リハーサル・承認の待ち・Kill Switch のワークスペースは除く", async () => {
+  it("ハートビートの途絶えた本番のタスク（provisioning・running）：承認の待ち・Kill Switch のワークスペースは除く", async () => {
     const { db } = T();
     const ok = await fxWorkspace(db);
     const killed = await fxWorkspace(db, { killSwitchEngaged: true });
@@ -101,11 +98,6 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     await setHeartbeat(fresh, at(1), at(1));
     const waiting = (await fxTask(db, ok, agentOk, { status: "awaiting_approval" })).taskId;
     await setHeartbeat(waiting, at(60), at(60));
-    const rehearsal = await fxRehearsalRun(db, ok, { jobId: agentOk.jobId, status: "running" });
-    const rehearsalCase = await fxRehearsalCase(db, ok, { jobId: agentOk.jobId });
-    const scenario = await fxRehearsalScenario(db, ok, { runId: rehearsal.runId, caseId: rehearsalCase.caseId });
-    const rehearsalTask = (await fxTask(db, ok, agentOk, { status: "running", rehearsalRunId: rehearsal.runId, rehearsalScenarioId: scenario.scenarioId })).taskId;
-    await setHeartbeat(rehearsalTask, at(30), at(30));
     const killedTask = (await fxTask(db, killed, agentKilled, { status: "running" })).taskId;
     await setHeartbeat(killedTask, at(30), at(30));
     const hits = await scanStaleLiveTasks(db, at(10));

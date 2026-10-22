@@ -1,7 +1,7 @@
 // 依頼（asks）の問い合わせ（@open-team/db/asks。設定プランナー FR-061・編成の実行 FR-062・回答 FR-063・連絡板 FR-064・API-072〜077）
 // README §1 の約束：業務の関数は (q, ctx: WsCtx, …)、SQL を必ず workspace_id で絞る。書いて整合が要る関数は Tx を受ける。
-// トランザクションの中で外部（Gemini・gateway・sim-world）を呼ばない（G-14）。ロックの順はワークスペース → タスク → 承認 → Intent（M-21）。
-// 本番のタスクを作るのは insertAskTask だけ（trigger_type = 'ask'・本番。shadow・rehearsal_run_id は付けられない：BR-67①）
+// トランザクションの中で外部（Gemini・gateway）を呼ばない（G-14）。ロックの順はワークスペース → タスク → 承認 → Intent（M-21）。
+// 本番のタスクを作るのは insertAskTask だけ（trigger_type = 'ask'）
 
 import type { Hex64, Json, JsonObject, TaintState } from "@open-team/kernel";
 import type { Queryable, Tx } from "../client.ts";
@@ -238,21 +238,21 @@ export async function appendAgentSnapshot(
 // 実行（ask_runs）
 // =====================================================================
 
-const RUN_COLS = `id, workspace_id, ask_id, run_no, mode, rehearsal_run_id, rehearsal_scenario_id, trigger_type, status, answer_task_id, answer,
+const RUN_COLS = `id, workspace_id, ask_id, run_no, trigger_type, status, answer_task_id, answer,
   answer_hash, answered_at, first_member_started_at, started_at, finished_at`;
 
-/** 本番の実行を始める（run_no は本番の実行だけで数える）。同じ依頼で動いている実行があれば作らず null */
+/** 実行を始める。同じ依頼で動いている実行があれば作らず null */
 export async function insertLiveRun(tx: Tx, ctx: WsCtx, askId: Uuid, triggerType: AskRunTrigger, now: Date): Promise<AskRunRow | null> {
   const active = await tx.query(
-    "SELECT 1 FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND mode = 'live' AND status IN ('running','waiting_input') LIMIT 1",
+    "SELECT 1 FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND status IN ('running','waiting_input') LIMIT 1",
     [ctx.workspaceId, askId],
   );
   if (active.rowCount > 0) return null;
   return one<AskRunRow>(
     tx,
-    `INSERT INTO ask_runs (workspace_id, ask_id, run_no, mode, trigger_type, status, started_at)
-     VALUES ($1, $2, COALESCE((SELECT max(run_no) FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND mode = 'live'), 0) + 1,
-             'live', $3, 'running', $4)
+    `INSERT INTO ask_runs (workspace_id, ask_id, run_no, trigger_type, status, started_at)
+     VALUES ($1, $2, COALESCE((SELECT max(run_no) FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2), 0) + 1,
+             $3, 'running', $4)
      RETURNING ${RUN_COLS}`,
     [ctx.workspaceId, askId, triggerType, now],
   );
@@ -266,7 +266,7 @@ export async function getAskRun(q: Queryable, ctx: WsCtx, runId: Uuid): Promise<
 export async function getLatestLiveRun(q: Queryable, ctx: WsCtx, askId: Uuid): Promise<AskRunRow | null> {
   return maybe<AskRunRow>(
     q,
-    `SELECT ${RUN_COLS} FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND mode = 'live' ORDER BY run_no DESC LIMIT 1`,
+    `SELECT ${RUN_COLS} FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 ORDER BY run_no DESC LIMIT 1`,
     [ctx.workspaceId, askId],
   );
 }
@@ -277,7 +277,7 @@ export async function getLatestLiveRun(q: Queryable, ctx: WsCtx, askId: Uuid): P
  */
 export async function listLiveRuns(q: Queryable, ctx: WsCtx, askId: Uuid, limit: number): Promise<AskRunRow[]> {
   const r = await q.query<AskRunRow>(
-    `SELECT ${RUN_COLS} FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND mode = 'live' ORDER BY run_no DESC LIMIT $3`,
+    `SELECT ${RUN_COLS} FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 ORDER BY run_no DESC LIMIT $3`,
     [ctx.workspaceId, askId, limit],
   );
   return r.rows;
@@ -342,7 +342,7 @@ export async function saveRunAnswer(
 /** 動いている本番の実行（tick の拾い直し用。1ワークスペースぶん） */
 export async function listActiveLiveRuns(q: Queryable, ctx: WsCtx): Promise<AskRunRow[]> {
   const r = await q.query<AskRunRow>(
-    `SELECT ${RUN_COLS} FROM ask_runs WHERE workspace_id = $1 AND mode = 'live' AND status IN ('running','waiting_input') ORDER BY started_at`,
+    `SELECT ${RUN_COLS} FROM ask_runs WHERE workspace_id = $1 AND status IN ('running','waiting_input') ORDER BY started_at`,
     [ctx.workspaceId],
   );
   return r.rows;
@@ -391,15 +391,15 @@ export interface InsertAskTaskInput {
 }
 
 /**
- * 本番のタスクを作る（trigger_type = 'ask'・queued・execution_variant = 'live'）。shadow・rehearsal_run_id は付けられない（BR-67①）。
+ * 依頼のタスクを作る（trigger_type = 'ask'・queued）。
  * 担当に今のスナップショットを固定する（agent_snapshot_id は呼び出し側が現在のものを渡す）
  */
 export async function insertAskTask(tx: Tx, ctx: WsCtx, i: InsertAskTaskInput): Promise<TaskRow> {
   const task = await one<TaskRow>(
     tx,
     `INSERT INTO tasks (workspace_id, requester_id, agent_id, agent_snapshot_id, job_id, ask_id, ask_run_id, ask_member_id, input_task_ids,
-                        trigger_type, is_dry_run, execution_variant, prompt, tainted, taint_sources, status, queued_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], 'ask', false, 'live', $10, $11, $12::jsonb, 'queued', $13, $13, $13)
+                        trigger_type, is_dry_run, prompt, tainted, taint_sources, status, queued_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], 'ask', false, $10, $11, $12::jsonb, 'queued', $13, $13, $13)
      RETURNING *`,
     [
       ctx.workspaceId,
@@ -434,14 +434,13 @@ export async function listRunTasks(q: Queryable, ctx: WsCtx, runId: Uuid): Promi
 
 /**
  * 担当の前の回の報告（定期の見張りで「前回の報告」として渡す）。この実行より前の実行の、報告のある通常のタスクのうち最も新しいもの。
- * 本番だけ（リハーサルのタスクは ask_member_id を持たない）
  */
 export async function getPreviousReportTask(q: Queryable, ctx: WsCtx, memberId: Uuid, currentRunId: Uuid): Promise<TaskRow | null> {
   const r = await q.query<TaskRow>(
     `SELECT t.* FROM tasks t
        JOIN ask_runs r ON r.workspace_id = t.workspace_id AND r.id = t.ask_run_id
       WHERE t.workspace_id = $1 AND t.ask_member_id = $2 AND t.ask_run_id <> $3 AND t.kind = 'normal'
-        AND t.report IS NOT NULL AND t.rehearsal_run_id IS NULL
+        AND t.report IS NOT NULL
       ORDER BY r.run_no DESC, t.created_at DESC, t.id DESC
       LIMIT 1`,
     [ctx.workspaceId, memberId, currentRunId],
@@ -457,7 +456,7 @@ export async function claimQueuedTask(tx: Tx, ctx: WsCtx, taskId: Uuid, now: Dat
   return maybe<TaskRow>(
     tx,
     `UPDATE tasks SET status = 'provisioning', updated_at = $3
-      WHERE workspace_id = $1 AND id = $2 AND status = 'queued' AND rehearsal_run_id IS NULL RETURNING *`,
+      WHERE workspace_id = $1 AND id = $2 AND status = 'queued' RETURNING *`,
     [ctx.workspaceId, taskId, now],
   );
 }
@@ -676,18 +675,6 @@ export async function plannerUsageOf(q: Queryable, ctx: WsCtx, askId: Uuid): Pro
   return { model: row.model, calls: row.calls, latencyMs: row.latency_ms, costUsd: row.cost_usd };
 }
 
-/** リハーサルの走行の「悪い日の生成」の費用（phase = rehearsal_generate の合計）。記録がなければ null（呼んでいない・費用を記録していない） */
-export async function rehearsalGenerateCostOf(q: Queryable, ctx: WsCtx, runId: Uuid): Promise<{ calls: number; costUsd: string } | null> {
-  const r = await q.query<{ calls: number; cost_usd: string }>(
-    `SELECT count(*)::int AS calls, COALESCE(sum(cost_usd), 0)::numeric(16,6)::text AS cost_usd
-       FROM usage_records WHERE workspace_id = $1 AND rehearsal_run_id = $2 AND phase = 'rehearsal_generate'`,
-    [ctx.workspaceId, runId],
-  );
-  const row = r.rows[0];
-  if (row === undefined || row.calls === 0) return null;
-  return { calls: row.calls, costUsd: row.cost_usd };
-}
-
 // =====================================================================
 // 追いのターン（FR-064。A-105）
 // =====================================================================
@@ -705,8 +692,8 @@ export async function insertFollowupTask(
   const task = await one<TaskRow>(
     tx,
     `INSERT INTO tasks (workspace_id, requester_id, agent_id, agent_snapshot_id, job_id, ask_id, ask_run_id, ask_member_id, input_task_ids, input_message_ids,
-                        parent_task_id, kind, trigger_type, is_dry_run, execution_variant, prompt, tainted, taint_sources, status, queued_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '{}', $9::uuid[], $10, 'followup', 'ask', false, 'live', NULL, $11, $12::jsonb, 'queued', $13, $13, $13)
+                        parent_task_id, kind, trigger_type, is_dry_run, prompt, tainted, taint_sources, status, queued_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, '{}', $9::uuid[], $10, 'followup', 'ask', false, NULL, $11, $12::jsonb, 'queued', $13, $13, $13)
      RETURNING *`,
     [
       ctx.workspaceId,
@@ -844,6 +831,6 @@ export async function markPendingReplyConsumed(tx: Tx, ctx: WsCtx, replyId: Uuid
 
 /** 動いている本番の実行があるか（running・waiting_input。insertLiveRun と同じ判定） */
 export async function hasActiveLiveRun(q: Queryable, ctx: WsCtx, askId: Uuid): Promise<boolean> {
-  const r = await q.query("SELECT 1 FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND mode = 'live' AND status IN ('running','waiting_input') LIMIT 1", [ctx.workspaceId, askId]);
+  const r = await q.query("SELECT 1 FROM ask_runs WHERE workspace_id = $1 AND ask_id = $2 AND status IN ('running','waiting_input') LIMIT 1", [ctx.workspaceId, askId]);
   return r.rowCount > 0;
 }
