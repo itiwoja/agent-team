@@ -13,7 +13,6 @@ import { join } from "node:path";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { GatewayClientError } from "@open-team/gateway-client";
 import { AppError, errorHandler, errorResponse, notFoundHandler, requestContext } from "@open-team/platform";
-import { isSimClientError } from "@open-team/sim-client";
 import { Hono } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { compress } from "hono/compress";
@@ -33,7 +32,6 @@ export interface CreateAppOptions {
 
 /** 外部の失敗を共通の形のエラーに直す（理由の内訳は応答に出さない） */
 function mapError(err: unknown): AppError | undefined {
-  if (isSimClientError(err)) return new AppError("SIM_WORLD_UNAVAILABLE", undefined, { cause: err });
   if (err instanceof GatewayClientError) return new AppError("INTERNAL_ERROR", "gateway の呼び出しに失敗しました", { cause: err });
   return undefined;
 }

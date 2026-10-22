@@ -1,5 +1,5 @@
 // EP-43 監査ログの一覧・EP-44 検証（AS §2.10・§3.13、SO §3.13、09_api/auth-workspace.md:130-154）
-// 一覧：ワークスペースで絞り seq の降順でカーソル。includeShadow = false（既定）なら影の走行の行（payload.enforced = false）を除く（BR-67③、AS 8-26）。
+// 一覧：ワークスペースで絞り seq の降順でカーソル。
 // 検証：fromSeq〜toSeq（省略は全範囲、最大100万件）のハッシュを計算し直し、最初に合わない seq を返す。checkpointMatched は常に null（KMS は Won't）。
 // ok = false なら構造化ログ audit.verify_failed（CRITICAL。運営への通知の代わり：SO §3.13）。権限は viewer 以上（全員）
 
@@ -32,7 +32,6 @@ export const AuditListQuery = z.strictObject({
   to: z.iso.datetime({ offset: true }).optional(),
   eventType: z.string().max(500).optional(),
   taskId: z.guid().optional(),
-  includeShadow: z.enum(["true", "false"]).default("false"),
 });
 
 /** EP-44 の本文 */
@@ -56,8 +55,6 @@ export function auditLogItem(row: AuditLogRow) {
     payload: row.payload,
     hash: row.hash.toString("hex"),
     prevHash: row.prev_hash.toString("hex"),
-    // 影の走行の書き込みは false（BR-67③）。それ以外は true
-    enforced: row.payload.enforced !== false,
   };
 }
 
@@ -83,7 +80,6 @@ export function auditRoutes(r: ApiRouter, deps: AppDeps): void {
       ...(q.to ? { to: new Date(q.to) } : {}),
       ...(eventTypes.length > 0 ? { eventTypes } : {}),
       ...(q.taskId ? { taskId: q.taskId.toLowerCase() } : {}),
-      includeShadow: q.includeShadow === "true",
     });
     const last = page.rows[page.rows.length - 1];
     return c.json({ items: page.rows.map(auditLogItem), nextCursor: page.hasMore && last ? encodeAuditCursor(last.seq) : null });

@@ -1,6 +1,6 @@
 // 確認カードの文（reasons.ts）の試験：予定の登録（mcp.gcal.create_event）の時刻・場所・招待の一文と、操作名
 import { describe, expect, it } from "vitest";
-import { actionNounOf, calendarCardOf, calendarWhenText, githubCardOf, intentTitle, ruleText } from "./reasons.ts";
+import { actionNounOf, calendarCardOf, calendarWhenText, githubCardOf, intentTitle } from "./reasons.ts";
 
 describe("calendarWhenText：時刻は資格情報の時間帯で出す（既定は Asia/Tokyo）", () => {
   it("同じ日なら「10/12(月) 15:00〜16:00」", () => {
@@ -62,12 +62,6 @@ describe("予定の操作の名前（確認カードの題・理由の文）", (
     expect(intentTitle("mcp.gcal.create_event")).toBe("予定を登録する");
     expect(intentTitle("mcp.gcal.delete_event")).toBe("予定を削除する");
     expect(actionNounOf("mcp.gcal.create_event")).toBe("予定の登録");
-  });
-});
-
-describe("ruleText：ルールによる判定の決まった文", () => {
-  it("安全チェックがまだのときは、内部の語を使わずに確認が必要と言う", () => {
-    expect(ruleText("certificate_missing", null)).toBe("安全チェックがまだなので、確認が必要です");
   });
 });
 

@@ -255,7 +255,7 @@ export async function loadSkill(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row:
     return { kind: "text", text: `スキル「${name}」はありません。使えるスキル：${names.join("、") || "（なし）"}` };
   }
   // 本番のタスクで読んだら使った時刻を残す（信頼されたかどうかは問わない。記録の失敗でタスクは止めない）
-  if (!task.is_dry_run && task.rehearsal_run_id === null && !task.shadow) {
+  if (!task.is_dry_run) {
     try {
       await touchSkillUsed(rt.db, ctx, hit.id, rt.clock.now());
     } catch (e) {

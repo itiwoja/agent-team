@@ -11,7 +11,7 @@ import { insertWorkspaceSnapshot, SANDBOX_COMMAND_REFUSED_OUTPUT } from "@open-t
 import type { ScriptedStep } from "@open-team/llm";
 import { createTarGz, readTarGz, runExecutor, type SandboxTransport } from "@open-team/sandbox";
 import { buildEdge, call, llmRequest, USAGE } from "./__fixtures__/env.ts";
-import { T0, fxWorkspace, seedAgent, seedChainAsk, seedTask, tokenFor } from "./__fixtures__/shop.ts";
+import { T0, fxWorkspace, seedAgent, seedChainAsk, seedTask, tokenFor } from "./__fixtures__/seed.ts";
 import { createRuntime, type SandboxProvider } from "./runtime.ts";
 import { RUN_SHELL_SHAPE_TEXT, RUN_SHELL_TAINTED_TEXT, commandDeniedNote, judgeCommand } from "./sandbox-command.ts";
 import { sandboxEdgeOf } from "./sandbox.ts";
@@ -37,7 +37,7 @@ function coderDefinition(): AgentDefinitionInput {
 }
 
 async function setup(db: Db, taint?: TaintState) {
-  const ws = await fxWorkspace(db, { kind: "owner", audit: true });
+  const ws = await fxWorkspace(db, { audit: true });
   const coder = await seedAgent(db, ws, coderDefinition());
   const ask = await seedChainAsk(db, ws, [{ agent: coder, jobSlug: "build", position: 1, spokesperson: true }]);
   const task = await seedTask(db, ws, coder, "build", { ask, memberName: "コード職人", ...(taint === undefined ? {} : { taint }) });

@@ -3,15 +3,13 @@ import { generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { GatewayStartupError, assertAllowedConnectorUrls, assertGatewayEnv, normalizeConnectorUrl, readGatewayEnv } from "./env.ts";
 
-const SIM = "http://localhost:8081";
+const MCP = "http://localhost:8081";
 const DB_URL = "postgres://gw:pw@10.0.0.5:5432/open_team";
 const TOKEN = "x".repeat(40);
 
 const baseVars = (over: Record<string, string | undefined> = {}) => ({
   DATABASE_URL: DB_URL,
   INTERNAL_SHARED_TOKEN: TOKEN,
-  SIM_WORLD_URL: SIM,
-  SIM_WORLD_SHARED_TOKEN: TOKEN,
   ...over,
 });
 
@@ -27,15 +25,15 @@ function refused(fn: () => unknown): GatewayStartupError {
 
 describe("normalizeConnectorUrl（SO §3.1.2）", () => {
   it("SO-ENV-11 末尾の / を除き、ホストを小文字にする", () => {
-    expect(normalizeConnectorUrl("  https://Sim-World-1.Example.com/  ")).toBe("https://sim-world-1.example.com");
-    expect(normalizeConnectorUrl("https://sim.example/mcp/shop/store/")).toBe("https://sim.example/mcp/shop/store");
+    expect(normalizeConnectorUrl("  https://Mcp-1.Example.com/  ")).toBe("https://mcp-1.example.com");
+    expect(normalizeConnectorUrl("https://mcp.example/mcp/store/")).toBe("https://mcp.example/mcp/store");
   });
   it("http とポートを許す（docker compose の http://localhost:8081）。https の 443 は URL が空にする", () => {
     expect(normalizeConnectorUrl("http://localhost:8081/")).toBe("http://localhost:8081");
-    expect(normalizeConnectorUrl("https://sim.example:443/")).toBe("https://sim.example");
+    expect(normalizeConnectorUrl("https://mcp.example:443/")).toBe("https://mcp.example");
   });
   it("SO-ENV-13 http・https 以外、認証情報・クエリ・#、読めない URL は断る", () => {
-    for (const u of ["ftp://x.example", "http://u:p@localhost:8081", "https://u:p@sim.example", "http://localhost:8081/?q=1", "https://sim.example/#a", "notaurl"]) {
+    for (const u of ["ftp://x.example", "http://u:p@localhost:8081", "https://u:p@mcp.example", "http://localhost:8081/?q=1", "https://mcp.example/#a", "notaurl"]) {
       expect(() => normalizeConnectorUrl(u), u).toThrow();
     }
   });
@@ -43,44 +41,36 @@ describe("normalizeConnectorUrl（SO §3.1.2）", () => {
 
 describe("assertAllowedConnectorUrls（BR-66、SO-ENV-09〜15）", () => {
   it("SO-ENV-11 同じ URL ＋ /、同じものを2つ、空 → 起動する（正規化して重複を除く）", () => {
-    const r = assertAllowedConnectorUrls({ allowedConnectorUrls: [`${SIM}/`, ` ${SIM} `, ""], simWorldUrl: SIM });
-    expect(r).toEqual({ allowedConnectorUrls: [SIM], simWorldUrl: SIM });
+    const r = assertAllowedConnectorUrls({ allowedConnectorUrls: [`${MCP}/`, ` ${MCP} `, ""] });
+    expect(r).toEqual({ allowedConnectorUrls: [MCP] });
   });
-  it("SO-ENV-15 一覧に実の MCP サーバーがあっても、一覧が空でも、SIM_WORLD_URL がなくても起動する（確かめない）", () => {
-    expect(() =>
-      assertAllowedConnectorUrls({ allowedConnectorUrls: ["https://mcp.example.com", "http://localhost:8081"], simWorldUrl: undefined }),
-    ).not.toThrow();
-    expect(assertAllowedConnectorUrls({ allowedConnectorUrls: [], simWorldUrl: undefined })).toEqual({ allowedConnectorUrls: [], simWorldUrl: null });
+  it("SO-ENV-15 一覧に実の MCP サーバーがあっても、一覧が空でも起動する（確かめない）", () => {
+    expect(() => assertAllowedConnectorUrls({ allowedConnectorUrls: ["https://mcp.example.com", "http://localhost:8081"] })).not.toThrow();
+    expect(assertAllowedConnectorUrls({ allowedConnectorUrls: [] })).toEqual({ allowedConnectorUrls: [] });
   });
   it("一覧に読めない URL・認証情報つきがあれば起動しない", () => {
-    refused(() => assertAllowedConnectorUrls({ allowedConnectorUrls: ["::not a url::"], simWorldUrl: undefined }));
-    refused(() => assertAllowedConnectorUrls({ allowedConnectorUrls: ["https://u:p@mcp.example.com"], simWorldUrl: undefined }));
-  });
-  it("SIM_WORLD_URL が不正なら起動しない", () => {
-    const e = refused(() => assertAllowedConnectorUrls({ allowedConnectorUrls: [], simWorldUrl: "ftp://sim.example" }));
-    expect(e.reasons.join()).toContain("SIM_WORLD_URL");
+    refused(() => assertAllowedConnectorUrls({ allowedConnectorUrls: ["::not a url::"] }));
+    refused(() => assertAllowedConnectorUrls({ allowedConnectorUrls: ["https://u:p@mcp.example.com"] }));
   });
 });
 
 describe("readGatewayEnv・assertGatewayEnv（SO §2.2）", () => {
-  it("INTERNAL_SHARED_TOKEN（受ける側）と、SIM_WORLD_URL があれば SIM_WORLD_SHARED_TOKEN が要る", () => {
+  it("INTERNAL_SHARED_TOKEN（受ける側）が要る", () => {
     expect(readGatewayEnv({ DATABASE_URL: DB_URL }).missing).toEqual(["INTERNAL_SHARED_TOKEN"]);
-    expect(readGatewayEnv({ DATABASE_URL: DB_URL, INTERNAL_SHARED_TOKEN: TOKEN, SIM_WORLD_URL: SIM }).missing).toEqual(["SIM_WORLD_SHARED_TOKEN"]);
     const env = assertGatewayEnv({
       DATABASE_URL: DB_URL,
       INTERNAL_SHARED_TOKEN: TOKEN,
       PORT: "9090",
       COMMIT_SHA: "abc123",
-      SIM_WORLD_URL: "http://localhost:8081/",
-      SIM_WORLD_SHARED_TOKEN: TOKEN,
-      ALLOWED_CONNECTOR_URLS: "http://localhost:8081",
+      ALLOWED_CONNECTOR_URLS: "http://localhost:8081/",
     });
-    expect(env).toMatchObject({ port: 9090, simWorldUrl: SIM, simWorldSharedToken: TOKEN, allowedConnectorUrls: [SIM], commitSha: "abc123" });
+    expect(env).toMatchObject({ port: 9090, allowedConnectorUrls: [MCP], commitSha: "abc123" });
     expect(env.serviceAuth).toEqual({ sharedToken: TOKEN });
   });
-  it("SIM_WORLD_URL がなければ sim-world なし（SIM_WORLD_SHARED_TOKEN は要らない）", () => {
+  it("ALLOWED_CONNECTOR_URLS がなければ一覧は空", () => {
     const env = assertGatewayEnv({ DATABASE_URL: DB_URL, INTERNAL_SHARED_TOKEN: TOKEN });
-    expect(env).toMatchObject({ simWorldUrl: null, simWorldSharedToken: undefined, allowedConnectorUrls: [] });
+    expect(env).toMatchObject({ allowedConnectorUrls: [] });
+    expect(env).not.toHaveProperty("simWorldUrl");
   });
   it("DATABASE_URL がなければ起動しない。足りない名前だけ返し、値は出さない（D-47）", () => {
     expect(readGatewayEnv({ INTERNAL_SHARED_TOKEN: TOKEN }).missing).toContain("DATABASE_URL");

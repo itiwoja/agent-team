@@ -159,7 +159,7 @@ const C0: Counters = {
   intentsCount: 0,
   unknownOutcomeKeys: [],
 };
-const F0: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+const F0: Flags = { killSwitchEngaged: false, taskStatus: "running" };
 const X0: TaintState = { tainted: false, sources: [] };
 const DK01 = "2366fc5baa1285be13d0ae6278b43f6d9ef3f56a6391abae7be184e7e409b40e";
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -270,7 +270,7 @@ describe("decide：手順2 予算（KD §6.2、M-19）", () => {
     expect(brief(run({ c: { costUsd: 0.2 } }))).toEqual(ALLOW_RULE0);
     expect(brief(run({ c: { costUsd: 0.200001 } }))).toEqual(["halt", "budget_exceeded", "budget.per_task_usd"]);
   });
-  it("B13 は M-19 で変更：全体 $10・リハーサル $0.5 は decide の外。余計な項目を渡しても判定も inputsHash も変わらない", () => {
+  it("B13 は M-19 で変更：全体 $10 などは decide の外。余計な項目を渡しても判定も inputsHash も変わらない", () => {
     const p = { ...P0, budget: { ...P0.budget, per_rehearsal_usd: 0.5, platform_day_usd: 10 } } as EffectivePolicy;
     const c = { ...C0, rehearsalCostUsd: 0.49, platformDayCostUsd: 9.99 } as Counters;
     const a = decide(p, L(0.02), c, F0, X0);
@@ -457,7 +457,7 @@ describe("decide：手順4 操作の分類（KD §6.3、M-01・M-14）", () => {
 });
 
 describe("decide：手順5 ツールの状態（KD §6.3）", () => {
-  it("T1：needs_review → deny / tool_needs_review（ルール・合格証があっても）", () => {
+  it("T1：needs_review → deny / tool_needs_review（ルールがあっても）", () => {
     expect(brief(run({ s: S_PO(A0, { tool: { ...T_PO, status: "needs_review" } }) }))).toEqual(["deny", "tool_needs_review", null]);
   });
   it("T2：コネクタが無効 → deny / connector_disabled", () => {
@@ -683,9 +683,6 @@ describe("decide：手順10 ガード（KD §6.4、BR-61）", () => {
     });
     expect(run({ p, s: withItems(item(21)) }).reasonCode).toBe("guard_exceeded");
   });
-  it("G16：合格証がなくても guard_exceeded（合格証は手順10を変えない）", () => {
-    expect(run({ s: withItems(item(21)), f: { certificateValid: false } }).reasonCode).toBe("guard_exceeded");
-  });
 });
 
 describe("decide：手順11 ルール（KD §6.4、M-09〜M-12）", () => {
@@ -808,41 +805,6 @@ describe("decide：手順11 ルール（KD §6.4、M-09〜M-12）", () => {
   });
 });
 
-describe("decide：合格証（KD §6.4、M-18・BR-81）", () => {
-  it("C1：合格証なし → approve / certificate_missing / rules.items[0]", () => {
-    expect(brief(run({ f: { certificateValid: false } }))).toEqual(["approve", "certificate_missing", "rules.items[0]"]);
-  });
-  it("C2（M-18）：合格証なし＋一致なし（supplier-02）→ approval_required", () => {
-    expect(brief(run({ s: S_PO(poArgs({ supplier_id: "supplier-02" })), f: { certificateValid: false } }))).toEqual(APPROVAL);
-  });
-  it("C3：合格証なし＋rules.enabled = false → approval_required", () => {
-    const p = policy((x) => {
-      x.rules.enabled = false;
-    });
-    expect(brief(run({ p, f: { certificateValid: false } }))).toEqual(APPROVAL);
-  });
-  it("C4：合格証なし＋数量 21 → guard_exceeded、合格証なし＋U1 → unknown_outcome_pending", () => {
-    expect(run({ s: S_PO(poArgs({ items: [item(21)] })), f: { certificateValid: false } }).reasonCode).toBe("guard_exceeded");
-    expect(run({ c: { unknownOutcomeKeys: [DK01] }, f: { certificateValid: false } }).reasonCode).toBe("unknown_outcome_pending");
-  });
-  it("C5：合格証なしでも読み取りは変わらない", () => {
-    expect(brief(run({ s: S_INV, f: { certificateValid: false } }))).toEqual(["allow", "autonomy_auto", "autonomy.mcp_read"]);
-  });
-  it("C6：用意した確認（supplier-01・豆 20kg）：ルールなし・合格証なし・汚染あり → approval_required（ADR-039:31）", () => {
-    const p = policy((x) => {
-      x.rules.items = [];
-    });
-    const x: TaintState = {
-      tainted: true,
-      sources: [{ kind: "mcp_read", connectorId: "c-1", connectorSlug: "mail", connectorName: "メール", tool: "list_inbox", at: "2026-10-08T09:00:00+09:00" }],
-    };
-    expect(brief(run({ p, f: { certificateValid: false }, x }))).toEqual(APPROVAL);
-  });
-  it("certificateValid が true 以外（undefined など）なら合格証なしとして扱う", () => {
-    expect(run({ f: { certificateValid: undefined as unknown as boolean } }).reasonCode).toBe("certificate_missing");
-  });
-});
-
 describe("decide：IA §6.2・MT §6.5〜6.6（M-xx で直したもの）", () => {
   it("IA K-1・K-2：intentsCount 4（上限5）は手順6を通り、5 で deny(intent_limit)", () => {
     expect(brief(run({ c: { intentsCount: 4 } }))).toEqual(ALLOW_RULE0);
@@ -867,7 +829,7 @@ describe("decide：IA §6.2・MT §6.5〜6.6（M-xx で直したもの）", () =
     });
     expect(brief(run({ p }))).toEqual(["deny", "autonomy_deny", "autonomy.mcp_write"]);
   });
-  it("K-9・DK-06：同じ宛先の unknown_outcome があればルール一致・ガード内・合格証ありでも pending", () => {
+  it("K-9・DK-06：同じ宛先の unknown_outcome があればルール一致・ガード内でも pending", () => {
     expect(run({ c: { unknownOutcomeKeys: [DK01] } }).reasonCode).toBe("unknown_outcome_pending");
   });
   it("K-11：同じ操作・別の宛先の unknown_outcome は当たらない", () => {
@@ -877,16 +839,13 @@ describe("decide：IA §6.2・MT §6.5〜6.6（M-xx で直したもの）", () =
   it("K-12：確定してキーが消えたあとは当たらない", () => {
     expect(brief(run({ c: { unknownOutcomeKeys: [] } }))).toEqual(ALLOW_RULE0);
   });
-  it("K-28・RU-12：合格証なし・ルール一致 → certificate_missing", () => {
-    expect(run({ f: { certificateValid: false } }).reasonCode).toBe("certificate_missing");
-  });
-  it("K-29 は M-18 で変更：合格証なし・ルールなし → approval_required", () => {
+  it("K-29：ルールなし → approval_required", () => {
     const p = policy((x) => {
       x.rules.items = [];
     });
-    expect(brief(run({ p, f: { certificateValid: false } }))).toEqual(APPROVAL);
+    expect(brief(run({ p }))).toEqual(APPROVAL);
   });
-  it("K-30：合格証あり・rules.enabled = false・一致するルールあり → approval_required", () => {
+  it("K-30：rules.enabled = false・一致するルールあり → approval_required", () => {
     const p = policy((x) => {
       x.rules.enabled = false;
     });
@@ -998,20 +957,17 @@ describe("decide：筋書き（KD §6.7）", () => {
     });
     expect(run({ p: withRule, s }).reasonCode).toBe("approval_required");
   });
-  it("S9（デモ 1:05）：リハーサル（合格証 true）で数量 200 がすり抜け → ガードを足すと guard_exceeded。本番（合格証なし）は certificate_missing", () => {
+  it("S9：ガードがなければ数量 200 もルールで allow → ガードを足すと guard_exceeded", () => {
     const noQtyGuard = policy((x) => {
       x.guards = [G1];
     });
     const s200 = S_PO(poArgs({ items: [item(200)] }));
-    expect(brief(run({ p: noQtyGuard, s: s200, f: { certificateValid: true } }))).toEqual(ALLOW_RULE0);
+    expect(brief(run({ p: noQtyGuard, s: s200 }))).toEqual(ALLOW_RULE0);
     const tightened = { ...noQtyGuard, guards: mergeGuards([G1, { action: PO, arg: "items[].quantity", max: 20 }]) };
-    expect(run({ p: tightened, s: s200, f: { certificateValid: true } }).reasonCode).toBe("guard_exceeded");
-    expect(brief(run({ p: tightened, f: { certificateValid: false } }))).toEqual(["approve", "certificate_missing", "rules.items[0]"]);
+    expect(run({ p: tightened, s: s200 }).reasonCode).toBe("guard_exceeded");
+    expect(brief(run({ p: tightened }))).toEqual(ALLOW_RULE0);
   });
-  it("S10：本番の経路と影の走行で同じ入力なら出力も同じ（decide は shadow を取らない）", () => {
-    const shadowFlags = { ...F0, shadow: true } as Flags;
-    expect(decide(P0, S_PO(), C0, shadowFlags, X0)).toEqual(decide(P0, S_PO(), C0, F0, X0));
-  });
+
 });
 
 describe("decide：判定できない入力は例外（NFR-005）", () => {
@@ -1025,7 +981,7 @@ describe("decide：判定できない入力は例外（NFR-005）", () => {
 });
 
 describe("recheckIntent（M-20：手順4〜11だけ）", () => {
-  const ctx = { unknownOutcomeKeys: [] as string[], certificateValid: true };
+  const ctx = { unknownOutcomeKeys: [] as string[] };
   it("予算・Breaker・時間・Kill Switch・Intent の数を見ない（引数にない）", () => {
     expect(brief(recheckIntent(P0, S_PO(), ctx))).toEqual(ALLOW_RULE0);
     const tiny = policy((x) => {
@@ -1053,13 +1009,12 @@ describe("recheckIntent（M-20：手順4〜11だけ）", () => {
     });
     expect(brief(recheckIntent(noWrite, S_PO(), ctx))).toEqual(["deny", "not_granted", "mcp.llmWrite"]);
   });
-  it("ガードを足した・unknown_outcome・合格証なしも同じ手順で", () => {
+  it("ガードを足した・unknown_outcome も同じ手順で", () => {
     const tightened = policy((x) => {
       x.guards = mergeGuards([{ action: PO, arg: "items[].quantity", max: 10 }]);
     });
     expect(recheckIntent(tightened, S_PO(), ctx).reasonCode).toBe("guard_exceeded");
-    expect(recheckIntent(P0, S_PO(), { unknownOutcomeKeys: [DK01], certificateValid: true }).reasonCode).toBe("unknown_outcome_pending");
-    expect(recheckIntent(P0, S_PO(), { unknownOutcomeKeys: [], certificateValid: false }).reasonCode).toBe("certificate_missing");
+    expect(recheckIntent(P0, S_PO(), { unknownOutcomeKeys: [DK01] }).reasonCode).toBe("unknown_outcome_pending");
   });
   it("inputsHash は decide のものと別で、同じ入力なら同じ", () => {
     const a = recheckIntent(P0, S_PO(), ctx);
@@ -1075,9 +1030,8 @@ describe("一致したルールの id（SG-09 の記録）", () => {
   const two = policy((x) => {
     x.rules.items = [R0, R1];
   });
-  it("rule_matched・certificate_missing はルールの id を付ける（パスは今までどおり）", () => {
+  it("rule_matched はルールの id を付ける（パスは今までどおり）", () => {
     expect(run().matchedRuleId).toBe("r-91c2");
-    expect(run({ f: { certificateValid: false } })).toMatchObject({ reasonCode: "certificate_missing", matchedRule: "rules.items[0]", matchedRuleId: "r-91c2" });
     const r = run({ p: two, s: S_PO(poArgs({ supplier_id: "supplier-02" })) });
     expect(brief(r)).toEqual(["allow", "rule_matched", "rules.items[1]"]);
     expect(r.matchedRuleId).toBe("r-second");
@@ -1094,7 +1048,7 @@ describe("一致したルールの id（SG-09 の記録）", () => {
     for (const r of results) expect(r).not.toHaveProperty("matchedRuleId");
   });
   it("recheckIntent も同じ id を返す", () => {
-    expect(recheckIntent(P0, S_PO(), { unknownOutcomeKeys: [], certificateValid: true }).matchedRuleId).toBe("r-91c2");
+    expect(recheckIntent(P0, S_PO(), { unknownOutcomeKeys: [] }).matchedRuleId).toBe("r-91c2");
   });
   it("ルールの id を変えても判定（decision・reasonCode・matchedRule）は同じで、matchedRuleId だけが変わる", () => {
     const renamed = policy((x) => {
@@ -1107,7 +1061,6 @@ describe("一致したルールの id（SG-09 の記録）", () => {
   });
   it("matchedRuleId を足しても inputsHash は入力だけから決まる（同じポリシーの computeInputsHash と一致）", () => {
     expect(run().inputsHash).toBe(computeInputsHash(P0, S_PO(), C0, F0, X0));
-    expect(run({ f: { certificateValid: false } }).inputsHash).toBe(computeInputsHash(P0, S_PO(), C0, { ...F0, certificateValid: false }, X0));
   });
 });
 
@@ -1288,7 +1241,6 @@ const arbCase: fc.Arbitrary<Case> = fc.tuple(arbPolicy, arbSubject).chain(([p, s
       flags: fc.record({
         killSwitchEngaged: mostly(false, fc.constant(true)),
         taskStatus: mostly<TaskStatus>("running", fc.constantFrom(...STATUSES)),
-        certificateValid: fc.boolean(),
       }),
       taint: fc.record({
         tainted: fc.boolean(),
@@ -1310,7 +1262,6 @@ const arbNear: fc.Arbitrary<Case> = fc
     guards: mostly([G0, G1], fc.subarray(GUARD_POOL)),
     mcpWrite: mostly<AutonomyLevel>("approve", fc.constantFrom<AutonomyLevel>("auto", "deny", "handoff")),
     llmWrite: mostly(true, fc.constant(false)),
-    cert: mostly(true, fc.constant(false)),
     unknown: mostly<string[]>([], fc.subarray([DK01, "e".repeat(64)])),
     repeat: mostly(false, fc.constant(true)),
     tainted: fc.boolean(),
@@ -1327,7 +1278,7 @@ const arbNear: fc.Arbitrary<Case> = fc
       },
       subject,
       counters: { ...C0, unknownOutcomeKeys: r.unknown, ...(r.repeat ? { repeatKey: repeatKeyOf(subject), repeatCount: 4 } : {}) },
-      flags: { ...F0, certificateValid: r.cert },
+      flags: F0,
       taint: { tainted: r.tainted, sources: [] },
     };
   });
@@ -1372,7 +1323,7 @@ describe("decide の性質（fast-check）", () => {
     );
   });
 
-  it("X3：型にないキー（shadow など）を足しても判定も inputsHash も同じ（BR-67）", () => {
+  it("X3：型にないキー（shadow など）を足しても判定も inputsHash も同じ", () => {
     fc.assert(
       fc.property(arbAll, (c) => {
         const extra: Case = {
@@ -1406,14 +1357,14 @@ describe("decide の性質（fast-check）", () => {
     const rnd = vi.spyOn(Math, "random");
     for (const c of cases) {
       dec(c);
-      recheckIntent(c.policy, c.subject, { unknownOutcomeKeys: c.counters.unknownOutcomeKeys, certificateValid: c.flags.certificateValid });
+      recheckIntent(c.policy, c.subject, { unknownOutcomeKeys: c.counters.unknownOutcomeKeys });
       nextCounters(c.counters, c.subject, dec(c), true);
     }
     expect(now).not.toHaveBeenCalled();
     expect(rnd).not.toHaveBeenCalled();
   });
 
-  it("X6：mcp_write の allow は「有効なルールに一致・合格証あり・宛先が結果不明でない・ガードの範囲内」のときだけ（Hard Ceiling）", () => {
+  it("X6：mcp_write の allow は「有効なルールに一致・宛先が結果不明でない・ガードの範囲内」のときだけ（Hard Ceiling）", () => {
     let allowed = 0;
     fc.assert(
       fc.property(arbAll, (c) => {
@@ -1423,7 +1374,6 @@ describe("decide の性質（fast-check）", () => {
         const { subject: s, policy: p } = c;
         expect(r.reasonCode).toBe("rule_matched");
         expect(r.matchedRule).toMatch(/^rules\.items\[\d+\]$/);
-        expect(c.flags.certificateValid).toBe(true);
         expect(p.rules.enabled).toBe(true);
         expect(s.tool!.classification).toBe("write");
         expect(c.counters.unknownOutcomeKeys).not.toContain(destinationKey(s.action!, s.args, s.tool!.argRoles));
@@ -1479,16 +1429,6 @@ describe("decide の性質（fast-check）", () => {
     );
   });
 
-  it("合格証がなければ mcp_write は allow にならない（BR-81）", () => {
-    fc.assert(
-      fc.property(arbAll, (c) => {
-        const r = dec({ ...c, flags: { ...c.flags, certificateValid: false } });
-        expect(r.decision === "allow" && r.operation === "mcp_write").toBe(false);
-      }),
-      RUNS,
-    );
-  });
-
   it("品目の並べ替え（多重集合）で判定・理由・matchedRule は変わらない（repeatKey は順も含めて数えるので外す）", () => {
     fc.assert(
       fc.property(arbAll, (c0) => {
@@ -1511,8 +1451,8 @@ describe("decide の性質（fast-check）", () => {
           budget: { per_task_usd: 20, per_day_usd: 200, agent_day_usd: null, max_steps: 200, max_minutes: 60 },
           breakers: { same_action_repeat: 20, denied_attempts_max: 20, step_cost_usd_max: 5 },
         };
-        const ctx = { unknownOutcomeKeys: c.counters.unknownOutcomeKeys, certificateValid: c.flags.certificateValid };
-        const a = decide(p, c.subject, { ...C0, unknownOutcomeKeys: ctx.unknownOutcomeKeys }, { ...F0, certificateValid: ctx.certificateValid }, c.taint);
+        const ctx = { unknownOutcomeKeys: c.counters.unknownOutcomeKeys };
+        const a = decide(p, c.subject, { ...C0, unknownOutcomeKeys: ctx.unknownOutcomeKeys }, F0, c.taint);
         const b = recheckIntent(p, c.subject, ctx);
         expect(strip(b)).toEqual(strip(a));
       }),

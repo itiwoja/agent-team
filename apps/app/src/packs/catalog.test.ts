@@ -14,7 +14,7 @@ import { PACK_CATEGORIES, PACKS, TRUSTED_SKILLS, type PackAgent } from "./catalo
 import { PackViewSchema } from "./contract.ts";
 import { packAgentIdsOf, packView } from "./install.ts";
 
-const policy = defaultWorkspacePolicy("owner");
+const policy = defaultWorkspacePolicy();
 
 describe("パックの棚の中身", () => {
   it("id・担当の名前・担当の key が重ならず、どの分類にも1つ以上ある", () => {
@@ -40,7 +40,7 @@ describe("パックの棚の中身", () => {
       expect(new Set(paths).size).toBe(paths.length);
       // ファイルを置くのは作業場を使う担当だけ
       if (paths.length > 0) expect(["dev-coder", "reviewer"]).toContain(a.template);
-      const initial = initialAgentDefinition({ name: a.name, role: a.role, workspacePolicy: policy, workspaceKind: "owner" });
+      const initial = initialAgentDefinition({ name: a.name, role: a.role, workspacePolicy: policy });
       const base = { ...(initial as unknown as AgentDefinitionInput), grants: { ...(initial.grants.web === undefined ? {} : { web: initial.grants.web }), connectors: {} } };
       expect(() => withJob(base, { slug: `pack-${a.key}`, kind: "once", template: a.template, instructions: a.instructions }, { policy, catalog: catalogOf([], []) }, a.name)).not.toThrow();
     }

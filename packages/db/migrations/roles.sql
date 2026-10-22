@@ -2,11 +2,11 @@
 -- 番号つきのマイグレーションのあとに毎回流す（冪等）。環境変数 OT_DB_SKIP_ROLES=1 で飛ばせる。
 -- ロールは NOLOGIN で作る。ログインはインフラが `ALTER ROLE ot_app LOGIN PASSWORD ...` か、ログイン用の利用者に
 -- `GRANT ot_app TO <利用者>` で付ける。流す利用者にロールを作る権限（CREATEROLE）がなければ作らず、あるロールにだけ GRANT する。
---   ot_app        app。業務の表の読み書き。audit_logs は INSERT・SELECT だけ、workspaces・users の DELETE なし、sim は snapshots の SELECT だけ
+--   ot_app        app。業務の表の読み書き。audit_logs は INSERT・SELECT だけ、workspaces・users の DELETE なし
 --                 connector_credentials は書くだけ（refresh_token_enc は読めない。更新は revoked_at と allow_protected_write だけ）
 --   ot_gateway    gateway。読み取り＋Intent・承認・タスク・ツールの更新、監査ログ・判定の INSERT。DELETE なし
---   ot_sim        sim-world。sim スキーマだけ（sim.events は更新しない）
---   ot_retention  ゲストの掃除（DB §2・SO §4.6 の ot_maint と同じ役目。名前は 08ddl:111）。workspaces・users などの DELETE
+--   ot_retention  古い行の掃除（DB §2・SO §4.6 の ot_maint と同じ役目。名前は 08ddl:111）。entry_attempts・idempotency_keys・
+--                 workspace_events の DELETE だけ
 -- 表の所有者はマイグレーションを流す利用者（本番は ot_migrator）。ON DELETE CASCADE と FK の確認は所有者の権限で走る。
 
 DO $$
@@ -15,7 +15,7 @@ DECLARE
   can_create boolean;
 BEGIN
   SELECT rolsuper OR rolcreaterole INTO can_create FROM pg_roles WHERE rolname = current_user;
-  FOREACH r IN ARRAY ARRAY['ot_app', 'ot_gateway', 'ot_sim', 'ot_retention'] LOOP
+  FOREACH r IN ARRAY ARRAY['ot_app', 'ot_gateway', 'ot_retention'] LOOP
     IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = r) THEN
       IF coalesce(can_create, false) THEN
         BEGIN
@@ -43,15 +43,12 @@ BEGIN
   REVOKE ALL ON public.schema_migrations FROM ot_app;
   -- 監査ログは追記だけ（BR-18。トリガーでも守る）
   REVOKE UPDATE, DELETE ON public.audit_logs FROM ot_app;
-  -- ワークスペース・利用者を消すのは掃除（ot_retention）だけ（DB I-31）
+  -- ワークスペース・利用者は消さない（DB I-31）
   REVOKE DELETE ON public.workspaces, public.users FROM ot_app;
   -- 変更しない表（トリガーでも守る）
   REVOKE UPDATE, DELETE ON public.agent_snapshots, public.workspace_policies FROM ot_app;
   -- 入口の試行は足して数えるだけ（消すのは掃除）
   REVOKE UPDATE, DELETE ON public.entry_attempts FROM ot_app;
-  -- 止めた実行を試験にするとき、タスク開始時の店舗の写しを読む（FR-066、incident-hook の getSimSnapshot）。sim の他の表・書き込みは不可
-  GRANT USAGE ON SCHEMA sim TO ot_app;
-  GRANT SELECT ON sim.snapshots TO ot_app;
   -- Google カレンダーの資格情報（design 16 §3.3）。上の ALL TABLES の後で付け直す（冪等）。
   -- 暗号文（refresh_token_enc）は読めない。復号は gateway（ot_gateway は SELECT のまま）。更新は revoked_at と allow_protected_write だけ
   -- 表の権限は REVOKE ALL にしない（ACL の項目が消えて付け直すと並びが変わり、2度目の流しで権限の写しがずれる）
@@ -85,20 +82,6 @@ BEGIN
 END
 $$;
 
--- ---- ot_sim ----
-DO $$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'ot_sim') THEN
-    RETURN;
-  END IF;
-  GRANT USAGE ON SCHEMA sim TO ot_sim;
-  GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA sim TO ot_sim;
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA sim TO ot_sim;
-  -- 事象は追記だけ（トリガーでも守る）
-  REVOKE UPDATE ON sim.events FROM ot_sim;
-END
-$$;
-
 -- ---- ot_retention ----
 DO $$
 BEGIN
@@ -106,14 +89,14 @@ BEGIN
     RETURN;
   END IF;
   GRANT USAGE ON SCHEMA public TO ot_retention;
-  GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO ot_retention;
-  GRANT SELECT ON public.workspaces, public.memberships, public.users, public.sessions, public.tasks, public.action_intents,
-    public.approvals, public.audit_logs, public.entry_attempts, public.idempotency_keys, public.workspace_events TO ot_retention;
-  -- 掃除（DB §4.4）。子の表はワークスペースからの ON DELETE CASCADE（所有者の権限）で消える
-  GRANT DELETE ON public.workspaces, public.users, public.sessions, public.entry_attempts, public.idempotency_keys,
-    public.workspace_events TO ot_retention;
-  -- 止めてから消す（Kill Switch と同じ停止。SO §3.16 の2）
-  GRANT UPDATE ON public.workspaces, public.tasks, public.approvals, public.action_intents, public.sessions TO ot_retention;
-  GRANT INSERT ON public.audit_logs, public.task_events, public.workspace_events TO ot_retention;
+  -- ゲストの掃除（0025 で廃止）のために付けていた権限を外す（冪等。付いていなければ何もしない）
+  REVOKE USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public FROM ot_retention;
+  REVOKE SELECT ON public.workspaces, public.memberships, public.users, public.sessions, public.tasks, public.action_intents,
+    public.approvals, public.audit_logs FROM ot_retention;
+  REVOKE DELETE ON public.workspaces, public.users, public.sessions FROM ot_retention;
+  REVOKE UPDATE ON public.workspaces, public.tasks, public.approvals, public.action_intents, public.sessions FROM ot_retention;
+  REVOKE INSERT ON public.audit_logs, public.task_events, public.workspace_events FROM ot_retention;
+  -- 24時間より古い入口の試行・冪等性のキー・SSE の事象を消す（DB §4.4）
+  GRANT SELECT, DELETE ON public.entry_attempts, public.idempotency_keys, public.workspace_events TO ot_retention;
 END
 $$;

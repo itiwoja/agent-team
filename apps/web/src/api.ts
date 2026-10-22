@@ -3,11 +3,10 @@
 // 型は手書き。設計書の表示項目から起こしたもので、契約（zod）が出たら突き合わせる：
 // - 依頼（API-072〜077）：apps/app/src/asks/contract.ts
 // - 承認・チェック（API-017・019、/check・/done・/counts）：apps/app/src/check/contract.ts
-// - リハーサル・セッション・ワークスペース：apps/app/src/routes/{rehearsal,rehearsal-cases,rehearsal-user-cases,rehearsal-tighten,session,workspace}.ts（こちらは実装済みの形に合わせた）
+// - セッション・ワークスペース：apps/app/src/routes/{session,workspace}.ts（こちらは実装済みの形に合わせた）
 // 契約にない呼び出し（unknown_outcome の確定）は api の中で「仮のパス」と書いてある。
 
 import { subscribeSse } from "./lib/sse";
-import type { CheckPrecedentView } from "./components/CheckPrecedent";
 
 const BASE = "/api/v1";
 
@@ -60,8 +59,6 @@ export function describeError(e: unknown): string {
       return "見つかりませんでした";
     case "WORKSPACE_IN_USE":
       return "この担当はいま作業場で動いています。終わってからもう一度試してください";
-    case "GUEST_LIMIT_REACHED":
-      return "いまは新しく始められません（試用の枠がいっぱいです）。いまの画面はそのまま使えます。しばらくしてからもう一度試してください";
     default:
       if (e.status === 404) return "見つかりませんでした";
       return e.status >= 500 ? "サーバーでうまくいきませんでした。時間をおいて試してください" : "うまくいきませんでした。もう一度試してください";
@@ -166,18 +163,16 @@ async function request<T>(method: string, path: string, opts: RequestOptions = {
 export type SessionState =
   | { state: "signed_out"; /** ローカルの起動ならトークンなしで入れる（POST /entry/local） */ localEntry?: boolean }
   | { state: "setup_required"; missing: string[] }
-  | { state: "signed_in"; workspaceKind: "owner" | "guest"; csrfToken: string; firstAskId?: string | null };
+  | { state: "signed_in"; workspaceKind: "owner"; csrfToken: string };
 
 export interface WorkspaceView {
   id: string;
-  kind: "owner" | "guest";
+  kind: "owner";
   role: "owner" | "maintainer" | "viewer" | string;
   timezone: string;
   maxConcurrentTasks: number;
   killSwitch: { engaged: boolean; engagedAt: string | null; engagedBy: string | null; reason: string | null };
-  guest: { expiresAt: string; daysLeft: number } | null;
   budget: { todayCostUsd: string; perDayUsd: string; remainingUsd: string };
-  seedVersion: string | null;
   /** Google カレンダー（available＝この環境で使えるか。connected・email＝つながっているか） */
   google: { available: boolean; connected: boolean; email: string | null };
   /**
@@ -314,35 +309,6 @@ export interface HandoffView {
   taintMark: string | null;
 }
 
-/** 止めた規則の貢献（防いだ額の降順）。一度も発動しなかったガードは実効ポリシーと照合できたときだけ */
-export interface RehearsalAttribution {
-  contributions: Array<{ ruleLabel: string; reasonCode: string; stoppedCount: number; preventedDamageJpy: number }>;
-  unfiredGuards: string[] | null;
-}
-
-export interface AskRehearsalView {
-  runId: string;
-  status: string;
-  certificate: "valid" | "none";
-  /** 現行の合格証（依頼単位）。revoked＝どれかが失効 */
-  certificateState: "valid" | "revoked" | "none";
-  certificateRevokeReason: "widen" | "tool_hash" | "model" | "case_added" | "superseded" | null;
-  /** 失効の理由の固定文（「ツールの説明が変わったため」） */
-  certificateRevokeText: string | null;
-  certificateCaseCount: number | null;
-  certificateIssuedAt: string | null;
-  /** 担当の仕事の再リハーサル（合格証が切れたあとの自動の走行）が走っている */
-  recertifying: boolean;
-  /** どの規則が何円防いだか（apps/app の rehearsal/attribution.ts。走行がなければ省く） */
-  attribution?: RehearsalAttribution | null;
-  /** 切れたあとの再リハーサルが費用の上限で止まった（翌日に自動でやり直す：D-107） */
-  recertifyStoppedByBudget?: boolean;
-  preventedDamageJpy: number | null;
-  damageJpy: number | null;
-  createdAt: string;
-  finishedAt: string | null;
-}
-
 /** 頼んだこと → 回答 の1往復（本番の実行1つ分）。kind：ask＝最初の依頼（やり直しも）、reply＝追加で頼んだこと、schedule＝定期の実行 */
 export interface AskTurnView {
   runId: string;
@@ -424,7 +390,6 @@ export interface AskDetail {
   stages: StageView[];
   handoffs: HandoffView[];
   pendingIntents: Array<{ intentId: string; approvalId: string | null; taskId: string; agentName: string; action: string; intentHash: string; taintLine: string | null; createdAt: string }>;
-  rehearsal: AskRehearsalView | null;
   resume: { agentName: string; reason: string } | null;
   messageCount: number;
   /** 編成を作った Gemini の呼び出し（用意した依頼は null） */
@@ -527,8 +492,6 @@ export interface ApprovalView {
   agent: AgentRef | null;
   askId: string | null;
   createdAt: string;
-  /** 同じ仕事・同じ action のリハーサルの前例（なければ無し） */
-  precedent?: CheckPrecedentView | null;
   expiresAt: string;
   canDecide: boolean;
   /** 承認者の名前（canDecide が false のとき「〇〇さんの確認待ち」） */
@@ -575,13 +538,13 @@ export interface QuestionItem extends ItemBase {
 
 export interface ReportItem extends ItemBase {
   kind: "report";
-  reportKind: "answer" | "rehearsal" | "incident_added" | "task" | "evolution";
+  reportKind: "answer" | "task" | "evolution";
   failed: boolean;
   /** 試しに走らせた結果（DryRunBanner） */
   dryRun: boolean;
   body: string | null;
   lines: string[];
-  link: { askId: string | null; rehearsalRunId: string | null; /** 担当の画面（/agents#<agentId>）へ移る行（evolution）だけ */ agentId?: string | null };
+  link: { askId: string | null; /** 担当の画面（/agents#<agentId>）へ移る行（evolution）だけ */ agentId?: string | null };
   /** 回答の報告のとき、その回答が答えた「頼んだこと」（返事の実行は返事の文）。ほかは null（古いサーバーの応答にはない） */
   request?: string | null;
 }
@@ -637,7 +600,6 @@ export interface DecisionResponse {
   approval: ApprovalView;
   rule: unknown;
   execution: { status: string; failReason: string | null; expiredReason: string | null; calendarLink?: string | null } | null;
-  incidentLine: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -747,183 +709,6 @@ export interface ResetAgentWorkspaceResponse {
 }
 
 // ---------------------------------------------------------------------------
-// リハーサル（実装済み：routes/rehearsal*.ts）
-
-export type RunStatus = "queued" | "generating" | "running" | "done" | "failed" | "cancelled" | (string & {});
-
-export interface RehearsalRun {
-  id: string;
-  jobId: string | null;
-  askId: string | null;
-  trigger: "seed" | "initial" | "retest" | "recertify" | "user_case" | (string & {});
-  /** 台本で再現した結果か（Gemini を呼んでいない。seed は常に true。retest は GUEST_RETEST_MODE=replay のゲストの依頼で true） */
-  scripted: boolean;
-  status: RunStatus;
-  seed: number;
-  modelId: string;
-  adaptRound: number;
-  damageJpy: number | null;
-  withoutControlDamageJpy: number | null;
-  preventedDamageJpy: number | null;
-  costUsd: string;
-  budgetUsd: string;
-  certificateId: string | null;
-  error: string | null;
-  createdAt: string;
-  startedAt: string | null;
-  finishedAt: string | null;
-}
-
-export interface RehearsalScenarioRow {
-  id: string;
-  caseId: string;
-  ordinal: number;
-  status: "queued" | "running" | "judging" | "done" | "cancelled" | "error" | (string & {});
-  abortReason: string | null;
-  faultIds: string[];
-  verdict: "pass" | "fail" | null;
-  /** kernel | agent | none */
-  stoppedBy: string | null;
-  stoppedByDecision: string | null;
-  stoppedByReasonCode: string | null;
-  stoppedByRule: string | null;
-  damageJpy: number | null;
-  withoutControlDamageJpy: number | null;
-  preventedDamageJpy: number | null;
-  /** 式と元の値（BR-79。rehearsal/damage-view.ts の DamageBreakdownView。形が合わない保存値は null） */
-  damageBreakdown: DamageBreakdownView | null;
-  /** 統制なし（影の走行）の分 */
-  withoutControlDamageBreakdown: DamageBreakdownView | null;
-  interpretation: unknown;
-  costUsd: string;
-  error: string | null;
-  /** 却下した書き込みの試験で、同じ宛先・違う内容がルールで確認なしに送られたときの注記（D-110。合否は変えない）。自分の悪い日の行には付かない */
-  incidentNote?: IncidentNote | null;
-}
-
-/** 注記の品目1行（apps/app/src/rehearsal/incident-note.ts の NoteItem） */
-export interface IncidentNoteItem {
-  sku: string | null;
-  name: string | null;
-  quantity: number | null;
-  unit: string | null;
-  unitPrice: number | null;
-}
-
-export interface IncidentNote {
-  text: string;
-  destination: string | null;
-  ruleLabel: string | null;
-  sent: IncidentNoteItem[];
-  rejected: IncidentNoteItem[];
-}
-
-export interface DamageTerm {
-  key: string;
-  label: string;
-  value: number | string;
-  unit: "jpy" | "qty" | "text";
-}
-
-/** apps/app/src/rehearsal/damage-view.ts の DamageBreakdownView */
-export interface DamageBreakdownView {
-  totalJpy: number;
-  items: Array<{
-    kind: "wrong_payee" | "duplicate_order" | "over_order" | "overpriced";
-    label: string;
-    formula: string;
-    applied: boolean;
-    amountJpy: number;
-    lines: Array<{ label: string; expression: string; terms: DamageTerm[]; amountJpy: number }>;
-  }>;
-  secretLeaks: { count: number; writes: Array<{ eventSeq: number; tool: string; canary: string }> };
-}
-
-/** 結果の userCases[]（自分の悪い日。routes/rehearsal.ts → rehearsal/user-case-results.ts） */
-export interface UserCaseResult {
-  id: string;
-  text: string | null;
-  status: string | null;
-  /** 「こう解釈しました：」のあとの1行 */
-  interpretation: string | null;
-  caseId: string | null;
-  faultIds: string[];
-  runId: string;
-  runStatus: string;
-  damageJpy: number | null;
-  withoutControlDamageJpy: number | null;
-  preventedDamageJpy: number | null;
-  createdAt: string;
-  finishedAt: string | null;
-  scenario: RehearsalScenarioRow | null;
-}
-
-/** packages/rehearsal の RehearsalCounts */
-export interface RehearsalCounts {
-  total: number;
-  withoutControl: { harmed: number; damageJpy: number } | null;
-  withControl: { slipped: number; damageJpy: number };
-  afterTighten: { slipped: number; damageJpy: number } | null;
-  stoppedByKernel: number;
-  stoppedByAgent: number;
-  byKernelRule: Record<string, number>;
-}
-
-/** 締める提案（result.proposals。id は POST …/tightening の proposalId） */
-export interface TighteningProposal {
-  id: string;
-  jobId: string;
-  /** 画面に出す 1 行（例：「1回の発注は20個まで」） */
-  label: string;
-  patch: Array<{ op: "add" | "replace" | "remove"; path: string; value?: unknown }>;
-  /** 塞ぐ状況の caseId */
-  fixes: string[];
-}
-
-export interface RehearsalResult {
-  run: RehearsalRun;
-  /** 悪い日を作った Gemini（用意した走行は null。費用の記録がなければ costUsd は null） */
-  generator?: { model: string; costUsd: string | null; count?: number } | null;
-  counts: RehearsalCounts | null;
-  provisional: boolean;
-  preventedDamageJpy: number | null;
-  scenarios: RehearsalScenarioRow[];
-  proposals: TighteningProposal[];
-  userCases: UserCaseResult[];
-}
-
-export interface RehearsalCertificate {
-  id: string;
-  runId: string;
-  policyHash: string;
-  toolHashes: unknown;
-  modelId: string;
-  caseSetHash: string;
-  caseCount: number;
-  summary: unknown;
-  certificateHash: string;
-  auditSeq: number | null;
-  issuedAt: string;
-  revokedAt: string | null;
-  revokeReason: string | null;
-}
-
-export interface RehearsalCase {
-  id: string;
-  /** どの依頼の試験か（担当の仕事の試験は null） */
-  askId: string | null;
-  source: "generated" | "user" | "incident" | (string & {});
-  title: string | null;
-  faultIds: string[];
-  userText: string | null;
-}
-
-export interface UserCaseStarted {
-  userCase: { id: string; status: string; interpretation: string | null; faultIds: string[]; runId: string | null };
-  run: RehearsalRun;
-}
-
-// ---------------------------------------------------------------------------
 // 監査ログ（SCR-010。API-023・API-024 = EP-43・EP-44：apps/app/src/routes/audit.ts）
 
 /** AS §2.10 の AuditLogItem */
@@ -937,8 +722,6 @@ export interface AuditLogItem {
   payload: Record<string, unknown>;
   hash: string;
   prevHash: string;
-  /** 影の走行の書き込みは false */
-  enforced: boolean;
 }
 
 export interface AuditLogQuery {
@@ -946,7 +729,6 @@ export interface AuditLogQuery {
   cursor?: string;
   /** カンマ区切りで複数 */
   eventType?: string;
-  includeShadow?: boolean;
 }
 
 export interface AuditVerifyResult {
@@ -959,7 +741,7 @@ export interface AuditVerifyResult {
 // ---------------------------------------------------------------------------
 // ワークスペースの SSE（EP-45）
 
-/** 受ける事象の名前（check/contract.ts の CHECK_EVENT_TYPES・asks/contract.ts の ASK_EVENT_TYPES・リハーサル・Kill Switch） */
+/** 受ける事象の名前（check/contract.ts の CHECK_EVENT_TYPES・asks/contract.ts の ASK_EVENT_TYPES・Kill Switch） */
 const EVENT_TYPES = [
   "killswitch",
   "reset",
@@ -978,9 +760,6 @@ const EVENT_TYPES = [
   "ask.message.posted",
   "ask.agent_question",
   "ask.reply.queue",
-  "rehearsal.scenario",
-  "rehearsal.run",
-  "rehearsal.phase",
 ];
 
 /**
@@ -1034,9 +813,9 @@ export const api = {
     setCsrfToken(me.csrfToken);
     return me;
   },
-  enter: (token: string) => request<{ state: "signed_in"; workspaceKind: string; next: string; firstAskId: string | null; created: boolean }>("POST", "/entry", { body: { token } }),
+  enter: (token: string) => request<{ state: "signed_in"; workspaceKind: string; next: string }>("POST", "/entry", { body: { token } }),
   /** ローカルの起動だけ：トークンなしでオーナーとして入る */
-  enterLocal: () => request<{ state: "signed_in"; workspaceKind: string; next: string; firstAskId: string | null; created: boolean }>("POST", "/entry/local", { body: {} }),
+  enterLocal: () => request<{ state: "signed_in"; workspaceKind: string; next: string }>("POST", "/entry/local", { body: {} }),
   logout: () => request<void>("POST", "/logout"),
   /** Google カレンダーを切断（DELETE /connect/google。接続のない状態で呼んでも何もしない） */
   disconnectGoogle: () => request<void>("DELETE", "/connect/google"),
@@ -1044,8 +823,6 @@ export const api = {
   disconnectGithub: () => request<void>("DELETE", "/connect/github"),
   /** main・既定のブランチへの直接の書き込みの許可を切り替える */
   setGithubProtectedWrite: (allow: boolean) => request<{ allowProtectedWrite: boolean }>("PUT", "/connect/github/protected-write", { body: { allow } }),
-  /** ゲストの [最初からやり直す]：新しいゲストを作ってから古いのを削除予約にする。新しい Cookie が出る */
-  restartGuest: () => request<{ next: string; firstAskId: string }>("POST", "/guest/restart", { body: {} }),
 
   // 全部止める（EP-27）
   engageKillSwitch: (workspaceId: string, reason: string | null, idempotencyKey: string) =>
@@ -1107,30 +884,10 @@ export const api = {
   packs: () => request<{ categories?: string[]; packs: PackView[] }>("GET", "/packs"),
   installPack: (packId: string) => request<{ pack: PackView; agents: Array<{ agentId: string; name: string }> }>("POST", `/packs/${encodeURIComponent(packId)}/install`, { body: {} }),
 
-  // リハーサル
-  rehearsals: (workspaceId: string, askId: string) => request<{ items: RehearsalRun[] }>("GET", `${ws(workspaceId)}/rehearsals`, { query: { askId, limit: 20 } }),
-  rehearsalResult: (workspaceId: string, runId: string) => request<RehearsalResult>("GET", `${ws(workspaceId)}/rehearsals/${runId}/result`),
-  rehearsalCertificate: async (workspaceId: string, runId: string): Promise<RehearsalCertificate | null> => {
-    try {
-      return (await request<{ certificate: RehearsalCertificate }>("GET", `${ws(workspaceId)}/rehearsals/${runId}/certificate`)).certificate;
-    } catch (e) {
-      if (e instanceof ApiError && e.status === 404) return null;
-      throw e;
-    }
-  },
-  rehearsalCases: (workspaceId: string, askId: string) => request<{ items: RehearsalCase[] }>("GET", `${ws(workspaceId)}/rehearsal-cases`, { query: { askId } }),
-  /** 担当の仕事の試験（本番から足した試験は仕事に入る。依頼のページが自動の再リハーサルの行の題・印に使う） */
-  jobRehearsalCases: (workspaceId: string, jobId: string) => request<{ items: RehearsalCase[] }>("GET", `${ws(workspaceId)}/rehearsal-cases`, { query: { jobId } }),
-  startRehearsal: (workspaceId: string, askId: string) => request<{ run: RehearsalRun }>("POST", `${ws(workspaceId)}/rehearsals`, { body: { askId } }),
-  applyTightening: (workspaceId: string, runId: string, proposalId: string, retest = true) =>
-    request<{ run: RehearsalRun | null; retestError?: { code: string; message: string } }>("POST", `${ws(workspaceId)}/rehearsals/${runId}/tightening`, { body: retest ? { proposalId } : { proposalId, retest: false } }),
-  startUserCase: (workspaceId: string, runId: string, text: string) => request<UserCaseStarted>("POST", `${ws(workspaceId)}/rehearsals/${runId}/user-cases`, { body: { text } }),
-  cancelUserCase: (workspaceId: string, runId: string, inputId: string) => request<unknown>("DELETE", `${ws(workspaceId)}/rehearsals/${runId}/user-cases/${inputId}`),
-
   // 監査ログ（seq の降順。nextCursor が null なら終わり）
   auditLogs: (workspaceId: string, q: AuditLogQuery = {}) =>
     request<{ items: AuditLogItem[]; nextCursor: string | null }>("GET", `${ws(workspaceId)}/audit-logs`, {
-      query: { limit: q.limit, cursor: q.cursor, eventType: q.eventType || undefined, includeShadow: q.includeShadow ? "true" : undefined },
+      query: { limit: q.limit, cursor: q.cursor, eventType: q.eventType || undefined },
     }),
   /** 全範囲のハッシュを計算し直す */
   verifyAuditLogs: (workspaceId: string) => request<AuditVerifyResult>("POST", `${ws(workspaceId)}/audit-logs/verify`, { body: {} }),

@@ -1,32 +1,29 @@
 // 試験の道具（本番では読み込まれない。名前が test-helpers.ts なので dependency-cruiser の not-to-dev-dep の対象外）
 // - app を試験用の依存で組む（手で進める時計・ログをためる Logger・待ちを記録する sleep・ローカルの共有トークン）
-// - 偽の gateway（EP-51 の syncTools：sim-core の manifest のツールを unclassified で入れる。本物の gateway と同じ入れ方）
-// - 同じプロセスの本物の sim-world（@open-team/sim-world の createApp。保存はメモリ）につないだ sim-client
+// - 偽の gateway（EP-51 の syncTools：Google カレンダー・GitHub の manifest のツールを unclassified で入れる。本物の gateway と同じ入れ方）
 // - 要求を送る・サインインする・SSE を読む
 
-import type { Db } from "@open-team/db";
+import { issueSession, type Db } from "@open-team/db";
+import { insertWorkspacePolicyIfMissing } from "@open-team/db/app";
+import { fxWorkspace } from "@open-team/db/testing";
 import { GatewayClientError, type GatewayClient, type GwToolsSyncResponse } from "@open-team/gateway-client";
-import { toolHashOf, type Json } from "@open-team/kernel";
-import { ScriptedLlmClient } from "@open-team/llm";
+import { defaultWorkspacePolicy, hashCanonical, toolHashOf, type Json, type JsonObject } from "@open-team/kernel";
+import { ScriptedLlmClient, type ScriptedReply } from "@open-team/llm";
 import { createServiceAuth, manualClock, memoryLogger, type LogRecord, type ManualClock } from "@open-team/platform";
-import { createSimClient, type SimClient } from "@open-team/sim-client";
-import { SHOP_CONNECTORS, SHOP_TOOL_DESCRIPTIONS, SHOP_TOOL_INPUT_SCHEMAS, type ShopToolName } from "@open-team/sim-core";
-import { createApp as createSimWorldApp, MemorySimStore, type SimStore } from "@open-team/sim-world";
+import { GCAL_CONNECTOR, GCAL_TOOL_DESCRIPTIONS, GCAL_TOOL_INPUT_SCHEMAS, type GcalToolName } from "@open-team/gcal-core";
+import { GITHUB_CONNECTOR, GITHUB_TOOL_DESCRIPTIONS, GITHUB_TOOL_INPUT_SCHEMAS, type GithubToolName } from "@open-team/github-core";
 import type { Hono } from "hono";
 import { createApp, type CreateAppOptions } from "./app.ts";
 import type { AppHonoEnv } from "./context.ts";
 import { createAppDeps, unavailableGatewayClient, type AppDeps } from "./deps.ts";
 import type { AppEnv } from "./env.ts";
 import { SESSION_COOKIE } from "./http.ts";
-import { unavailableSimClient } from "@open-team/sim-client";
 
 export const OWNER_TOKEN = "owner-token-for-tests-0123456789abcdef";
-export const GUEST_TOKEN = "guest-token-for-tests-0123456789abcdef";
 export const COOKIE_SECRET = "cookie-secret-for-tests-0123456789abcd";
 export const SHARED_TOKEN = "internal-shared-token-0123456789abcdef";
 export const HOST = "app.test";
 export const ORIGIN = `https://${HOST}`;
-export const SIM_URL = "http://sim-world.test";
 export const GATEWAY_URL = "http://gateway.test";
 export const T0 = new Date("2026-10-14T01:00:00.000Z"); // 10:00 JST
 
@@ -36,17 +33,14 @@ export function testEnv(over: Partial<AppEnv> = {}): AppEnv {
     port: 0,
     webDist: undefined,
     ownerToken: OWNER_TOKEN,
-    guestToken: GUEST_TOKEN,
     cookieSecret: COOKIE_SECRET,
     cookieSecure: true,
     databaseUrl: "postgres://test",
     databaseUrlMaint: undefined,
     appBaseUrl: ORIGIN,
     gatewayUrl: GATEWAY_URL,
-    simWorldUrl: SIM_URL,
     serviceAuth: { sharedToken: SHARED_TOKEN },
     gemini: { apiKey: undefined, agentModel: "gemini-test", plannerModel: "gemini-test", compareModels: [] },
-    guestRetestMode: "replay",
     commitSha: "0123abc",
     googleConnect: undefined,
     githubConnect: undefined,
@@ -68,7 +62,7 @@ export function makeTestApp(
   o: { env?: Partial<AppEnv>; missing?: string[]; deps?: Partial<AppDeps>; app?: CreateAppOptions } = {},
 ): TestApp {
   const clock = manualClock(T0);
-  const { logger, records } = memoryLogger({ service: "app", secrets: [OWNER_TOKEN, GUEST_TOKEN, COOKIE_SECRET, SHARED_TOKEN] });
+  const { logger, records } = memoryLogger({ service: "app", secrets: [OWNER_TOKEN, COOKIE_SECRET, SHARED_TOKEN] });
   const sleeps: number[] = [];
   const env = testEnv(o.env);
   const deps = createAppDeps(env, o.missing ?? [], {
@@ -76,7 +70,6 @@ export function makeTestApp(
     log: logger,
     clock,
     gatewayClient: unavailableGatewayClient(),
-    simClient: unavailableSimClient(),
     llm: new ScriptedLlmClient([]),
     serviceAuth: createServiceAuth(env.serviceAuth, { log: logger }),
     sleep: async (ms) => {
@@ -136,6 +129,23 @@ export async function signInOwner(t: TestApp): Promise<SignedIn> {
   return { cookie, csrf: me.csrfToken, workspaceId: me.workspace.id, userId: me.user.id };
 }
 
+/**
+ * 2つ目のワークスペース（既定のポリシーつき）を作ってセッションを出す（分離の試験用）。
+ * ワークスペースはオーナーの1つだけなので本番では作れない。試験のデータベースの一意の索引を外して作る（fxWorkspace の second）
+ */
+export async function signInSecondWorkspace(t: TestApp): Promise<SignedIn> {
+  const db = t.deps.db;
+  const now = t.clock.now();
+  const ws = await fxWorkspace(db, { now, second: true });
+  const policy = defaultWorkspacePolicy();
+  await db.transaction((tx) =>
+    insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now }),
+  );
+  const s = await issueSession(db, { workspaceId: ws.workspaceId, userId: ws.userId, ipHash: null, userAgent: null, now });
+  const me = (await (await send(t, "GET", "/api/v1/me", { cookie: s.cookieValue })).json()) as { csrfToken: string };
+  return { cookie: s.cookieValue, csrf: me.csrfToken, workspaceId: ws.workspaceId, userId: ws.userId };
+}
+
 /** /internal/* を呼ぶ（既定は sa-app のローカルの証明） */
 export async function sendInternal(t: TestApp, method: string, path: string, caller: "sa-app" | "sa-gateway" | null = "sa-app"): Promise<Response> {
   const headers: Record<string, string> = { host: HOST };
@@ -143,14 +153,43 @@ export async function sendInternal(t: TestApp, method: string, path: string, cal
   return t.app.request(`http://${HOST}${path}`, { method, headers });
 }
 
+// ---- LLM の台本 ----
+
+/** モデルが返す JSON の台本 */
+export function jsonReply(value: unknown, usage = { inputTokens: 1000, outputTokens: 500, thinkingTokens: 0 }): ScriptedReply {
+  return { parts: [{ type: "text", text: JSON.stringify(value) }], usage };
+}
+
+/** モデルが返す文の台本 */
+export function textReply(text: string): ScriptedReply {
+  return { parts: [{ type: "text", text }], usage: { inputTokens: 100, outputTokens: 10, thinkingTokens: 0 } };
+}
+
 // ---- 偽の gateway（EP-51） ----
+
+/** 偽の gateway が tools/list に返すツール（'<コネクタ>.<ツール>'） */
+export type FakeToolName = `gcal.${GcalToolName}` | `github.${GithubToolName}`;
+
+/** コネクタの slug → tools/list のツール（説明・入力スキーマ） */
+const FAKE_MANIFESTS: Readonly<Record<string, ReadonlyArray<{ name: string; description: string; inputSchema: Json }>>> = {
+  [GCAL_CONNECTOR.slug]: GCAL_CONNECTOR.tools.map((t) => ({
+    name: t.name,
+    description: GCAL_TOOL_DESCRIPTIONS[t.name as GcalToolName],
+    inputSchema: GCAL_TOOL_INPUT_SCHEMAS[t.name as GcalToolName] as unknown as Json,
+  })),
+  [GITHUB_CONNECTOR.slug]: GITHUB_CONNECTOR.tools.map((t) => ({
+    name: t.name,
+    description: GITHUB_TOOL_DESCRIPTIONS[t.name as GithubToolName],
+    inputSchema: GITHUB_TOOL_INPUT_SCHEMAS[t.name as GithubToolName] as unknown as Json,
+  })),
+};
 
 export interface FakeGateway extends GatewayClient {
   syncCalls: string[];
-  /** 次から tools/list が返す説明を変える（F-08・needs_review の試験） */
-  overrideDescription(tool: ShopToolName, description: string): void;
+  /** 次から tools/list が返す説明を変える（needs_review の試験） */
+  overrideDescription(tool: FakeToolName, description: string): void;
   /** 次から tools/list に出さない */
-  omit(tool: ShopToolName): void;
+  omit(tool: FakeToolName): void;
   /** 次の syncTools を失敗させる */
   failNext(status: number, code: string): void;
 }
@@ -189,13 +228,12 @@ export function fakeGatewayClient(db: Db): FakeGateway {
       const c = (await db.query<{ id: string; workspace_id: string; slug: string }>("SELECT id, workspace_id, slug FROM connectors WHERE id = $1", [connectorId]))
         .rows[0];
       if (!c) throw new GatewayClientError(404, "NOT_FOUND");
-      const manifest = SHOP_CONNECTORS.find((m) => m.slug === c.slug);
       const out: GwToolsSyncResponse["tools"] = [];
-      for (const t of manifest?.tools ?? []) {
-        const name = `${c.slug}.${t.name}` as ShopToolName;
+      for (const t of FAKE_MANIFESTS[c.slug] ?? []) {
+        const name = `${c.slug}.${t.name}`;
         if (omitted.has(name)) continue;
-        const description = descriptions.get(name) ?? SHOP_TOOL_DESCRIPTIONS[name];
-        const inputSchema = SHOP_TOOL_INPUT_SCHEMAS[name] as unknown as Json;
+        const description = descriptions.get(name) ?? t.description;
+        const inputSchema = t.inputSchema;
         const existing = (
           await db.query<{ id: string; description: string; tool_hash: `sha256:${string}`; status: "ok" | "needs_review" }>(
             "SELECT id, description, tool_hash, status FROM connector_tools WHERE connector_id = $1 AND name = $2",
@@ -224,44 +262,6 @@ export function fakeGatewayClient(db: Db): FakeGateway {
       return { tools: out };
     },
   };
-}
-
-// ---- 同じプロセスの sim-world ----
-
-export interface InProcessSimWorld {
-  simClient: SimClient;
-  store: MemorySimStore;
-  /** 次から sim-world に届かない（NETWORK_ERROR） */
-  setDown(down: boolean): void;
-  requests: string[];
-}
-
-/** store を渡すと、メモリでなくその保存（Postgres の PostgresSimStore など。タスクの sim_snapshot_id の外部キーを通したい試験）を使う */
-export function inProcessSimWorld(clock: { now(): Date } = { now: () => T0 }, simStore?: SimStore): InProcessSimWorld {
-  const store = (simStore ?? new MemorySimStore()) as MemorySimStore;
-  const simApp = createSimWorldApp(
-    {
-      port: 0,
-      sharedToken: SHARED_TOKEN,
-      databaseUrl: undefined,
-      commitSha: "0123abc",
-    },
-    { store, now: () => clock.now() },
-  );
-  let down = false;
-  const requests: string[] = [];
-  const auth = createServiceAuth({ sharedToken: SHARED_TOKEN });
-  const simClient = createSimClient({
-    baseUrl: SIM_URL,
-    authHeaders: (aud) => auth.serviceAuthHeaders("sa-app", aud),
-    fetch: (async (input: string | URL | Request, init?: RequestInit) => {
-      const url = input instanceof Request ? input.url : String(input);
-      requests.push(`${init?.method ?? "GET"} ${url.replace(SIM_URL, "")}`);
-      if (down) throw new TypeError("fetch failed");
-      return simApp.request(url, init);
-    }) as typeof fetch,
-  });
-  return { simClient, store, setDown: (d) => void (down = d), requests };
 }
 
 // ---- SSE ----

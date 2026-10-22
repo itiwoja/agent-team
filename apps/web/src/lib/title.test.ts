@@ -19,6 +19,6 @@ describe("composeTitle", () => {
 
 describe("shortenForTitle", () => {
   it("改行や連続した空白は1つにし、前後の空白を落とす", () => {
-    expect(shortenForTitle("  仕入れ先の\n\nメールを  読んで ")).toBe("仕入れ先の メールを 読んで");
+    expect(shortenForTitle("  取引先の\n\nメールを  読んで ")).toBe("取引先の メールを 読んで");
   });
 });

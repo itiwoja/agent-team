@@ -3,7 +3,7 @@
 // HTTP は差し込める fetch を包み、要求ごとに「送ったか・どの状態コードが返ったか・ネットワークのどの段で失敗したか」を記録する。
 // 書き込みの結果の分け方（IA §3.12 の4 の表、BR-59・D-18）はこの記録から決める：
 // - tools/call を送る前の失敗（つなげない・initialize・tools/list の失敗、tools/call の名前解決・接続拒否・TLS）→ 送信前（再試行してよい）
-// - tools/call を送ったあとのタイムアウト・接続断・5xx（sim-world の 504・503 も）→ 結果不明（再試行しない）
+// - tools/call を送ったあとのタイムアウト・接続断・5xx→ 結果不明（再試行しない）
 // - 401・403 → 認証の失敗、JSON-RPC のエラー・3xx・ほかの 4xx（応答が返った）→ ツールのエラー（IA §8-12）
 // リダイレクトは追わない（redirect: "manual"。許可した URL から別のホストへ飛ばされない：MT D-11・BD-12）
 
@@ -23,7 +23,7 @@ export const MCP_CLIENT_INFO = { name: "open-team-gateway", version: "0.1.0" } a
 
 export interface McpTarget {
   url: string;
-  /** 呼び出し元の証明（ID トークン・共有トークン）と sim-world の X-OT-* */
+  /** 呼び出し元の証明（ID トークン・共有トークン）と各アダプターの頭 */
   headers: Record<string, string>;
   /** この呼び出しだけの秘密（Google のアクセストークン）。応答の結果のマスクに足す（ログには出さない） */
   secrets?: readonly string[];

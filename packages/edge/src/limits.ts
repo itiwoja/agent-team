@@ -50,11 +50,9 @@ export const EDGE_LIMITS = {
 
 export type EdgeLimits = { -readonly [K in keyof typeof EDGE_LIMITS]: number };
 
-/** 全体1日 $15・ゲスト1日 $4・リハーサル1回 $3（BR-62。D-104・D-106。15:228。整数のマイクロドル） */
+/** 全体1日 $15（BR-62。D-104・D-106。15:228。整数のマイクロドル） */
 export const SPEND_LIMITS = {
   platformDayMicroUsd: 15_000_000,
-  guestDayMicroUsd: 4_000_000,
-  rehearsalRunMicroUsd: 3_000_000,
 } as const;
 
 export type SpendLimits = { -readonly [K in keyof typeof SPEND_LIMITS]: number };

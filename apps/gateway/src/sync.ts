@@ -1,9 +1,9 @@
 // EP-51 POST /gw/v1/connectors/{connectorId}/tools/sync（ツールの取得と変化の検出。mcp-taint.md §3.12.4、api-surface.md §3.17）。
-// 1 コネクタの行からワークスペースを引き直す（本文はない）→ 境界（外れたら 422 CONNECTOR_NOT_ALLOWED と監査ログ connector.rejected：MT §3.12.3）
+// 1 コネクタの行からワークスペースを引き直す（本文はない）
 // 2 initialize → tools/list（nextCursor を最後まで。リダイレクトは追わない）。名前の形が外れたツールは登録しない
 // 3 新しいツール → unclassified・ok・役割なし（tool_hash = toolHashOf(説明, 入力スキーマ, {})）。監査ログ connector.tool.added
-// 4 説明・入力スキーマが変わった → needs_review（確定の定義と tool_hash は書き換えず pending に）・失効・合格証を切る。注釈だけなら needs_review にしない
-// 5 一覧から消えた → needs_review（pending = null）・失効・合格証を切る
+// 4 説明・入力スキーマが変わった → needs_review（確定の定義と tool_hash は書き換えず pending に）・失効。注釈だけなら needs_review にしない
+// 5 一覧から消えた → needs_review（pending = null）・失効
 // tool_hash は確定の役割の map で計算する（MT §3.2。判定に使う役割 effectiveArgRoles は edge が ToolInfo を作るときに計算する）
 
 import type { GwToolsSyncResponse } from "@open-team/gateway-client";
@@ -19,7 +19,6 @@ import {
 } from "@open-team/db/gateway";
 import { canonicalJson, toolHashOf, type ToolHash } from "@open-team/kernel";
 import { AppError } from "@open-team/platform";
-import { connectorBoundary, isOwnConnector } from "./boundary.ts";
 import { ConnectorAuthRequired, ConnectorAuthUnsupported, ConnectorTokenUnavailable, targetFor, type GatewayContext } from "./context.ts";
 import { isUuid } from "./ids.ts";
 import { describeFailure, openMcpSession, type McpToolDef } from "./mcp.ts";
@@ -43,7 +42,12 @@ function samePending(a: ConnectorToolRow["pending"], b: { description: string; i
   return sameDefinition({ description: b.description, inputSchema: b.inputSchema }, { description: a.description, inputSchema: a.inputSchema });
 }
 
-export async function syncConnectorTools(g: GatewayContext, connectorId: string, requestId: string | null): Promise<GwToolsSyncResponse> {
+/** コネクタに届かない・tools/list を読めない（details.reason は固定の短い名前。秘密は入れない） */
+function unreachable(reason: string): AppError {
+  return new AppError("INTERNAL_ERROR", "コネクタに届きません", { details: { reason } });
+}
+
+export async function syncConnectorTools(g: GatewayContext, connectorId: string): Promise<GwToolsSyncResponse> {
   if (!isUuid(connectorId)) throw new AppError("NOT_FOUND");
   const loc = await locateConnector(g.db, connectorId);
   if (!loc) throw new AppError("NOT_FOUND");
@@ -52,56 +56,23 @@ export async function syncConnectorTools(g: GatewayContext, connectorId: string,
   const connector = await getConnector(g.db, ctx, connectorId);
   if (!connector) throw new AppError("NOT_FOUND");
 
-  const boundary = connectorBoundary({
-    simWorldOrigin: g.simWorldOrigin,
-    workspaceKind: ctx.kind,
-    rehearsalRunId: null,
-    shadow: false,
-    connectorUrl: connector.url,
-    ownOAuthConnector: isOwnConnector(g, connector),
-  });
-  if (!boundary.ok) {
-    const now = g.clock.now();
-    await g.db.transaction((tx) =>
-      appendAuditLog(
-        tx,
-        ctx.workspaceId,
-        {
-          eventType: "connector.rejected",
-          actorType: "system",
-          actorId: "gateway",
-          payload: { connectorId: connector.id, slug: connector.slug, reasonCode: boundary.reasonCode },
-        },
-        now,
-      ),
-    );
-    log.warn("gateway.connector_denied", "境界の外のコネクタの同期を断った", { connectorId: connector.id, reasonCode: boundary.reasonCode });
-    throw new AppError("CONNECTOR_NOT_ALLOWED", undefined, { details: [{ reasonCode: boundary.reasonCode }] });
-  }
-
-  // tools/list（sim-world はワークスペースの頭が要る。デモ店舗がまだなくても固定の説明を返す）
+  // tools/list
   let target;
   try {
-    target = await targetFor(
-      g,
-      connector,
-      { workspaceId: ctx.workspaceId, rehearsalRunId: null, simExecutionId: null, taskId: null, intentId: null, shadow: false },
-      requestId,
-      "list",
-    );
+    target = await targetFor(g, connector, null, "list");
   } catch (e) {
     // 同期は資格情報を使わない（list）。それでも投げられたら、つながらない扱いにする
     if (e instanceof ConnectorAuthUnsupported || e instanceof ConnectorAuthRequired || e instanceof ConnectorTokenUnavailable) {
-      throw new AppError("SIM_WORLD_UNAVAILABLE", undefined, { details: { reason: e instanceof ConnectorAuthUnsupported ? "auth_unsupported" : e.reason } });
+      throw unreachable(e instanceof ConnectorAuthUnsupported ? "auth_unsupported" : e.reason);
     }
     throw e;
   }
   const opened = await openMcpSession(target, { fetch: g.fetch, listTimeoutMs: g.listTimeoutMs });
-  if (!opened.ok) throw new AppError("SIM_WORLD_UNAVAILABLE", undefined, { details: { reason: describeFailure(opened.failure) } });
+  if (!opened.ok) throw unreachable(describeFailure(opened.failure));
   let listed: McpToolDef[];
   try {
     const r = await opened.session.listTools();
-    if (!r.ok) throw new AppError("SIM_WORLD_UNAVAILABLE", undefined, { details: { reason: describeFailure(r.failure) } });
+    if (!r.ok) throw unreachable(describeFailure(r.failure));
     listed = r.tools;
   } finally {
     await opened.session.close();
@@ -147,7 +118,7 @@ export async function syncConnectorTools(g: GatewayContext, connectorId: string,
       }
       // 変わった（DR-01・DR-03）
       if (cur.status === "ok") {
-        await applyToolChange(tx, ctx, connector, cur, { kind: "changed", def }, "sync", now, log);
+        await applyToolChange(tx, ctx, connector, cur, { kind: "changed", def }, "sync", now);
       } else if (!samePending(cur.pending, def)) {
         // すでに needs_review で、さらに別の定義になった：pending だけ新しくする（失効は前の変化で済んでいる）
         await markToolNeedsReview(tx, ctx, cur.id, { description: def.description, inputSchema: def.inputSchema, annotations: def.annotations, detectedAt: now.toISOString() }, now);
@@ -169,7 +140,7 @@ export async function syncConnectorTools(g: GatewayContext, connectorId: string,
     for (const cur of existing.values()) {
       if (server.has(cur.name)) continue;
       if (cur.status === "ok") {
-        await applyToolChange(tx, ctx, connector, cur, { kind: "removed" }, "sync", now, log);
+        await applyToolChange(tx, ctx, connector, cur, { kind: "removed" }, "sync", now);
       } else if (cur.pending !== null) {
         await markToolNeedsReview(tx, ctx, cur.id, null, now);
         await appendAuditLog(

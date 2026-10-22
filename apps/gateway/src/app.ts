@@ -1,6 +1,6 @@
 // gateway の Hono のアプリ（api-surface.md §1.2・§2.12.2・§3.17、security-ops-deploy.md §3.9）。書き込みの唯一の出口（15:445）。
 // /gw/v1/* は呼び出し元を sa-app だけに限る（共有トークン：15:483）。
-// 本文の workspaceId・rehearsal_run_id・shadow は読まない（EP-49 は z.object で知らないキーを捨てる：AS §2 の例外、T-155）。
+// 本文の workspaceId は読まない（EP-49 は z.object で知らないキーを捨てる：AS §2 の例外、T-155）。
 // 誤りは 09 の共通の形 { error: { code, message, details, requestId } }
 
 import { Hono } from "hono";
@@ -16,7 +16,6 @@ import {
   parseInput,
   readJsonBody,
   requestContext,
-  requestIdOf,
   type PlatformEnv,
 } from "@open-team/platform";
 import { resolveContext, type GatewayContext, type GatewayDeps } from "./context.ts";
@@ -67,19 +66,19 @@ export function createGateway(env: GatewayEnv, deps: GatewayDeps): GatewayApp {
   app.post("/gw/v1/tools/call", async (c) => {
     if (!/^application\/json\b/i.test(c.req.header("content-type") ?? "")) throw new AppError("UNSUPPORTED_MEDIA_TYPE");
     const body = parseInput(ToolsCallBody, await readJsonBody(c)) as GwToolsCallRequest;
-    const res = await callReadTool(g, c.req.header(TASK_TOKEN_HEADER), body, requestIdOf(c));
+    const res = await callReadTool(g, c.req.header(TASK_TOKEN_HEADER), body);
     return c.json(res);
   });
 
   // EP-50 書き込みの実行（本文は読まない：Intent の行から引く）
   app.post("/gw/v1/intents/:intentId/execute", async (c) => {
-    const res = await executeIntent(g, c.req.param("intentId"), { requestId: requestIdOf(c), signal: c.req.raw.signal });
+    const res = await executeIntent(g, c.req.param("intentId"), { signal: c.req.raw.signal });
     return c.json(res);
   });
 
   // EP-51 ツールの同期（本文は読まない：コネクタの行から引く）
   app.post("/gw/v1/connectors/:connectorId/tools/sync", async (c) => {
-    const res = await syncConnectorTools(g, c.req.param("connectorId"), requestIdOf(c));
+    const res = await syncConnectorTools(g, c.req.param("connectorId"));
     return c.json(res);
   });
 

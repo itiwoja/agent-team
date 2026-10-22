@@ -60,8 +60,6 @@ export const AgentGrowthSchema = z.object({
   reuseCount: z.number().int(),
   /** 「以後も許可」にしたルールの数 */
   allowedRuleCount: z.number().int(),
-  /** 安全チェックで権限を絞った回数 */
-  tightenedCount: z.number().int(),
   /** スキルの数 */
   skillCount: z.number().int(),
 });
@@ -123,7 +121,7 @@ export const AgentLibraryItemSchema = z.object({
   disabledReason: z.string().nullable(),
   jobCount: z.number().int(),
   askCount: z.number().int(),
-  /** 本番のタスクの数（リハーサルは数えない） */
+  /** 本番のタスクの数（試し実行は数えない） */
   taskCount: z.number().int(),
   lastActiveAt: Iso.nullable(),
   createdAt: Iso,

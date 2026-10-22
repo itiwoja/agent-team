@@ -1,28 +1,25 @@
 // 設定プランナーの生成（create.ts の generateAsk）の失敗の扱い：時間切れ・Kill Switch・費用の上限・材料の不足。LLM は台本・待ちぼうけ
 import { lockWorkspace } from "@open-team/db";
-import { insertWorkspacePolicyIfMissing } from "@open-team/db/app";
 import { getAsk, getLatestLiveRun, insertGeneratingAsk, insertLiveRun, markAskFormed } from "@open-team/db/asks";
 import { useTestDb } from "@open-team/db/testing";
-import { defaultWorkspacePolicy, hashCanonical, type JsonObject } from "@open-team/kernel";
+import { defaultWorkspacePolicy } from "@open-team/kernel";
 import { LlmError, ScriptedLlmClient, type LlmClient } from "@open-team/llm";
 import { AppError } from "@open-team/platform";
 import { afterEach, describe, expect, it } from "vitest";
-import { T0, startRehearsalWorld, type RehearsalWorld } from "../rehearsal/__fixtures__/world.ts";
-import { jsonReply } from "../rehearsal/test-helpers.ts";
+import { T0, startTestWorld, type TestWorld } from "../__fixtures__/world.ts";
+import { jsonReply } from "../test-helpers.ts";
 import { closeFailedStart, generateAsk, policyLinesOf, type CreateAskDeps } from "./create.ts";
 
 const T = useTestDb();
-let world: RehearsalWorld | null = null;
+let world: TestWorld | null = null;
 afterEach(async () => {
   await world?.close();
   world = null;
 });
 
 async function setup(llm: LlmClient, over: Partial<CreateAskDeps> = {}) {
-  const { db, url } = T();
-  const w = (world = await startRehearsalWorld(db, url));
-  const policy = defaultWorkspacePolicy("owner");
-  await db.transaction((tx) => insertWorkspacePolicyIfMissing(tx, w.ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now: T0 }));
+  const { db } = T();
+  const w = (world = await startTestWorld(db));
   const ask = await db.transaction((tx) => insertGeneratingAsk(tx, w.ws.ctx, { createdBy: w.ws.userId, text: "何かして", mentionAgentId: null, now: T0 }));
   const deps: CreateAskDeps = { ...w.deps(llm as ScriptedLlmClient), sleep: async () => {}, ...over };
   return { w, ask, deps };
@@ -80,7 +77,7 @@ describe("generateAsk の失敗", () => {
 
 describe("policyLinesOf", () => {
   it("ポリシーの要約を固定の文で作る（書き込みは確認が要る・予算・使えるコネクタ）", () => {
-    const lines = policyLinesOf(defaultWorkspacePolicy("owner"));
+    const lines = policyLinesOf(defaultWorkspacePolicy());
     expect(lines).toContain("書き込み（発注・送信など）は送る前の確認が要る");
     expect(lines.join("\n")).toMatch(/予算は \$0\.5、1日は \$10/);
     expect(lines.at(-1)).toMatch(/^使えるコネクタ：/);
@@ -95,7 +92,7 @@ describe("編成のあと実行を始められなかったとき（closeFailedSt
     expect(running).toMatchObject({ status: "running" });
     return { w, ask, deps };
   }
-  const askEvents = async (w: RehearsalWorld) =>
+  const askEvents = async (w: TestWorld) =>
     (await w.db.query<{ type: string; data: { status?: string } }>("SELECT type, data FROM workspace_events WHERE workspace_id = $1 AND type = 'ask.status' ORDER BY id", [w.ws.workspaceId])).rows;
 
   it("Kill Switch で止まったら running → cancelled（SSE も出す）", async () => {

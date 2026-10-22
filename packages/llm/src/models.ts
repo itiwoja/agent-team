@@ -1,6 +1,6 @@
 // 使うモデル（SO §2.2・§9 I-03）
-// エージェントの推論・要約は Flash 系、設定プランナー・状況の生成（解釈・締める提案を含む）は上位のモデル。
-// 版つきの ID にする（別名が裏で替わると、合格証の「モデルの変更」が働かない：SO I-03）
+// エージェントの推論・要約は Flash 系、設定プランナーは上位のモデル。
+// 版つきの ID にする（別名が裏で替わると、同じ名前で中身の違うモデルを呼ぶことになる：SO I-03）
 
 import type { LlmPhase } from "@open-team/runner";
 
@@ -41,9 +41,6 @@ export type GeminiPurpose =
   | "agent"
   | "summary"
   | "planner"
-  | "rehearsal_generate"
-  | "rehearsal_interpret"
-  | "rehearsal_tighten"
   | "model_comparison";
 
 /** LLM Proxy の phase。0-H はどの段階も Flash 系（formation-runtime.md §8-7） */
@@ -55,14 +52,11 @@ export const MODEL_ROLE_BY_PHASE: Readonly<Record<LlmPhase, GeminiModelRole>> = 
   report: "agent",
 };
 
-/** 状況の生成・解釈・締める提案は上位（SW:766・855・916）、要約は Flash 系（15_hackathon.md:587） */
+/** 設定プランナーは上位、要約は Flash 系（15_hackathon.md:587） */
 export const MODEL_ROLE_BY_PURPOSE: Readonly<Record<Exclude<GeminiPurpose, "model_comparison">, GeminiModelRole>> = {
   agent: "agent",
   summary: "agent",
   planner: "planner",
-  rehearsal_generate: "planner",
-  rehearsal_interpret: "planner",
-  rehearsal_tighten: "planner",
 };
 
 export function modelForRole(env: Pick<GeminiEnv, "agentModel" | "plannerModel">, role: GeminiModelRole): string {

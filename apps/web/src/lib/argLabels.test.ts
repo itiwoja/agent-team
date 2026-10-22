@@ -3,14 +3,14 @@ import { argLabel } from "./argLabels";
 
 describe("argLabel", () => {
   it("内部のキーを日本語にする", () => {
-    expect(argLabel("supplier_id")).toBe("仕入れ先");
+    expect(argLabel("title")).toBe("題名");
     expect(argLabel("note")).toBe("備考");
     expect(argLabel("to")).toBe("宛先");
-    expect(argLabel("account")).toBe("振込先口座");
+    expect(argLabel("path")).toBe("ファイル");
   });
   it("配列のパス（添字なし）", () => {
     expect(argLabel("items[].quantity")).toBe("品目の数量");
-    expect(argLabel("items[].sku")).toBe("品目の商品コード");
+    expect(argLabel("items[].name")).toBe("品目の名前");
     expect(argLabel("items[].unit_price")).toBe("品目の単価");
   });
   it("配列のパス（添字つき）は1から数える", () => {

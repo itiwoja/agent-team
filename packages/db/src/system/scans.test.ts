@@ -1,18 +1,17 @@
 // ワークスペースをまたぐ走査の試験（DB §4.1 の2・§4.12、IA §3.13・3.15）
 import { describe, expect, it } from "vitest";
 import type { Uuid } from "../types.ts";
-import { fxAgent, fxApproval, fxAsk, fxAskRun, fxConnector, fxIntent, fxRehearsalCase, fxRehearsalRun, fxRehearsalScenario, fxTask, fxWorkspace, useTestDb } from "../testing.ts";
-import { markAskRunsScanned, scanActiveAskRuns, scanDueAsks, scanExpiredApprovals, scanQueuedRehearsalRuns, scanQueuedTasks, scanStaleLiveTasks, scanStuckExecutingIntents } from "./scans.ts";
+import { fxAgent, fxApproval, fxAsk, fxAskRun, fxConnector, fxIntent, fxTask, fxWorkspace, useTestDb } from "../testing.ts";
+import { markAskRunsScanned, scanActiveAskRuns, scanDueAsks, scanExpiredApprovals, scanQueuedTasks, scanStaleLiveTasks, scanStuckExecutingIntents } from "./scans.ts";
 
 const T = useTestDb();
 const NOW = new Date("2026-10-12T09:00:00.000Z");
 
 describe("走査（ロックを取らずに候補を返す）", () => {
-  it("定期の依頼：next_run_at <= now を古い順に、ワークスペースをまたいで。削除予約のワークスペースは除く", async () => {
+  it("定期の依頼：next_run_at <= now を古い順に、ワークスペースをまたいで", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
-    const gone = await fxWorkspace(db, { deleteRequestedAt: NOW });
+    const b = await fxWorkspace(db, { second: true });
     const trigger = { type: "schedule", cron: "0 18 * * *", timezone: "Asia/Tokyo" };
     const mk = async (ws: typeof a, nextRunAt: Date) => {
       const { askId } = await fxAsk(db, ws);
@@ -22,10 +21,9 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     const late = await mk(a, new Date(NOW.getTime() - 1000));
     const exact = await mk(b, NOW);
     await mk(a, new Date(NOW.getTime() + 1));
-    await mk(gone, new Date(NOW.getTime() - 5000));
     const hits = await scanDueAsks(db, NOW);
     expect(hits.map((h) => h.id)).toEqual([late, exact]);
-    expect(hits[0]).toMatchObject({ workspaceId: a.workspaceId, workspaceKind: "guest", status: "running" });
+    expect(hits[0]).toMatchObject({ workspaceId: a.workspaceId, workspaceKind: "owner", status: "running" });
     expect(await scanDueAsks(db, NOW, 1)).toHaveLength(1);
   });
 
@@ -43,7 +41,7 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     await db.query("UPDATE approvals SET expires_at = $2 WHERE id = $1", [a2.approvalId, new Date(NOW.getTime() + 1)]);
     const expired = await scanExpiredApprovals(db, NOW);
     expect(expired).toEqual([
-      { workspaceId: ws.workspaceId, workspaceKind: "guest", id: a1.approvalId, intentId: i1.intentId, taskId, expiryCause: "ttl" },
+      { workspaceId: ws.workspaceId, workspaceKind: "owner", id: a1.approvalId, intentId: i1.intentId, taskId, expiryCause: "ttl" },
     ]);
     const ex = await fxIntent(db, ws, { taskId, jobId: agent.jobId, connectorId: conn.connectorId, status: "executing" });
     await db.query("UPDATE action_intents SET updated_at = $2 WHERE id = $1", [ex.intentId, new Date(NOW.getTime() - 120_000)]);
@@ -51,10 +49,10 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     expect(await scanStuckExecutingIntents(db, new Date(NOW.getTime() - 180_000))).toEqual([]);
   });
 
-  it("queued のタスク・走行：Kill Switch と削除予約のワークスペースは除き、古い順", async () => {
+  it("queued のタスク：Kill Switch と削除予約のワークスペースは除き、古い順", async () => {
     const { db } = T();
     const ok = await fxWorkspace(db);
-    const killed = await fxWorkspace(db, { killSwitchEngaged: true });
+    const killed = await fxWorkspace(db, { second: true, killSwitchEngaged: true });
     const agentOk = await fxAgent(db, ok);
     const agentKilled = await fxAgent(db, killed);
     const t2 = await fxTask(db, ok, agentOk, { status: "queued", now: new Date(NOW.getTime() + 10) });
@@ -62,9 +60,6 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     await fxTask(db, ok, agentOk, { status: "running" });
     await fxTask(db, killed, agentKilled, { status: "queued" });
     expect((await scanQueuedTasks(db)).map((h) => h.id)).toEqual([t1.taskId, t2.taskId]);
-    const run = await fxRehearsalRun(db, ok, { jobId: agentOk.jobId, status: "queued" });
-    await fxRehearsalRun(db, killed, { jobId: agentKilled.jobId, status: "queued" });
-    expect((await scanQueuedRehearsalRuns(db)).map((h) => h.id)).toEqual([run.runId]);
   });
 
   it("動いている依頼の実行：拾った印（last_scanned_at）の古い順。まだ拾っていないものが先（先頭の進まない実行で詰まらない）", async () => {
@@ -84,10 +79,10 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     expect((await scanActiveAskRuns(db, 1)).map((h) => h.id)).toEqual([runs[0]]);
   });
 
-  it("ハートビートの途絶えた本番のタスク（provisioning・running）：リハーサル・承認の待ち・Kill Switch のワークスペースは除く", async () => {
+  it("ハートビートの途絶えた本番のタスク（provisioning・running）：承認の待ち・Kill Switch のワークスペースは除く", async () => {
     const { db } = T();
     const ok = await fxWorkspace(db);
-    const killed = await fxWorkspace(db, { killSwitchEngaged: true });
+    const killed = await fxWorkspace(db, { second: true, killSwitchEngaged: true });
     const agentOk = await fxAgent(db, ok);
     const agentKilled = await fxAgent(db, killed);
     const at = (m: number) => new Date(NOW.getTime() - m * 60_000);
@@ -101,15 +96,10 @@ describe("走査（ロックを取らずに候補を返す）", () => {
     await setHeartbeat(fresh, at(1), at(1));
     const waiting = (await fxTask(db, ok, agentOk, { status: "awaiting_approval" })).taskId;
     await setHeartbeat(waiting, at(60), at(60));
-    const rehearsal = await fxRehearsalRun(db, ok, { jobId: agentOk.jobId, status: "running" });
-    const rehearsalCase = await fxRehearsalCase(db, ok, { jobId: agentOk.jobId });
-    const scenario = await fxRehearsalScenario(db, ok, { runId: rehearsal.runId, caseId: rehearsalCase.caseId });
-    const rehearsalTask = (await fxTask(db, ok, agentOk, { status: "running", rehearsalRunId: rehearsal.runId, rehearsalScenarioId: scenario.scenarioId })).taskId;
-    await setHeartbeat(rehearsalTask, at(30), at(30));
     const killedTask = (await fxTask(db, killed, agentKilled, { status: "running" })).taskId;
     await setHeartbeat(killedTask, at(30), at(30));
     const hits = await scanStaleLiveTasks(db, at(10));
     expect(hits.map((h) => h.id).sort()).toEqual([stale, provisioningNoBeat].sort());
-    expect(hits.find((h) => h.id === stale)).toMatchObject({ workspaceId: ok.workspaceId, workspaceKind: "guest", askId: null });
+    expect(hits.find((h) => h.id === stale)).toMatchObject({ workspaceId: ok.workspaceId, workspaceKind: "owner", askId: null });
   });
 });

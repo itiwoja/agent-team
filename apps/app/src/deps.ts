@@ -1,6 +1,6 @@
-// app の依存（AppDeps）。ルート・処理はこれだけを受け取り、試験は差し替える（偽の gateway・sim-world・LLM・時計）。
+// app の依存（AppDeps）。ルート・処理はこれだけを受け取り、試験は差し替える（偽の gateway・LLM・時計）。
 // 本番の組み立ては createAppDeps（server.ts から）。足りない環境変数があっても作れる（準備中：D-47）：
-// DB・gateway・sim-world・Gemini は「使うと失敗する」代わりを入れ、準備中の確認が処理まで通さない
+// DB・gateway・Gemini は「使うと失敗する」代わりを入れ、準備中の確認が処理まで通さない
 
 import { randomUUID } from "node:crypto";
 import { createDb, type Db, type Tx, type WsCtx } from "@open-team/db";
@@ -10,26 +10,23 @@ import { createEdgeGeminiClient, createRuntime, sandboxEdgeOf, type SandboxEdge,
 import { createSandboxProvider } from "./sandbox/providers.ts";
 import { LlmError, createLlmClient, PROVIDER_KEY_NAMES, findPrice, profilePrice, type LlmClient, type LlmConfig } from "@open-team/llm";
 import { createLogger, createServiceAuth, systemClock, type Clock, type Logger, type ServiceAuth } from "@open-team/platform";
-import { createSimClient, unavailableSimClient, type SimClient } from "@open-team/sim-client";
 import type { GoogleFetch } from "./connectors/google.ts";
 import type { AppEnv } from "./env.ts";
 import { asksOnTaskSettled, asksOnTasksTerminated, asksTickStep } from "./asks/hooks.ts";
-import { incidentOnTasksTerminated } from "./rehearsal/incident-hook.ts";
 import { approvalsTickStep } from "./check/tick-step.ts";
 import { learnSkillsStep } from "./evolution/learn.ts";
 import { pruneStep } from "./evolution/prune.ts";
-import { reRehearsalStep } from "./rehearsal/re-rehearse.ts";
 import { createWorkspaceEventHub, type WorkspaceEventHub } from "./events.ts";
 import { createRunningTaskRegistry, type RunningTaskRegistry } from "./registry.ts";
 import { DEFAULT_SSE_OPTIONS, type SseOptions } from "./sse.ts";
 
-/** タスクが終了状態になったときの処理（BR-80 の回帰の試験・順番の進め方の入口。次の担当が足す） */
+/** タスクが終了状態になったときの処理（順番の進め方の入口） */
 export interface TasksTerminatedEvent {
   tasks: readonly HaltedTask[];
   cause: "kill_switch";
   now: Date;
 }
-/** 同じトランザクションの中で呼ぶ。外部（Gemini・gateway・sim-world）を呼ばない（G-14） */
+/** 同じトランザクションの中で呼ぶ。外部（Gemini・gateway）を呼ばない（G-14） */
 export type TasksTerminatedHook = (tx: Tx, ctx: WsCtx, e: TasksTerminatedEvent) => Promise<void>;
 
 /** 承認の API（却下）・タスクの取り消しでタスクが終了状態になった（依頼の回答・順番の次の段の進め方の入口） */
@@ -58,7 +55,6 @@ export interface CronTickCounts {
   dispatched: number;
   expiredApprovals: number;
   scheduled: number;
-  reRehearsals: number;
 }
 
 /** 毎分の tick の1つの手順（G-02：取りこぼしの拾い直しだけ。次の担当が足す） */
@@ -78,13 +74,12 @@ export interface AppDeps {
   clock: Clock;
   ids: { newId(): string };
   gatewayClient: GatewayClient;
-  simClient: SimClient;
   llm: LlmClient;
   /** Google の呼び出し（token・カレンダー・revoke。試験で差し替える：16 §3.6） */
   googleFetch: GoogleFetch;
   /** GitHub の呼び出し（認可コードの交換・利用者とインストールの確認。試験で差し替える：18 §3.6） */
   githubFetch: typeof fetch;
-  /** サービス間の認証（/internal/* の受け口と、gateway・sim-world を呼ぶときのヘッダー） */
+  /** サービス間の認証（/internal/* の受け口と、gateway を呼ぶときのヘッダー） */
   serviceAuth: ServiceAuth;
   registry: RunningTaskRegistry;
   eventHub: WorkspaceEventHub;
@@ -143,7 +138,6 @@ export function createAppDeps(env: AppEnv, missing: readonly string[], overrides
   const authHeaders = (aud: string) => serviceAuth.serviceAuthHeaders("sa-app", aud);
   const gatewayClient =
     overrides.gatewayClient ?? (env.gatewayUrl ? createGatewayClient({ baseUrl: env.gatewayUrl, authHeaders }) : unavailableGatewayClient());
-  const simClient = overrides.simClient ?? (env.simWorldUrl ? createSimClient({ baseUrl: env.simWorldUrl, authHeaders }) : unavailableSimClient());
   const llm =
     overrides.llm ??
     // 1回だけ呼ぶクライアント。やり直しは edge の callGemini の1か所でする（中でもやり直すと二重になり、504 の待ちが最大 約8分に伸びて見えない）
@@ -163,15 +157,14 @@ export function createAppDeps(env: AppEnv, missing: readonly string[], overrides
     clock,
     ids: overrides.ids ?? { newId: () => randomUUID() },
     gatewayClient,
-    simClient,
     llm,
     googleFetch: overrides.googleFetch ?? fetch,
     githubFetch: overrides.githubFetch ?? fetch,
     serviceAuth,
     registry: overrides.registry ?? createRunningTaskRegistry(),
     eventHub: overrides.eventHub ?? createWorkspaceEventHub({ db, log }),
-    hooks: overrides.hooks ?? { tasksTerminated: [incidentOnTasksTerminated, asksOnTasksTerminated], taskSettled: [asksOnTaskSettled] },
-    tickSteps: overrides.tickSteps ?? [approvalsTickStep, reRehearsalStep, asksTickStep, learnSkillsStep, pruneStep],
+    hooks: overrides.hooks ?? { tasksTerminated: [asksOnTasksTerminated], taskSettled: [asksOnTaskSettled] },
+    tickSteps: overrides.tickSteps ?? [approvalsTickStep, asksTickStep, learnSkillsStep, pruneStep],
     sse: overrides.sse ?? DEFAULT_SSE_OPTIONS,
     sleep: overrides.sleep ?? defaultSleep,
     sandbox,

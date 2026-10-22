@@ -11,17 +11,17 @@ import {
   inboxDefinition,
   seedAgent,
   seedChainAsk,
-  seedShopConnectors,
+  seedConnectors,
   seedTask,
   supplierDefinition,
   tokenFor,
-} from "./__fixtures__/shop.ts";
+} from "./__fixtures__/seed.ts";
 
 const T = useTestDb();
 
-async function chain(db: Db, kind: "guest" | "owner" = "guest") {
-  const ws = await fxWorkspace(db, { kind, audit: true });
-  await seedShopConnectors(db, ws);
+async function chain(db: Db, second = false) {
+  const ws = await fxWorkspace(db, { audit: true, second });
+  await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());
   const ask = await seedChainAsk(db, ws, [
@@ -67,7 +67,7 @@ describe("getTaskContext（API-036）", () => {
     expect(again.started_at.getTime()).toBe(T0.getTime() + 5_000);
   });
 
-  it("PR-04 受信箱係（ゲスト・researcher）：テンプレート・フェーズ・ツール（mcp_call・notify・submit_report・finish と、2体の編成の連絡板 team_post・team_wait、本番の依頼なので利用者への質問 ask_user）・付与した MCP のツールだけ", async () => {
+  it("PR-04 受信箱係（researcher）：テンプレート・フェーズ・ツール（mcp_call・notify・submit_report・finish と、2体の編成の連絡板 team_post・team_wait、本番の依頼なので利用者への質問 ask_user）・付与した MCP のツールだけ", async () => {
     const { db } = T();
     const { ws, inbox, ask } = await chain(db);
     const taskId = await seedTask(db, ws, inbox, "read-supplier-mail", { ask, memberName: "受信箱係" });
@@ -83,7 +83,7 @@ describe("getTaskContext（API-036）", () => {
     expect(ctx.agent.jobInstructions).toContain("仕入れ先から届いた新しいメール");
     expect(ctx.input.prompt).toBe("仕入れ先のメールを読んで、在庫を見て、必要なら発注して");
     expect(ctx.limits.maxTokens).toBe(4096); // D-106（8,000 から下げた）
-    // 仮想の時計がなければ実時間の JST（18:00 JST）
+    // 「今」は実時間の JST（18:00 JST）
     expect(ctx.now).toBe("2026-10-12T18:00:00+09:00");
     expect(ctx.policySummary).toEqual(["mail.list_inbox で読み取りができます", "外部のサービスには書き込めません", "1回あたり最大 $0.20、1日 $1.00 まで"]);
     expect(ctx.formation).toEqual({
@@ -121,8 +121,8 @@ describe("getTaskContext（API-036）", () => {
 
   it("オーナーの owner は web の付与がなければ web_* を渡さない／無効のコネクタ・確認待ちのツールは見せない", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
-    await seedShopConnectors(db, ws, { disabled: ["bank"] });
+    const ws = await fxWorkspace(db);
+    await seedConnectors(db, ws, { disabled: ["bank"] });
     await db.query("UPDATE connector_tools SET status = 'needs_review' WHERE workspace_id = $1 AND name = 'list_products'", [ws.workspaceId]);
     const supplier = await seedAgent(db, ws, supplierDefinition());
     const taskId = await seedTask(db, ws, supplier, "reorder");
@@ -166,15 +166,6 @@ describe("getTaskContext（API-036）", () => {
     expect(ctx.input.prompt).toBe("このキー [REDACTED] を使って");
   });
 
-  it("仮想の時計（virtualNow）があればその時刻を「今」にする", async () => {
-    const { db } = T();
-    const { ws, inbox } = await chain(db);
-    const taskId = await seedTask(db, ws, inbox, "read-supplier-mail");
-    const { edge } = buildEdge(db, { extra: { virtualNow: async () => "2026-10-07T18:00:00+09:00" } });
-    const ctx = await edge.getTaskContext(await tokenFor(db, ws, taskId));
-    expect(ctx.now).toBe("2026-10-07T18:00:00+09:00");
-  });
-
   it("SO §3.10：トークンが違う・空・期限切れ（ちょうど）→ UNAUTHORIZED、終了・Kill Switch → TASK_HALTED", async () => {
     const { db } = T();
     const { ws, inbox } = await chain(db);
@@ -196,7 +187,7 @@ describe("getTaskContext（API-036）", () => {
   it("15:486 別のワークスペースのタスクはトークンからしか引けない（トークンが自分のタスクとワークスペースを決める）", async () => {
     const { db } = T();
     const a = await chain(db);
-    const b = await chain(db);
+    const b = await chain(db, true);
     const taskA = await seedTask(db, a.ws, a.inbox, "read-supplier-mail");
     const taskB = await seedTask(db, b.ws, b.inbox, "read-supplier-mail");
     const { edge } = buildEdge(db);

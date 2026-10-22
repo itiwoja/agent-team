@@ -7,8 +7,6 @@ export { EDGE_LIMITS, SPEND_LIMITS, BUDGET_TIME_ZONE, type EdgeLimits, type Spen
 export { issueTaskToken, resolveTaskByToken, haltedDetails, isTerminalStatus, type ResolvedTask } from "./tokens.ts";
 export {
   EdgeDataError,
-  grantedToolHashes,
-  isCertificateValid,
   loadDecideBase,
   loadDecideInputs,
   loadTaskPolicy,
@@ -25,7 +23,6 @@ export {
 export {
   intentStatusFor,
   recordMcpIntent,
-  shadowIgnores,
   type AgentIntentStatus,
   type RecordMcpIntentInput,
   type RecordedMcpIntent,
@@ -78,7 +75,7 @@ export { createRuntime, type EdgeRuntime } from "./runtime.ts";
 export { isTrustedSkill, skillDigest, skillTrustKey, trustedSkillDigestsOf, type TrustedSkillDigests } from "./skill-trust.ts";
 export { ASK_USER_LIMIT_TEXT, ASK_USER_NO_ANSWER_TEXT, ASK_USER_UNAVAILABLE_TEXT, answerText as askUserAnswerText, parseAskUserArgs } from "./ask-user.ts";
 export { TEAM_NO_REPLY_TEXT, TEAM_POSTED_TEXT, TEAM_RECIPIENT_STOPPED_TEXT, formatIncoming, loadBoard, type Board } from "./team.ts";
-export { enforcementOf, judgeToolCalls, type Judged, type JudgedCalls } from "./proxy.ts";
+export { judgeToolCalls, type Judged, type JudgedCalls } from "./proxy.ts";
 export { SlidingWindowLimiter, type Acquired } from "./rate-limit.ts";
 export { toJstIso } from "./util.ts";
 // 汚染後の Web の出口（SG-04）：依頼のタスクを作るとき、利用者の文の URL を見た URL の集合に入れる

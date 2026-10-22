@@ -39,13 +39,14 @@ describe("構造化ログ（SO §2.10・§3.17、NFR-032）", () => {
     });
   });
 
-  it("15:459 intentId・rehearsalRunId は渡したときだけ出す（null も渡せる）。commit を付けられる", () => {
+  it("15:459 intentId は渡したときだけ出す（null も渡せる）。commit を付けられる", () => {
     const { logger, records } = memoryLogger({ service: "app", commit: "0123abc" });
-    logger.log({ severity: "NOTICE", event: "intent.executed", message: "実行", workspaceId: "w1", taskId: "t1", intentId: "i1", rehearsalRunId: null });
-    expect(records[0]).toMatchObject({ severity: "NOTICE", workspaceId: "w1", taskId: "t1", intentId: "i1", rehearsalRunId: null, commit: "0123abc" });
+    logger.log({ severity: "NOTICE", event: "intent.executed", message: "実行", workspaceId: "w1", taskId: "t1", intentId: "i1" });
+    expect(records[0]).toMatchObject({ severity: "NOTICE", workspaceId: "w1", taskId: "t1", intentId: "i1", commit: "0123abc" });
+    logger.log({ severity: "NOTICE", event: "intent.failed", message: "失敗", intentId: null });
+    expect(records[1]).toMatchObject({ intentId: null });
     logger.info("x", "y");
-    expect(records[1]).not.toHaveProperty("intentId");
-    expect(records[1]).not.toHaveProperty("rehearsalRunId");
+    expect(records[2]).not.toHaveProperty("intentId");
   });
 
   it("debug・info・warn・error の重さ", () => {
@@ -79,10 +80,10 @@ describe("構造化ログ（SO §2.10・§3.17、NFR-032）", () => {
     const shared = "local-shared-token-0123456789abcdef";
     vi.stubEnv("INTERNAL_SHARED_TOKEN", shared);
     const lines: string[] = [];
-    const logger = createLogger({ service: "sim-world", write: (l) => lines.push(l) });
-    logger.error("sim.error", `failed with ${shared}`);
+    const logger = createLogger({ service: "gateway", write: (l) => lines.push(l) });
+    logger.error("gateway.error", `failed with ${shared}`);
     expect(lines[0]).not.toContain(shared);
-    expect(JSON.parse(lines[0]!)).toMatchObject({ message: `failed with ${REDACTED}`, service: "sim-world" });
+    expect(JSON.parse(lines[0]!)).toMatchObject({ message: `failed with ${REDACTED}`, service: "gateway" });
   });
 
   it("フィールドで service・severity などの決まったキーは上書きできない（severity は引数のもの）", () => {

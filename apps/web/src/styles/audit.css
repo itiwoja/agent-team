@@ -75,19 +75,6 @@
   font: inherit;
   font-size: 14px;
 }
-.audit-check {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px; /* タップ領域 44px（F-027） */
-  font-size: 14px;
-}
-.audit-check input {
-  width: 18px;
-  height: 18px;
-  margin: 0;
-  accent-color: var(--accent);
-}
 .audit-from {
   margin: 0 0 12px;
 }
@@ -177,7 +164,6 @@
   -webkit-box-orient: vertical;
   overflow-wrap: anywhere;
 }
-.audit-row.is-shadow .audit-summary,
 .audit-row.is-quiet .audit-summary {
   color: var(--muted);
 }

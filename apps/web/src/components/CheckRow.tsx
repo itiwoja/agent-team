@@ -1,7 +1,6 @@
 // SCR-019 の行（SCR-021 の「送る前の確認」と共有する部品）。種類は3つ：報告（○）・送る前の確認（○送る＝5秒の取り消し猶予）・質問（選択肢）
 import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import { Avatar } from "./Avatar";
-import { CheckPrecedent } from "./CheckPrecedent";
 import { Markdown } from "./Markdown";
 import {
   ApiError,
@@ -191,7 +190,6 @@ function ReportRow({
   failure,
   onReload,
 }: { item: ReportItem } & RowHandlers) {
-  const { workspace } = useWorkspace();
   const blocked = useBlocked();
   const [open, setOpen] = useState(item.opened);
   const [error, setError] = useState<string | null>(null);
@@ -243,7 +241,7 @@ function ReportRow({
   // 失敗は札で示すので、題の頭の「失敗：」は落とす
   const title = item.failed ? item.title.replace(/^失敗[：:]\s*/, "") : item.title;
 
-  // 失敗の行の「やり直す」：リハーサルは走らせ直し、依頼は止まった段から再開か頼み直す
+  // 失敗の行の「やり直す」：依頼は止まった段から再開か頼み直す
   const retryPlan = retryPlanFor(item);
   const retry = async () => {
     const askId = item.link.askId;
@@ -252,16 +250,12 @@ function ReportRow({
     setRetrying(true);
     let next = askId;
     try {
-      if (retryPlan === "rehearsal") {
-        await api.startRehearsal(workspace.id, askId);
-      } else {
-        const detail = await api.ask(askId);
-        const action = askRetryAction(detail);
-        if (action === "resume") await api.resumeAsk(askId, "retry");
-        // 同じ依頼の失敗の行が複数あっても、同じキーなので依頼は1つだけ作られる（2回目は最初の依頼の応答が返る）
-        else if (action === "reask") next = (await api.createAsk(detail.ask.text, await reaskKeyFor(askId))).ask.id;
-        // open：元の依頼がまだ動いている（作り直すと二重になる）ので、その依頼のページを開くだけ
-      }
+      const detail = await api.ask(askId);
+      const action = askRetryAction(detail);
+      if (action === "resume") await api.resumeAsk(askId, "retry");
+      // 同じ依頼の失敗の行が複数あっても、同じキーなので依頼は1つだけ作られる（2回目は最初の依頼の応答が返る）
+      else if (action === "reask") next = (await api.createAsk(detail.ask.text, await reaskKeyFor(askId))).ask.id;
+      // open：元の依頼がまだ動いている（作り直すと二重になる）ので、その依頼のページを開くだけ
     } catch (e) {
       setRetrying(false);
       setError(describeError(e));
@@ -275,8 +269,7 @@ function ReportRow({
     navigate(`/asks/${next}`);
   };
 
-  const kind =
-    item.reportKind === "rehearsal" ? "練習の結果" : item.reportKind === "incident_added" ? "事故の記録" : item.reportKind === "evolution" ? "育った" : "報告";
+  const kind = item.reportKind === "evolution" ? "育った" : "報告";
   const body = item.body ? dropLeadingTitle(item.body, item.title) : null;
   const hasBody = Boolean(body) || item.lines.length > 0;
   const agentLink = item.link.agentId ? (
@@ -768,7 +761,6 @@ function ApprovalRow({
       </div>
       {a.calendar && <CalendarCardView card={a.calendar} />}
       {a.github && <GithubCardView card={a.github} />}
-      {a.canDecide && <CheckPrecedent precedent={a.precedent} />}
         {a.canDecide && !rejecting && !remembering && (
           <div className="detail-actions">
             <button

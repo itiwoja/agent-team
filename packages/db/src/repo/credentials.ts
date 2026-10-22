@@ -15,7 +15,7 @@ const CREDENTIAL_COLUMNS =
 
 /**
  * OAuth（Google・GitHub）のコネクタを作る・更新する（kind = mcp_remote、auth = {type:"oauth",provider}。provider の既定は google）。
- * 同じ slug が mcp_remote・同じ provider の oauth なら url・表示名を直して有効に戻す。別の種類なら例外（sim などを上書きしない）
+ * 同じ slug が mcp_remote・同じ provider の oauth なら url・表示名を直して有効に戻す。別の種類なら例外（ほかのコネクタを上書きしない）
  */
 export async function upsertOAuthConnector(
   tx: Tx,

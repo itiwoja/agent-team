@@ -1,5 +1,5 @@
 // Google カレンダーの接続（16 §3.6・§5 増分1）。偽の Google（token・カレンダー・revoke）と、偽の gateway（gcal のツールを入れる）で試す。
-// オーナー（owner-setup の投入のあと）とゲスト（入口のたびに作るワークスペース）の両方
+// オーナー（owner-setup の投入のあと）のワークスペース
 import { randomBytes } from "node:crypto";
 import type { Db } from "@open-team/db";
 import { useTestDb } from "@open-team/db/testing";
@@ -7,9 +7,8 @@ import type { GatewayClient } from "@open-team/gateway-client";
 import { GCAL_CONNECTOR, GCAL_MCP_PATH, GCAL_SCOPES, GCAL_TOOL_DESCRIPTIONS, GCAL_TOOL_INPUT_SCHEMAS, type GcalToolName } from "@open-team/gcal-core";
 import { toolHashOf, type Json } from "@open-team/kernel";
 import { openSecret } from "@open-team/platform";
-import { inProcessSimWorld, fakeGatewayClient, makeTestApp, ORIGIN, send, signInOwner, type TestApp } from "../test-helpers.ts";
+import { fakeGatewayClient, makeTestApp, ORIGIN, send, signInOwner, signInSecondWorkspace, type TestApp } from "../test-helpers.ts";
 import { ensureOwnerWorkspace } from "../owner-setup.ts";
-import { enterGuest, guestHarness } from "../check/test-helpers.ts";
 import { GOOGLE_CALENDAR_API_URL, GOOGLE_REVOKE_URL, GOOGLE_TOKEN_URL } from "../connectors/google.ts";
 import type { AppEnv, GoogleConnectEnv } from "../env.ts";
 import { describe, expect, it } from "vitest";
@@ -96,18 +95,15 @@ function gcalGateway(db: Db, base: GatewayClient): GatewayClient {
 /** オーナーの世界（owner-setup の投入のあと、オーナーで入る） */
 async function ownerApp(db: Db, google: FakeGoogle, env: Partial<AppEnv> = { googleConnect: GOOGLE, cookieSecure: false }) {
   const base = fakeGatewayClient(db);
-  const sim = inProcessSimWorld();
-  const t = makeTestApp(db, { env, deps: { gatewayClient: gcalGateway(db, base), simClient: sim.simClient, googleFetch: google.fetch } });
+  const t = makeTestApp(db, { env, deps: { gatewayClient: gcalGateway(db, base), googleFetch: google.fetch } });
   await ensureOwnerWorkspace(t.deps);
   return { t, s: await signInOwner(t) };
 }
 
-/** ゲストの世界（入口で作る） */
-async function guestApp(db: Db, google: FakeGoogle) {
-  const { t } = guestHarness(db, { env: { googleConnect: GOOGLE } });
-  t.deps.googleFetch = google.fetch;
-  t.deps.gatewayClient = gcalGateway(db, t.deps.gatewayClient);
-  return { t, s: await enterGuest(t) };
+/** 別のワークスペースとセッション（分離の試験用。本番では作れない） */
+async function secondApp(db: Db, google: FakeGoogle) {
+  const t = makeTestApp(db, { env: { googleConnect: GOOGLE }, deps: { gatewayClient: gcalGateway(db, fakeGatewayClient(db)), googleFetch: google.fetch } });
+  return { t, s: await signInSecondWorkspace(t) };
 }
 
 /** 同意画面へ行く（start）。state を返す */
@@ -188,10 +184,10 @@ describe("callback の拒否（state・error・scope）", () => {
   it("開始時と別のセッションで戻った state は拒否する", async () => {
     const { db } = T();
     const google = fakeGoogle();
-    const { t, s } = await guestApp(db, google);
+    const { t, s } = await ownerApp(db, google);
     const { stateCookie, state } = await startFlow(t, s.cookie);
-    // 別のゲスト（同じ DB の別の入口から入った別のセッション・ワークスペース）
-    const other = await guestApp(db, google);
+    // 別のセッション・ワークスペース（同じ DB）
+    const other = await secondApp(db, google);
     const res = await callbackFlow(t, other.s.cookie, stateCookie, { code: "auth-code-1", state });
     expect(res.headers.get("location")).toBe("/?connect_error=state");
     expect(google.calls.filter((call) => call.url === GOOGLE_TOKEN_URL)).toEqual([]);
@@ -345,21 +341,6 @@ describe("接続（happy path）と切断", () => {
     const again = await send(t, "DELETE", "/api/v1/connect/google", { cookie: s.cookie, csrf: s.csrf });
     expect(again.status).toBe(204);
     expect(await one(db, "SELECT count(*)::int AS n FROM audit_logs WHERE workspace_id = $1 AND event_type = 'connector.oauth.disconnected'", [s.workspaceId])).toEqual({ n: 1 });
-  });
-
-  it("ゲストのワークスペースでも同じく接続・切断できる", async () => {
-    const { db } = T();
-    const google = fakeGoogle();
-    const { t, s } = await guestApp(db, google);
-    const { stateCookie, state } = await startFlow(t, s.cookie, "Asia/Tokyo");
-    const res = await callbackFlow(t, s.cookie, stateCookie, { code: "auth-code-1", state });
-    expect(res.headers.get("location")).toBe("/?connected=gcal");
-    const row = await one<{ workspace_id: string }>(db, "SELECT workspace_id FROM connector_credentials");
-    expect(row?.workspace_id).toBe(s.workspaceId);
-    const me = (await (await send(t, "GET", "/api/v1/me", { cookie: s.cookie })).json()) as { workspace: { kind: string; google: unknown } };
-    expect(me.workspace.kind).toBe("guest");
-    expect(me.workspace.google).toEqual({ available: true, connected: true, email: "taro.test@gmail.com" });
-    expect((await send(t, "DELETE", "/api/v1/connect/google", { cookie: s.cookie, csrf: s.csrf })).status).toBe(204);
   });
 });
 

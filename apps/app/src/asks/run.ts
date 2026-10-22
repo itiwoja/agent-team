@@ -1,6 +1,6 @@
 // 編成の実行（FR-062）：ask_members の段ごとにタスクを作り、形（ひとり・並列・まとめ・順番）に従って動かす。
 // 新しい実行経路は作らない：タスクを作る → タスクのトークン → runner の runTask → edge（createEdge：LLM Proxy・decide・Intent の記録）→ gateway。
-// 書き込みは必ず Kernel（decide）→ gateway を通る。リハーサルの経路（rehearsal/run.ts）との違いは、本番のタスク（trigger_type = 'ask'）であることだけ。
+// 書き込みは必ず Kernel（decide）→ gateway を通る。
 // 進め方：いまのタスクの状態から evaluateRun（plan.ts。純粋関数）が「次に始める担当・実行の状態・回答を出してよいか」を決め、
 //   advanceTx（1つのトランザクション）が「担当のタスクを作る（queued）・実行と依頼の状態・回答・SSE の事象」を書く。
 //   タスクは別のトランザクションの外で動かす（外部を呼ぶのはトランザクションの外：G-14）。ワークスペースの行のロックで、同じ実行を同時に進めるのを直列にする。
@@ -141,8 +141,8 @@ export async function createMemberTask(
     taint: taintFromInputs(inputs, o.now.toISOString()),
     prompt: o.prompt,
     // SG-04：汚染後も辿れる URL として、利用者自身が書いた文の URL だけを入れる。
-    // - s.ask.text：入口で利用者が書いた依頼の文（acceptAsk の body.text を maskUserText したもの）か、運営が固定で持つ準備済みの依頼の文
-    //   （owner-setup の SHOP_DEMO_FORMATION）。作ったあとに書き換える所はない（プランナーは ask_members と仕事の instructions を書く）
+    // - s.ask.text：入口で利用者が書いた依頼の文（acceptAsk の body.text を maskUserText したもの）か、運営が固定で持つ準備済みの依頼の文。
+    //   作ったあとに書き換える所はない（プランナーは ask_members と仕事の instructions を書く）
     // - o.reply：回答への返事（routes/asks.ts の API-077 の body.text を maskUserText したもの）。ただし画面の「次はこれをしましょうか？」の
     //   ボタン（AskPage の NextActions）は、担当が書いた提案の文をそのまま返事として送る。提案と同じ文なら何も入れず、
     //   提案に出てくる URL も入れない（replyWebUrlHashes。提案は o.replySuggestions）
@@ -356,7 +356,7 @@ export async function startWhenRoom(deps: AskRunDeps, ctx: WsCtx, taskId: Uuid, 
     if (signal.aborted) return signal.reason instanceof StopRequested && signal.reason.stopCause === "shutdown" ? { kind: "left" } : haltIfQueued("kill_switch");
     const ws = await getWorkspace(deps.db, ctx);
     if (ws === null) return haltIfQueued("kill_switch");
-    const r = await canStartWork(deps.db, ws, { rehearsalRunId: null }, deps.clock.now(), { ...SPEND_LIMITS, ...deps.edge?.spendLimits });
+    const r = await canStartWork(deps.db, ws, deps.clock.now(), { ...SPEND_LIMITS, ...deps.edge?.spendLimits });
     if (!r.ok && r.reason === "kill_switch") return haltIfQueued("kill_switch");
     if (!r.ok && r.reason !== "concurrency") return haltIfQueued("budget");
     if (r.ok) {

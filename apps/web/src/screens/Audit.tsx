@@ -1,5 +1,5 @@
 // SCR-010 記録（`/audit`）：監査ログの一覧（新しい順）と、ハッシュの鎖の検証。
-// ?seq= で来たら、その行から古い順に取り、行を強調して開く（合格証の「監査ログ #348」から）。
+// ?seq= で来たら、その行から古い順に取り、行を強調して開く（検証の結果の「#348」から）。
 // 「出力」（API-025）は API が無いので出さない。期間の絞り込みは省いた
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, describeError, type AuditLogItem } from "../api";
@@ -30,7 +30,6 @@ const clock = (iso: string): string => {
 export function Audit({ seq }: { seq: number | null }) {
   const { workspace, me } = useWorkspace();
   const [eventType, setEventType] = useState("");
-  const [includeShadow, setIncludeShadow] = useState(false);
   const [items, setItems] = useState<AuditLogItem[] | null>(null);
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -59,7 +58,7 @@ export function Audit({ seq }: { seq: number | null }) {
     setLoading(true);
     setError(null);
     api
-      .auditLogs(workspace.id, { limit: PAGE, eventType, includeShadow, ...(seq !== null ? { cursor: cursorAt(seq) } : {}) })
+      .auditLogs(workspace.id, { limit: PAGE, eventType, ...(seq !== null ? { cursor: cursorAt(seq) } : {}) })
       .then((r) => {
         if (req !== reqRef.current) return;
         setItems(r.items);
@@ -76,7 +75,7 @@ export function Audit({ seq }: { seq: number | null }) {
       .finally(() => {
         if (req === reqRef.current) setLoading(false);
       });
-  }, [workspace.id, eventType, includeShadow, seq, reload, remember]);
+  }, [workspace.id, eventType, seq, reload, remember]);
 
   useEffect(() => {
     if (scrollTo === null) return;
@@ -89,7 +88,7 @@ export function Audit({ seq }: { seq: number | null }) {
     const req = ++reqRef.current;
     setLoading(true);
     api
-      .auditLogs(workspace.id, { limit: PAGE, eventType, includeShadow, cursor: nextCursor })
+      .auditLogs(workspace.id, { limit: PAGE, eventType, cursor: nextCursor })
       .then((r) => {
         if (req !== reqRef.current) return;
         setItems((prev) => [...(prev ?? []), ...r.items]);
@@ -128,7 +127,6 @@ export function Audit({ seq }: { seq: number | null }) {
       return;
     }
     setEventType("");
-    setIncludeShadow(true);
     navigate(`/audit?seq=${target}`, { replace: true });
   };
 
@@ -143,7 +141,7 @@ export function Audit({ seq }: { seq: number | null }) {
   const options = useMemo(() => eventTypeOptions(seen), [seen]);
   const days = useMemo(() => groupByDay(items ?? [], (i) => i.occurredAt), [items]);
   const broken = verify.state === "ng" ? verify.broken : null;
-  const filtered = eventType !== "" || includeShadow;
+  const filtered = eventType !== "";
 
   return (
     <div className="check-page audit-page">
@@ -168,10 +166,6 @@ export function Audit({ seq }: { seq: number | null }) {
               </option>
             ))}
           </select>
-        </label>
-        <label className="audit-check">
-          <input type="checkbox" checked={includeShadow} onChange={(e) => setIncludeShadow(e.target.checked)} />
-          <span>影の走行も表示</span>
         </label>
       </div>
 
@@ -296,7 +290,6 @@ function AuditRow({
         "audit-row" +
         (target ? " is-target" : "") +
         (broken ? " is-broken" : "") +
-        (item.enforced ? "" : " is-shadow") +
         // AI の呼び出しは重要度の低い行なので、本文を目立たせない
         (item.eventType === "llm.called" ? " is-quiet" : "")
       }

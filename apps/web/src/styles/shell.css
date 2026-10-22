@@ -183,10 +183,6 @@
   flex: 1;
   min-width: 0;
 }
-.drawer-note {
-  margin: 0;
-  padding: 0 12px 8px;
-}
 .drawer-restart {
   margin: 0 12px 8px;
   justify-self: start;
@@ -300,30 +296,6 @@
   grid-template-columns: 1fr 1fr;
   gap: 10px;
   margin-top: 8px;
-}
-/* 手元で押し間違えないよう、スマホでは縦に積む（上が主のボタン、下がキャンセル） */
-.sheet-actions-stack {
-  grid-template-columns: 1fr;
-}
-.sheet-actions-stack .btn {
-  width: 100%;
-}
-.sheet-body {
-  margin: 0;
-}
-@media (min-width: 768px) {
-  /* 横並び・右寄せ。DOM では主のボタンを先に置いているので、見た目だけ後ろへ回す */
-  .sheet-actions-stack {
-    grid-template-columns: auto auto;
-    justify-content: end;
-  }
-  .sheet-actions-stack .btn {
-    width: auto;
-    min-width: 120px;
-  }
-  .sheet-actions-stack .btn-danger {
-    order: 2;
-  }
 }
 
 /* メニューの「つなぐ・設定」：ふだん使わないものをたたむ。開くと中身は今までの行のまま */

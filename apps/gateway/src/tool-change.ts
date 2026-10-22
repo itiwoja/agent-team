@@ -1,17 +1,15 @@
-// ツールの説明・入力スキーマの変化の検出（mcp-taint.md §3.12.4 checkToolDrift・§3.12.7、IA §3.17、BR-42、F-08）。
+// ツールの説明・入力スキーマの変化の検出（mcp-taint.md §3.12.4 checkToolDrift・§3.12.7、IA §3.17、BR-42）。
 // 比べるのは description（取得したまま。trim しない）と inputSchema（正規形 JSON）だけ。注釈・title は比べない（MT D-04・DR-04）。
 // ワークスペースのツールが変わったら：needs_review（確定の定義と tool_hash は書き換えず pending に新しい定義）、
-// そのツールの承認待ちと未実行の approved を expired（tool_changed）、そのツールを試した合格証を切る（D-78・BR-81）、監査ログ
+// そのツールの承認待ちと未実行の approved を expired（tool_changed）、監査ログ
 
 import {
   expireIntentsForTool,
   markToolNeedsReview,
-  revokeCertificatesForAction,
   type ExpiredIntent,
 } from "@open-team/db/gateway";
 import { appendAuditLog, type ConnectorRow, type ConnectorToolRow, type Json, type Tx, type WsCtx } from "@open-team/db";
 import { canonicalJson } from "@open-team/kernel";
-import type { Logger } from "@open-team/platform";
 import type { McpFailure, McpSession, McpToolDef } from "./mcp.ts";
 
 export type DriftResult =
@@ -49,14 +47,11 @@ export type ToolChangeDetectedBy = "sync" | "tools_call" | "execute";
 
 export interface AppliedToolChange {
   expired: ExpiredIntent[];
-  revokedCertificateIds: string[];
-  /** 合格証を切る権限がなかった（db-core への要望。app の getCertificateStatus があとで切る） */
-  certificateRevokeDenied: boolean;
 }
 
 /**
- * ワークスペースのツールを needs_review にし、失効と合格証の切りまでを1つのトランザクションで行う（MT §3.12.4 の4・5、§3.12.7）。
- * ワークスペースの行は呼び出し側がロック済み（M-21）。リハーサルの走行の中で見つけた変化には使わない（MT D-24：その走行だけ deny）
+ * ワークスペースのツールを needs_review にし、失効までを1つのトランザクションで行う（MT §3.12.4 の4・5、§3.12.7）。
+ * ワークスペースの行は呼び出し側がロック済み（M-21）
  */
 export async function applyToolChange(
   tx: Tx,
@@ -66,7 +61,6 @@ export async function applyToolChange(
   change: { kind: "changed"; def: McpToolDef } | { kind: "removed" },
   detectedBy: ToolChangeDetectedBy,
   now: Date,
-  log: Logger,
 ): Promise<AppliedToolChange> {
   const action = `mcp.${connector.slug}.${tool.name}`;
   await markToolNeedsReview(
@@ -79,13 +73,6 @@ export async function applyToolChange(
     now,
   );
   const expired = await expireIntentsForTool(tx, ctx, { connectorId: connector.id, name: tool.name }, now);
-  const certs = await revokeCertificatesForAction(tx, ctx, action, now);
-  if (certs.permissionDenied) {
-    log.error("gateway.certificate_revoke_denied", "合格証を切る権限がない（ot_gateway に rehearsal_certificates の UPDATE が要る）", {
-      workspaceId: ctx.workspaceId,
-      action,
-    });
-  }
   await appendAuditLog(
     tx,
     ctx.workspaceId,
@@ -102,10 +89,9 @@ export async function applyToolChange(
         detectedBy,
         toolHash: tool.tool_hash,
         expiredIntentIds: expired.map((e) => e.intentId),
-        revokedCertificateIds: certs.revoked.map((c) => c.certificateId),
       },
     },
     now,
   );
-  return { expired, revokedCertificateIds: certs.revoked.map((c) => c.certificateId), certificateRevokeDenied: certs.permissionDenied };
+  return { expired };
 }

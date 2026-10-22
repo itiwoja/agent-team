@@ -1,4 +1,4 @@
-// セッション（DB §4.3、SO §3.6。0-H はオーナー・ゲストとも DB のセッション）
+// セッション（DB §4.3、SO §3.6。DB のセッション）
 // Cookie の値は32バイトの乱数（base64url 43文字）。DB には SHA-256 だけを入れ、生の値は残さない（08ws:202）。
 // CSRF トークンも32バイトの乱数で、セッションの間は変えない（SO §3.8）。期限は最後のアクセスから7日（15:383）
 
@@ -82,7 +82,7 @@ export async function issueSession(
 }
 
 /**
- * Cookie の値からセッションを引く。なし・失効・期限切れ（expires_at = now ちょうども無効）・削除予約のワークスペース・
+ * Cookie の値からセッションを引く。なし・失効・期限切れ（expires_at = now ちょうども無効）・
  * 所属がない・消した利用者は null（→ 401 か入口へ）
  */
 export async function resolveSession(q: Queryable, cookieValue: string | null | undefined, now: Date): Promise<SessionCtx | null> {
@@ -105,7 +105,6 @@ export async function resolveSession(q: Queryable, cookieValue: string | null | 
       WHERE s.token_hash = $1
         AND s.revoked_at IS NULL
         AND s.expires_at > $2
-        AND w.delete_requested_at IS NULL
         AND u.deleted_at IS NULL`,
     [hashSessionToken(cookieValue), now],
   );
@@ -151,7 +150,7 @@ export async function revokeSession(q: Queryable, s: Pick<SessionCtx, "sessionId
   return r.rowCount > 0;
 }
 
-/** ワークスペースのセッションをすべて失効させる（[最初からやり直す]・ゲストのログアウト：SO §3.6・3.7） */
+/** ワークスペースのセッションをすべて失効させる（SO §3.6・3.7） */
 export async function revokeWorkspaceSessions(q: Queryable, ctx: WsCtx, now: Date): Promise<number> {
   const r = await q.query("UPDATE sessions SET revoked_at = $2 WHERE workspace_id = $1 AND revoked_at IS NULL", [ctx.workspaceId, now]);
   return r.rowCount;

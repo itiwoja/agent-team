@@ -28,7 +28,7 @@ export type ToolName =
 export type TemplateId = "researcher" | "briefer" | "watcher" | "assistant" | "dev-coder" | "reviewer";
 /** LLM の呼び出しの段階（usage_records.phase。Router がモデルを選ぶ） */
 export type LlmPhase = "investigate" | "plan" | "implement" | "review" | "report";
-export type TaskRunKind = "live" | "dry_run" | "rehearsal";
+export type TaskRunKind = "live" | "dry_run";
 export type Shape = "single" | "parallel" | "aggregate" | "chain";
 export type TeamMessageKind = "share" | "question" | "reply" | "revise_request";
 /** '0.012345' の形（小数6桁の文字列。09_api の金額） */
@@ -147,7 +147,7 @@ export interface TaskContext {
     /** dependsOn は順番のときだけ：結果を受け取る段の position（ないときは1つ前の段） */
     members: Array<{ name: string; position: number; isAggregator: boolean; dependsOn?: number[] }>;
   };
-  /** 仮想の時計がある世界（sim-world）では仮想の今の時刻。プロンプトに「今」として出す */
+  /** 今の時刻（JST）。プロンプトに「今」として出す */
   now: IsoDateTime;
   limits: { maxTokens: number };
 }

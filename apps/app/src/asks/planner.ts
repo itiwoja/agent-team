@@ -25,11 +25,10 @@ import {
   type TemplateName,
 } from "@open-team/kernel";
 import type { LlmClient } from "@open-team/llm";
-import { inputJsonSchema, structuredOutputSchema } from "@open-team/sim-core";
 import { z } from "zod";
 import type { JsonObject } from "@open-team/db";
 import type { AskFailureReason } from "./contract.ts";
-import { parseModelJson, withoutMaxItems } from "../rehearsal/common.ts";
+import { inputJsonSchema, parseModelJson, structuredOutputSchema, withoutMaxItems } from "../llm-json.ts";
 import { UnsupportedScheduleError, nextScheduledRun } from "../schedule.ts";
 
 // ---- 入力（呼び出し側が DB から集めた材料） ----

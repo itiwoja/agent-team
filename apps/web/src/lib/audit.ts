@@ -69,7 +69,6 @@ const REASON: Record<string, string> = {
   approval_required: "人の確認が必要",
   unknown_outcome_pending: "届いたかわからない送信がある",
   guard_exceeded: "値の上限を超えた",
-  certificate_missing: "安全チェックがまだ",
   autonomy_auto: "任せ方の設定で自動",
   rule_matched: "覚えた決まりに合った",
   not_gated: "確認のいらない操作",
@@ -82,11 +81,6 @@ const REASON: Record<string, string> = {
   task_cancelled: "仕事を取り消した",
   approval_timeout: "確認の期限が切れた",
   superseded: "新しいものに置き換わった",
-  rehearsal_end: "リハーサルの終わり",
-  // 合格証を取り消した理由
-  widen: "できることを広げた",
-  model: "モデルが変わった",
-  case_added: "試験が増えた",
   // 仕事を止めた理由（halted）
   timeout: "時間切れ",
   policy_violation: "決まりに反した",
@@ -114,7 +108,6 @@ const REASON: Record<string, string> = {
   // 承認の出どころの照合（SG-03。gateway が実行の前に止めた理由）
   approval_provenance: "判定の証拠が合わなかった",
   dry_run_intent: "試し実行の送る案だった",
-  not_enforced: "統制の効かない判定だった",
   decision_not_executable: "実行できる判定ではなかった",
   decision_missing: "統制の判定の記録がない",
   decision_mismatch: "統制の判定の記録と合わない",
@@ -139,7 +132,6 @@ const REASON: Record<string, string> = {
   approval_request_mismatch: "監査ログの確認の依頼と合わない",
   approval_order_invalid: "確認の順番が合わない",
   rule_not_matched: "覚えた決まりに合っていない",
-  certificate_flag_missing: "合格証を確かめた記録がない",
   // 依頼が失敗した理由
   formation_invalid: "チームの組み方が正しくない",
   agent_limit: "エージェントの数の上限",
@@ -149,12 +141,11 @@ const REASON: Record<string, string> = {
   report: "報告だけ",
   actions_declined: "送らないものがあった",
   approved_branch: "確認で送った場合",
-  shadow_end: "統制なしの走行の終わり",
   user: "利用者が取り消した",
   policy_narrowed: "決まりを狭めた",
 };
 
-/** 仕事（tasks）・依頼（asks・ask_runs）・リハーサルの走行の状態 */
+/** 仕事（tasks）・依頼（asks・ask_runs）の状態 */
 const STATUS: Record<string, string> = {
   queued: "待ち",
   provisioning: "準備中",
@@ -182,14 +173,9 @@ const BUDGET_ITEM: Record<string, string> = {
   agent_day_usd: "エージェントの1日の費用の上限",
 };
 
-/** 費用の守り（packages/edge/src/spend.ts の SpendScope）。workspace はゲストのワークスペースだけに効く */
+/** 費用の守り（packages/edge/src/spend.ts の SpendScope） */
 const BUDGET_SCOPE: Record<string, string> = {
   global: "全体の1日の上限",
-  workspace: "ワークスペースの1日の上限",
-  rehearsal_run: "リハーサル1回の上限",
-  // 古い記録の名前
-  guest: "ワークスペースの1日の上限",
-  rehearsal: "リハーサル1回の上限",
 };
 
 const BREAKER: Record<string, string> = {
@@ -198,19 +184,9 @@ const BREAKER: Record<string, string> = {
   step_cost_usd_max: "1回の費用",
 };
 
-const CASE_SOURCE: Record<string, string> = {
-  generated: "自動で作った",
-  user: "あなたの悪い日",
-  incident: "本番から",
-};
-
 const RUN_TRIGGER: Record<string, string> = {
   initial: "最初の実行",
   manual: "手動",
-  retest: "試し直し",
-  user_case: "足した状況",
-  seed: "用意したもの",
-  model_compare: "モデルの比較",
   schedule: "予定の時刻",
   resume: "再開",
 };
@@ -290,11 +266,6 @@ const EVENT_LABEL: Record<string, string> = {
   "task.report_submitted": "報告",
   "killswitch.engaged": "全部止める",
   "killswitch.released": "全部止めるの解除",
-  "rehearsal.run_started": "リハーサルの開始",
-  "rehearsal.certificate_issued": "合格証の発行",
-  "rehearsal.certificate_revoked": "合格証の取り消し",
-  "rehearsal.case_added": "リハーサルの状況の追加",
-  "rehearsal.case_removed": "リハーサルの状況の削除",
   "ask.created": "依頼",
   "ask.question": "依頼への質問",
   "ask.question_answered": "質問への答え",
@@ -333,12 +304,11 @@ export function eventTypeLabel(eventType: string): string {
   return Object.hasOwn(EVENT_LABEL, eventType) ? EVENT_LABEL[eventType]! : eventType;
 }
 
-/** 1行の要約。影の走行（enforced = false）は末尾に断る */
+/** 1行の要約 */
 export function summarizeAudit(item: Pick<AuditLogItem, "eventType" | "payload">): string {
   const p: Payload = item.payload && typeof item.payload === "object" ? item.payload : {};
   // 主要なイベントでもキーが欠けて空になったら、主なキーに戻す
-  const body = summarizeKnown(item.eventType, p) || summarizeKeys(p);
-  return p.enforced === false || p.shadow === true ? `${body}（影の走行・実際には効かせていない）` : body;
+  return summarizeKnown(item.eventType, p) || summarizeKeys(p);
 }
 
 function summarizeKnown(type: string, p: Payload): string | null {
@@ -410,20 +380,6 @@ function summarizeKnown(type: string, p: Payload): string | null {
     }
     case "killswitch.released":
       return join(["全部止めるを解除した", str(p.reason)]);
-    case "rehearsal.run_started":
-      return join([
-        p.trigger === "recertify" ? "リハーサルをやり直した" : "リハーサルを始めた",
-        typeof p.trigger === "string" && RUN_TRIGGER[p.trigger],
-        num(p.caseCount) !== null && `状況 ${num(p.caseCount)}件`,
-      ]);
-    case "rehearsal.certificate_issued":
-      return join(["合格証を出した", num(p.caseCount) !== null && `状況 ${num(p.caseCount)}件`, str(p.modelId)]);
-    case "rehearsal.certificate_revoked":
-      return join(["合格証を取り消した", label(REASON, p.reason), str(p.action)]);
-    case "rehearsal.case_added":
-      return join(["リハーサルの状況を足した", label(CASE_SOURCE, p.source), label(REASON, p.reasonCode)]);
-    case "rehearsal.case_removed":
-      return join(["リハーサルの状況を外した", label(CASE_SOURCE, p.source)]);
     case "ask.created":
       return "依頼を受けた";
     case "ask.question":
@@ -463,7 +419,7 @@ function summarizeKnown(type: string, p: Payload): string | null {
     case "agent.removed":
       return join(["30日使われなかったエージェントを片付けた", str(p.name)]);
     case "agent.config.changed":
-      return join(["エージェントの設定を変えた", p.origin === "rehearsal_tighten" && "リハーサルの提案で締めた"]);
+      return "エージェントの設定を変えた";
     case "agent.config.widened":
       return "エージェントにできることを広げた";
     case "agent.workspace.reset":
@@ -476,7 +432,7 @@ function summarizeKnown(type: string, p: Payload): string | null {
     case "job.created":
       return join(["仕事の型を作った", str(p.slug)]);
     case "workspace.created":
-      return p.kind === "guest" ? "ゲストのワークスペースを作った" : "ワークスペースを作った";
+      return "ワークスペースを作った";
     case "policy.snapshot_created":
       return join(["決まりを保存した", num(p.version) !== null && `版 ${num(p.version)}`]);
     case "connector.registered":
@@ -506,7 +462,7 @@ function summarizeKeys(p: Payload): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(p)) {
     if (parts.length >= 3) break;
-    if (k === "enforced" || k === "shadow" || ID_KEY.test(k)) continue;
+    if (ID_KEY.test(k)) continue;
     if (typeof v === "string") {
       if (v === "" || HEX.test(v) || UUID.test(v)) continue;
       parts.push(`${k}: ${v.length > 24 ? `${v.slice(0, 24)}…` : v}`);
@@ -523,7 +479,6 @@ export const COMMON_EVENT_TYPES = [
   "action.executed",
   "budget.exceeded",
   "killswitch.engaged",
-  "rehearsal.certificate_issued",
   "task.status_changed",
   "llm.called",
 ] as const;

@@ -54,15 +54,15 @@ export function packView(p: PackDefinition, o: { installedAt: Date | null; sandb
   };
 }
 
-/** 作業場を使えるワークスペースか（作業場のプロバイダーがあり、オーナーのワークスペース：edge の sandboxAllowed と同じ考え） */
-export function sandboxAvailableFor(deps: Pick<AppDeps, "sandbox">, s: Pick<SessionCtx, "kind">): boolean {
-  return deps.sandbox !== null && s.kind === "owner";
+/** 作業場を使えるか（作業場のプロバイダーがある：edge の sandboxAllowed と同じ考え） */
+export function sandboxAvailableFor(deps: Pick<AppDeps, "sandbox">): boolean {
+  return deps.sandbox !== null;
 }
 
 export async function listPacks(deps: Pick<AppDeps, "db" | "sandbox">, s: SessionCtx): Promise<ListPacksResponse> {
   const installs = await listPackInstalls(deps.db, s);
   const byPack = new Map(installs.map((i) => [i.pack_id, i]));
-  const sandboxAvailable = sandboxAvailableFor(deps, s);
+  const sandboxAvailable = sandboxAvailableFor(deps);
   return {
     categories: [...PACK_CATEGORIES],
     packs: PACKS.map((p) => {
@@ -95,7 +95,7 @@ export async function installPack(deps: Pick<AppDeps, "db" | "clock" | "ids" | "
     for (const a of pack.agents) {
       let name = a.name;
       for (let n = 2; (await findAgentByName(tx, s, name)) !== null; n += 1) name = `${a.name}${n}`;
-      const initial = initialAgentDefinition({ name, role: a.role, workspacePolicy: policy, workspaceKind: s.kind });
+      const initial = initialAgentDefinition({ name, role: a.role, workspacePolicy: policy });
       const base: AgentDefinitionInput = {
         ...(initial as unknown as AgentDefinitionInput),
         grants: { ...(initial.grants.web === undefined ? {} : { web: initial.grants.web }), connectors: {} },
@@ -168,7 +168,7 @@ export async function installPack(deps: Pick<AppDeps, "db" | "clock" | "ids" | "
     return { agents, install };
   });
   return {
-    pack: packView(pack, { installedAt: created.install.created_at, sandboxAvailable: sandboxAvailableFor(deps, s), agentIds: packAgentIdsOf(pack, created.install) }),
+    pack: packView(pack, { installedAt: created.install.created_at, sandboxAvailable: sandboxAvailableFor(deps), agentIds: packAgentIdsOf(pack, created.install) }),
     agents: created.agents.map((a) => ({ agentId: a.id, name: a.name })),
   };
 }

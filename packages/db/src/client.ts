@@ -1,5 +1,5 @@
 // DB の接続（postgres.js を包む）。業務のコードは Db・Tx・Queryable だけを使い、postgres.js を直接 import しない。
-// 決まり（README・DB §4.1、G-14）：トランザクションの中で外部（Gemini・gateway・sim-world）を呼ばない。
+// 決まり（README・DB §4.1、G-14）：トランザクションの中で外部（Gemini・gateway）を呼ばない。
 // 値の変換：timestamptz → Date、numeric → 文字列（USD は小数6桁の文字列）、int8 → number（安全な整数を超えたら例外：DB I-34）、
 // bytea → Buffer、jsonb → 値、配列 → 配列。jsonb の引数には JS の値をそのまま渡す（JSON.stringify した文字列を渡すと文字列が入る）
 
@@ -51,7 +51,7 @@ export interface Db extends Queryable {
 }
 
 export interface DbOptions {
-  /** 接続の本数の上限。既定 2（SO §4.6：app・gateway・sim-world のプールは各2） */
+  /** 接続の本数の上限。既定 2（SO §4.6：app・gateway のプールは各2） */
   max?: number;
   applicationName?: string;
   /** 既定 10 秒 */

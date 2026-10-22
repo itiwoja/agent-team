@@ -74,7 +74,7 @@ it("failed transport attempts consume their estimate and cannot loop around the 
   await expect(c.generate(req)).rejects.toThrow(/試験費用上限/);
   expect(generate).toHaveBeenCalledTimes(1);
 });
-it("binds certificates to provider, endpoint and capabilities, but never API keys", () => {
+it("モデルの識別子は提供元・接続先・能力で変わり、API キーでは変わらない", () => {
   const cfg: LlmConfig = { provider: "openrouter", baseUrl: "https://one.test/v1", apiKey: "fake-key", agentModel: "m", plannerModel: "m", compareModels: [], profiles: { m: PROFILE } };
   const id = providerModelIdentity(cfg, "m");
   expect(providerModelIdentity({ ...cfg, apiKey: "different-secret" }, "m")).toBe(id);

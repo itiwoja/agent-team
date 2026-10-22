@@ -1,12 +1,12 @@
 // gateway（apps/gateway。書き込みの唯一の出口）が使う問い合わせ（MT §3.12、IA §3.12・3.13・3.17、AS §3.17、SO §3.10・3.14）。
 // 入口の引き直し（タスクのトークン・Intent の ID・コネクタの ID からワークスペースを引く）だけはワークスペースで絞れない。
-// それが WsCtx の出どころ（README §1 の2、15:486）で、リクエストの workspace_id・rehearsal_run_id・shadow は使わない。
+// それが WsCtx の出どころ（README §1 の2、15:486）で、リクエストの workspace_id は使わない。
 // それ以外はすべて WsCtx で絞る。ロックの順はワークスペース → タスク → 承認 → Intent（M-21・SO §3.14）。
-// 外部（sim-world・MCP サーバー）はここから呼ばない（G-14：接続を握ったまま待たない）
+// 外部（MCP サーバー）はここから呼ばない（G-14：接続を握ったまま待たない）
 
 import { KERNEL_VERSION, hashCanonical, nextTaskStatus, type TaskStatus } from "@open-team/kernel";
 import { appendAuditLog } from "../audit.ts";
-import { PG_ERROR, pgErrorInfo, type Queryable, type Tx } from "../client.ts";
+import type { Queryable, Tx } from "../client.ts";
 import { hashTaskToken } from "../session.ts";
 import type {
   ActionIntentRow,
@@ -14,14 +14,12 @@ import type {
   ApprovalRow,
   ConnectorRow,
   ConnectorToolRow,
-  ExecutionVariant,
   IntentExpireReason,
   IntentFailReason,
   IntentStatus,
   Json,
   JsonObject,
   PolicyDecisionRow,
-  RehearsalCertificateRow,
   ToolHash,
   Uuid,
   WorkspaceKind,
@@ -48,11 +46,6 @@ export interface GatewayTask {
   readonly agentId: Uuid;
   readonly status: TaskStatus;
   readonly isDryRun: boolean;
-  readonly rehearsalRunId: Uuid | null;
-  readonly rehearsalScenarioId: Uuid | null;
-  readonly shadow: boolean;
-  readonly simExecutionId: Uuid | null;
-  readonly executionVariant: ExecutionVariant | null;
   readonly killSwitchEngaged: boolean;
 }
 
@@ -70,11 +63,6 @@ interface TaskJoinRow {
   agent_id: Uuid;
   status: TaskStatus;
   is_dry_run: boolean;
-  rehearsal_run_id: Uuid | null;
-  rehearsal_scenario_id: Uuid | null;
-  shadow: boolean;
-  sim_execution_id: Uuid | null;
-  execution_variant: ExecutionVariant | null;
   kill_switch_engaged: boolean;
 }
 
@@ -87,8 +75,7 @@ export async function resolveTaskByToken(q: Queryable, rawToken: string | null |
     return { ok: false, error: "UNAUTHORIZED" };
   }
   const r = await q.query<TaskJoinRow>(
-    `SELECT t.id, t.workspace_id, w.kind, t.job_id, t.agent_id, t.status, t.is_dry_run, t.rehearsal_run_id, t.rehearsal_scenario_id,
-            t.shadow, t.sim_execution_id, t.execution_variant, w.kill_switch_engaged
+    `SELECT t.id, t.workspace_id, w.kind, t.job_id, t.agent_id, t.status, t.is_dry_run, w.kill_switch_engaged
        FROM tasks t JOIN workspaces w ON w.id = t.workspace_id
       WHERE t.task_token_hash = $1 AND t.task_token_expires_at > $2`,
     [hashTaskToken(rawToken), now],
@@ -102,11 +89,6 @@ export async function resolveTaskByToken(q: Queryable, rawToken: string | null |
     agentId: row.agent_id,
     status: row.status,
     isDryRun: row.is_dry_run,
-    rehearsalRunId: row.rehearsal_run_id,
-    rehearsalScenarioId: row.rehearsal_scenario_id,
-    shadow: row.shadow,
-    simExecutionId: row.sim_execution_id,
-    executionVariant: row.execution_variant,
     killSwitchEngaged: row.kill_switch_engaged,
   };
   if (row.kill_switch_engaged) return { ok: false, error: "TASK_HALTED", haltReason: "kill_switch", task };
@@ -176,16 +158,10 @@ export interface GatewayTaskRow {
   agent_id: Uuid;
   status: TaskStatus;
   is_dry_run: boolean;
-  rehearsal_run_id: Uuid | null;
-  rehearsal_scenario_id: Uuid | null;
-  shadow: boolean;
-  sim_execution_id: Uuid | null;
-  execution_variant: ExecutionVariant | null;
   halt_reason: string | null;
 }
 
-const TASK_COLUMNS = `id, workspace_id, job_id, agent_id, status, is_dry_run, rehearsal_run_id, rehearsal_scenario_id, shadow,
-  sim_execution_id, execution_variant, halt_reason`;
+const TASK_COLUMNS = "id, workspace_id, job_id, agent_id, status, is_dry_run, halt_reason";
 
 /** タスクを FOR UPDATE で取る（ワークスペースの行を取ったあとに呼ぶ：M-21） */
 export async function lockTask(tx: Tx, ctx: WsCtx, taskId: Uuid): Promise<GatewayTaskRow | null> {
@@ -310,12 +286,12 @@ export interface TaskStatusChange {
  * Intent の状態が変わったあとにタスクの状態を決め直す（IA §3.18 の4）。タスクの行は呼び出し側がロック済み（M-21）。
  * gateway はエージェントのループの終わりを知らないので loopEnded = false（awaiting_approval・executing はループが終わった扱い）。
  * 終了状態にしたら finished_at・status_detail・fail_reason、トークンの失効（SO §3.10）、task_events の status_changed・finished、
- * 監査ログ task.status_changed。依頼の回答・順番の次の段・回帰の試験（M-26）は app が行う
+ * 監査ログ task.status_changed。依頼の回答・順番の次の段は app が行う
  */
 export async function recomputeTaskStatus(tx: Tx, ctx: WsCtx, taskId: Uuid, now: Date): Promise<TaskStatusChange | null> {
   const t = (
-    await tx.query<{ status: TaskStatus; is_dry_run: boolean; rehearsal_run_id: Uuid | null }>(
-      "SELECT status, is_dry_run, rehearsal_run_id FROM tasks WHERE id = $2 AND workspace_id = $1",
+    await tx.query<{ status: TaskStatus; is_dry_run: boolean }>(
+      "SELECT status, is_dry_run FROM tasks WHERE id = $2 AND workspace_id = $1",
       [ctx.workspaceId, taskId],
     )
   ).rows[0];
@@ -326,7 +302,7 @@ export async function recomputeTaskStatus(tx: Tx, ctx: WsCtx, taskId: Uuid, now:
       taskId,
     ])
   ).rows;
-  const next = nextTaskStatus({ status: t.status, loopEnded: false, isDryRun: t.is_dry_run, rehearsal: t.rehearsal_run_id !== null, intents });
+  const next = nextTaskStatus({ status: t.status, loopEnded: false, isDryRun: t.is_dry_run, intents });
   if (next.status === t.status) return { changed: false, from: t.status, to: t.status, terminal: false };
 
   const ending = next.ending;
@@ -454,7 +430,7 @@ export interface ExpiredIntent {
 
 /**
  * そのツールの承認待ち（pending_approval）と、まだ executing でない approved の Intent を expired（tool_changed）にする
- * （MT §3.12.7、IA §3.17、X-10。executing はそのまま）。承認待ちの承認も expired。影のタスクの Intent は触らない（記録だけ：BR-67③）。
+ * （MT §3.12.7、IA §3.17、X-10。executing はそのまま）。承認待ちの承認も expired。
  * ワークスペースの行は呼び出し側がロック済み。ここでタスク → 承認 → Intent の順に取る（M-21）。通知は送らない（MT §3.12.7 の2）
  */
 export async function expireIntentsForTool(
@@ -464,9 +440,9 @@ export async function expireIntentsForTool(
   now: Date,
 ): Promise<ExpiredIntent[]> {
   const cand = await tx.query<{ id: Uuid; task_id: Uuid }>(
-    `SELECT i.id, i.task_id FROM action_intents i JOIN tasks t ON t.id = i.task_id AND t.workspace_id = i.workspace_id
+    `SELECT i.id, i.task_id FROM action_intents i
       WHERE i.workspace_id = $1 AND i.connector_id = $2 AND i.payload->>'tool' = $3
-        AND i.status IN ('pending_approval', 'approved') AND NOT t.shadow`,
+        AND i.status IN ('pending_approval', 'approved')`,
     [ctx.workspaceId, tool.connectorId, tool.name],
   );
   if (cand.rows.length === 0) return [];
@@ -506,53 +482,6 @@ export async function expireIntentsForTool(
   return out;
 }
 
-export interface CertificateRevocation {
-  revoked: Array<{ certificateId: Uuid; jobId: Uuid }>;
-  /** gateway のロールに rehearsal_certificates の UPDATE がなかった（切れなかった。app の getCertificateStatus が後で切る） */
-  permissionDenied: boolean;
-}
-
-/**
- * そのツール（action）を試した有効な合格証を切る（BR-81・D-78、AS §3.17 EP-51「合格証を切る（tool_hash）」）。
- * 合格証の tool_hashes は付与した全ツールの [{ action, toolHash }]（M-49）なので、action を含むものだけ。
- * 監査ログ rehearsal.certificate_revoked。再リハーサル（recertify）を積むのはリハーサルの担当（gateway は rehearsal_runs を書けない）。
- * ロールに権限がないときはセーブポイントまで戻して切らずに続ける（同期そのものは止めない。needs_review の間は decide が deny する）
- */
-export async function revokeCertificatesForAction(tx: Tx, ctx: WsCtx, action: string, now: Date): Promise<CertificateRevocation> {
-  try {
-    return await tx.savepoint(async (sp) => {
-      const r = await sp.query<{ id: Uuid; job_id: Uuid }>(
-        `UPDATE rehearsal_certificates SET revoked_at = $3, revoke_reason = 'tool_hash'
-          WHERE workspace_id = $1 AND revoked_at IS NULL AND tool_hashes @> jsonb_build_array(jsonb_build_object('action', $2::text))
-          RETURNING id, job_id`,
-        [ctx.workspaceId, action, now],
-      );
-      const revoked = r.rows.map((x) => ({ certificateId: x.id, jobId: x.job_id })).sort((a, b) => (a.certificateId < b.certificateId ? -1 : 1));
-      if (revoked.length > 0) {
-        await appendAuditLog(
-          sp,
-          ctx.workspaceId,
-          {
-            eventType: "rehearsal.certificate_revoked",
-            ...GATEWAY_ACTOR,
-            payload: {
-              certificateIds: revoked.map((x) => x.certificateId),
-              jobIds: [...new Set(revoked.map((x) => x.jobId))].sort(),
-              reason: "tool_hash",
-              action,
-            },
-          },
-          now,
-        );
-      }
-      return { revoked, permissionDenied: false };
-    });
-  } catch (e) {
-    if (pgErrorInfo(e)?.code === PG_ERROR.insufficientPrivilege) return { revoked: [], permissionDenied: true };
-    throw e;
-  }
-}
-
 // ===================================================================
 // 6. gateway の判定の記録（境界・説明の変化。MT §3.12.2・D-14）
 // ===================================================================
@@ -570,7 +499,7 @@ export interface GatewayDecisionInput {
   reasonCode: string;
   /** 'boundary.<code>'・'gateway.tool_changed' など */
   matchedRule: string;
-  /** 影の走行で「記録だけ」にしたものは false（BR-67③） */
+  /** 判定どおりに効かせたか（今は常に true。0024 より前の影の走行の行だけ false） */
   enforced: boolean;
 }
 
@@ -682,27 +611,3 @@ export async function listKillSwitchEngagedSeqs(q: Queryable, ctx: WsCtx): Promi
   return r.rows.map((x) => x.seq);
 }
 
-/**
- * その仕事の合格証の発行と失効の監査ログ（rehearsal.certificate_issued の payload.jobId、rehearsal.certificate_revoked の payload.jobIds）。seq の順。
- * 新しい合格証の発行は、同じ仕事の前の合格証を superseded で切る（行ごとの失効の監査ログはない：issueCertificate）
- */
-export async function listCertificateAuditEvents(q: Queryable, ctx: WsCtx, jobId: Uuid): Promise<ProvenanceAuditEvent[]> {
-  const r = await q.query<ProvenanceAuditEvent>(
-    `SELECT seq, occurred_at, event_type, actor_type, actor_id, payload FROM audit_logs
-      WHERE workspace_id = $1
-        AND ((event_type = 'rehearsal.certificate_issued' AND payload->>'jobId' = $2)
-          OR (event_type = 'rehearsal.certificate_revoked' AND payload->'jobIds' ? $2))
-      ORDER BY seq`,
-    [ctx.workspaceId, jobId],
-  );
-  return r.rows;
-}
-
-/** その仕事の合格証（失効したものも含む：判定の時点で有効だったかを監査ログの順で見るため）。発行の古い順 */
-export async function listJobCertificates(q: Queryable, ctx: WsCtx, jobId: Uuid): Promise<RehearsalCertificateRow[]> {
-  const r = await q.query<RehearsalCertificateRow>(
-    "SELECT * FROM rehearsal_certificates WHERE workspace_id = $1 AND job_id = $2 ORDER BY audit_seq, id",
-    [ctx.workspaceId, jobId],
-  );
-  return r.rows;
-}

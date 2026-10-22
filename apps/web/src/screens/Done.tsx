@@ -20,7 +20,7 @@ const hasTime = (s: string): boolean => /\d{1,2}:\d{2}/.test(s);
 /**
  * 結果の札と、2行目（subtitle · 時刻）。
  * 送る前の確認の subtitle はサーバーが「担当 · 送りました」まで入れて作る（apps/app/src/check/items.ts の buildDone）ので、
- * 札と同じ語を含む部分は subtitle から外す（「送りました · 仕入れ係 · 送りました」にならない）。
+ * 札と同じ語を含む部分は subtitle から外す（「送りました · 予定係 · 送りました」にならない）。
  * 報告の subtitle に時刻が入っていれば（練習・記録・仕事の報告）、済んだ時刻を重ねて出さない
  */
 function describeDone(i: Pick<DoneItem, "outcome" | "subtitle" | "doneAt">): { outcome: string | null; meta: string } {

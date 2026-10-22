@@ -3,7 +3,7 @@
 useDefault = true
 
 [allowlist]
-description = "ゲストのリハーサルの fixture の repeat_key（同じ呼び出しの繰り返しを数える SHA-256。秘密ではない）と、GitHub 連携の試験用の偽のインストールトークン"
+description = "fixture の repeat_key（同じ呼び出しの繰り返しを数える SHA-256。秘密ではない）と、GitHub 連携の試験用の偽のインストールトークン"
 regexTarget = "match"
 regexes = [
   '''repeat_key":"[0-9a-f]{64}''',

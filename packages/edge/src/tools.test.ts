@@ -14,12 +14,12 @@ import {
   inboxDefinition,
   seedAgent,
   seedChainAsk,
-  seedShopConnectors,
+  seedConnectors,
   seedTask,
   supplierDefinition,
   tokenFor,
   type SeededConnector,
-} from "./__fixtures__/shop.ts";
+} from "./__fixtures__/seed.ts";
 
 const T = useTestDb();
 
@@ -34,10 +34,10 @@ interface W {
 
 async function setup(
   db: Db,
-  o: { def?: "inbox" | "supplier"; script: readonly ScriptedStep[]; gateway?: FakeGateway; spokesperson?: boolean; knownSecrets?: string[] },
+  o: { def?: "inbox" | "supplier"; script: readonly ScriptedStep[]; gateway?: FakeGateway; spokesperson?: boolean; knownSecrets?: string[]; second?: boolean },
 ): Promise<W> {
-  const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-  const conns = await seedShopConnectors(db, ws);
+  const ws = await fxWorkspace(db, { audit: true, second: o.second === true });
+  const conns = await seedConnectors(db, ws);
   const isInbox = o.def === "inbox";
   const agent = await seedAgent(db, ws, isInbox ? inboxDefinition() : supplierDefinition());
   const jobSlug = isInbox ? "read-supplier-mail" : "reorder";
@@ -149,7 +149,7 @@ describe("callTool：実行してよい呼び出しだけ（§3.11-2）", () => 
     const { db } = T();
     const a = await setup(db, { script: [{ parts: [mcp("r1", "store", "get_inventory", {})], usage: USAGE }] });
     await a.env.edge.llmMessages(a.token, llmRequest(a.ctx.tools));
-    const b = await setup(db, { script: [] });
+    const b = await setup(db, { script: [], second: true });
     await expectEdgeError(b.env.edge.callTool(b.token, "r1"), "TOOL_CALL_NOT_ALLOWED");
     // 自分のトークンなら実行できる
     expect((await a.env.edge.callTool(a.token, "r1")).kind).toBe("text");

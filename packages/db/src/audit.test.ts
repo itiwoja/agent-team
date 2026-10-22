@@ -110,7 +110,7 @@ describe("追記と検証（T-73〜T-78）", () => {
     expect(await verifyAuditChain(db, ws.workspaceId, { fromSeq: 1, toSeq: 2 })).toEqual({ ok: true, checkedCount: 2, firstBrokenSeq: null });
     expect(await verifyAuditChain(db, ws.workspaceId, { toSeq: 99 })).toEqual({ ok: true, checkedCount: 3, firstBrokenSeq: null });
     // 監査ログのないワークスペース
-    const empty = await fxWorkspace(db);
+    const empty = await fxWorkspace(db, { second: true });
     expect(await verifyAuditChain(db, empty.workspaceId)).toEqual({ ok: true, checkedCount: 0, firstBrokenSeq: null });
   });
 
@@ -150,7 +150,7 @@ describe("追記と検証（T-73〜T-78）", () => {
     expect(await verifyAuditChain(db, ws.workspaceId)).toEqual({ ok: false, checkedCount: 1, firstBrokenSeq: 2 });
     expect(await verifyAuditChain(db, ws.workspaceId, { fromSeq: 3 })).toEqual({ ok: false, checkedCount: 0, firstBrokenSeq: 2 });
 
-    const ws2 = await fxWorkspace(db);
+    const ws2 = await fxWorkspace(db, { second: true });
     await append(db, ws2.workspaceId, 2);
     await db.query("UPDATE workspaces SET audit_last_hash = $2 WHERE id = $1", [ws2.workspaceId, Buffer.alloc(32, 7)]);
     expect(await verifyAuditChain(db, ws2.workspaceId)).toEqual({ ok: false, checkedCount: 2, firstBrokenSeq: 3 });

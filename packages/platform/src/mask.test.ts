@@ -53,7 +53,7 @@ describe("maskSecrets のパターン（NFR-057・NFR-032、SO §3.17 の 2・I-
       "BEAN-HOUSE を 20 個発注",
       "inputTokens=1200 outputTokens=300",
       "postgres://ot_app@localhost/open_team",
-      "https://sim-world-123.asia-northeast1.run.app/mcp/shop/supplier",
+      "https://gateway-123.asia-northeast1.run.app/mcp/supplier",
       "ghs_short",
       "AKIA の形の説明",
     ]) {
@@ -187,7 +187,7 @@ describe("knownSecretsFromEnv", () => {
   it("決まった名前の、8文字以上の値だけを拾う", () => {
     const env = {
       PHASE0_ACCESS_TOKEN: "o".repeat(32),
-      GUEST_ENTRY_TOKEN: "short",
+      SESSION_COOKIE_SECRET: "short",
       INTERNAL_SHARED_TOKEN: "i".repeat(40),
       DATABASE_URL: "postgres://u:p@h/db",
       PORT: "8080",

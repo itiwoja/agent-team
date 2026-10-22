@@ -19,8 +19,7 @@ import { toolHashOf, type ArgRoleMap, type Json } from "@open-team/kernel";
 import { sealSecret } from "@open-team/platform";
 import { ConnectorAuthRequired, ConnectorAuthUnsupported, ConnectorTokenUnavailable, GOOGLE_TOKEN_URL, defaultConnectorAuth } from "./context.ts";
 import type { GcalConfig } from "./env.ts";
-import { NOW, gatewayEnv, insertIntent, intentRow, rehearsalRows, rpcResponse, startGateway, taskWithToken, workspace, type FetchHook } from "./test-helpers.ts";
-import { SIM_GCAL_PATH } from "@open-team/sim-core";
+import { NOW, gatewayEnv, insertIntent, intentRow, rpcResponse, startGateway, taskWithToken, workspace, type FetchHook } from "./test-helpers.ts";
 import type { FxWorkspace } from "@open-team/db/testing";
 
 const T = useTestDb();
@@ -145,7 +144,7 @@ async function seedWriteFlow(db: Db, ws: FxWorkspace, conn: ConnectorRow) {
 
 async function setupFlow(mode: Mode) {
   const { db } = T();
-  const ws = await workspace(db, "owner");
+  const ws = await workspace(db);
   const fake = okGoogle();
   const gw = startGateway(db, providerEnv(), { hook: gcalHook(fake) });
   const conn = await seedGoogle(db, ws, mode);
@@ -173,13 +172,13 @@ async function setupFlow(mode: Mode) {
 describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
   it("アクセストークンは1回だけ取り、キャッシュする。期限（expires_in−60秒）を過ぎたら取り直す。資格情報の値は頭の値に入るだけ", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const fake = okGoogle();
     let t = NOW.getTime();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => new Date(t) } });
 
-    const h1 = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    const h1 = await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(h1[GCAL_HEADER.accessToken]).toBe(ACCESS);
     expect(h1[GCAL_HEADER.calendarId]).toBe(CAL_ID);
     expect(h1[GCAL_HEADER.timeZone]).toBe("Asia/Tokyo");
@@ -190,24 +189,23 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
     expect(form.get("refresh_token")).toBe(REFRESH);
     expect(form.get("client_id")).toBe(GCAL_CFG.clientId);
 
-    const h2 = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    const h2 = await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(h2[GCAL_HEADER.accessToken]).toBe(ACCESS);
     expect(fake.exchanges).toHaveLength(1);
 
     t += 3539_000;
-    await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(fake.exchanges).toHaveLength(1);
     t += 2_000;
-    await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(fake.exchanges).toHaveLength(2);
   });
 
-  it("冪等キーは intentId（execute のときだけ）。sim-world の X-OT-* は付けない", async () => {
+  it("冪等キーは intentId（execute のときだけ）", async () => {
     const { db, ws, conn, intentId } = await setupFlow("ok");
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(okGoogle()), clock: { now: () => NOW } });
-    const h = await provider({ connector: conn, simWorld: false, intentId, purpose: "call" });
+    const h = await provider({ connector: conn, intentId, purpose: "call" });
     expect(h[GCAL_HEADER.idempotencyKey]).toBe(intentId);
-    expect(Object.keys(h).filter((k) => k.startsWith("x-ot-workspace") || k.startsWith("x-ot-intent") || k.startsWith("x-ot-shadow"))).toEqual([]);
   });
 
   it("Intent の作成後に再接続した資格情報では承認済み書き込みを実行しない", async () => {
@@ -220,58 +218,58 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
     }));
     const fake = okGoogle();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    await expect(provider({ connector: conn, simWorld: false, intentId, purpose: "call" })).rejects.toMatchObject({ reason: "credential_changed" });
+    await expect(provider({ connector: conn, intentId, purpose: "call" })).rejects.toMatchObject({ reason: "credential_changed" });
     expect(fake.exchanges).toHaveLength(0);
   });
 
   it("invalid_grant（同意の取り消し）→ ConnectorAuthRequired（invalid_grant）", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const fake: GoogleFake = { status: 400, body: { error: "invalid_grant", error_description: "Token has been expired or revoked." }, exchanges: [] };
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    await expect(provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "invalid_grant" });
-    await expect(provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(ConnectorAuthRequired);
+    await expect(provider({ connector: conn, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "invalid_grant" });
+    await expect(provider({ connector: conn, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(ConnectorAuthRequired);
   });
 
   for (const mode of ["none", "revoked"] as const) {
     it(`資格情報がない（${mode}）→ ConnectorAuthRequired（no_credential）。token は取りに行かない`, async () => {
       const { db } = T();
-      const ws = await workspace(db, "owner");
+      const ws = await workspace(db);
       const conn = await seedGoogle(db, ws, mode);
       const fake = okGoogle();
       const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-      await expect(provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "no_credential" });
+      await expect(provider({ connector: conn, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "no_credential" });
       expect(fake.exchanges).toHaveLength(0);
     });
   }
 
   it("AAD が違う（別のワークスペースの行に写した暗号文）→ 開かない（credential_unreadable）。token は取らない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "other_workspace");
     const fake = okGoogle();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    await expect(provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "credential_unreadable" });
+    await expect(provider({ connector: conn, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "credential_unreadable" });
     expect(fake.exchanges).toHaveLength(0);
   });
 
   it("token の交換が失敗（503）→ ConnectorTokenUnavailable。届いたのは送信前の扱い", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const fake: GoogleFake = { status: 503, body: { error: "backendError" }, exchanges: [] };
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    await expect(provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(ConnectorTokenUnavailable);
+    await expect(provider({ connector: conn, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(ConnectorTokenUnavailable);
   });
 
   it("同期（list）は資格情報を開かず、呼び出しの証明だけ返す", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "none");
     const fake = okGoogle();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    const h = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "list" });
+    const h = await provider({ connector: conn, intentId: null, purpose: "list" });
     expect(h[GCAL_HEADER.accessToken]).toBeUndefined();
     expect(h[GCAL_HEADER.calendarId]).toBeUndefined();
     expect(h.authorization).toBeDefined();
@@ -280,10 +278,10 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 
   it("URL の origin が GCAL_URL と違う Google のコネクタは証明しない（ConnectorAuthUnsupported）", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(okGoogle()), clock: { now: () => NOW } });
-    await expect(provider({ connector: { ...conn, url: "https://other.example/mcp/gcal" }, simWorld: false, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(
+    await expect(provider({ connector: { ...conn, url: "https://other.example/mcp/gcal" }, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(
       ConnectorAuthUnsupported,
     );
   });
@@ -292,7 +290,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 describe("gateway の流れ（gcal の MCP を差し込む）", () => {
   it("同期（tools/list）に Google の頭は付かず、token も取らない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const fake = okGoogle();
     const gw = startGateway(db, providerEnv(), { hook: gcalHook(fake) });
     const conn = await seedGoogle(db, ws, "ok");
@@ -318,7 +316,6 @@ describe("gateway の流れ（gcal の MCP を差し込む）", () => {
     expect(h[GCAL_HEADER.accessToken]).toBe(ACCESS);
     expect(h[GCAL_HEADER.calendarId]).toBe(CAL_ID);
     expect(h[GCAL_HEADER.timeZone]).toBe("Asia/Tokyo");
-    expect(Object.keys(h).filter((k) => k.startsWith("x-ot-workspace") || k.startsWith("x-ot-intent") || k.startsWith("x-ot-shadow"))).toEqual([]);
     expect(fake.exchanges).toHaveLength(1);
 
     const row = await intentRow(db, intentId);
@@ -343,68 +340,5 @@ describe("gateway の流れ（gcal の MCP を差し込む）", () => {
     const r = await gw.client.executeIntent(intentId);
     expect(r).toMatchObject({ status: "failed", failReason: "auth_required" });
     expect(gw.sent.filter((s) => s.rpc === "tools/call")).toHaveLength(0);
-  });
-});
-
-describe("リハーサルの走行の本人の Google カレンダー（16 §6.1）：模擬へ向け直す", () => {
-  const SIM_BASE = "http://localhost:8081";
-
-  it("execute：リハーサルの create_event は模擬（SIM_WORLD_URL + SIM_GCAL_PATH）へ行き、token を取らず Google の頭も付けず、X-OT-* を付ける", async () => {
-    const { db } = T();
-    const ws = await workspace(db, "owner");
-    const fake = okGoogle();
-    const gw = startGateway(db, gatewayEnv(SIM_BASE, { allowedConnectorUrls: [SIM_BASE, GCAL_BASE], gcal: GCAL_CFG }), {
-      hook: gcalHook(fake, [GCAL_BASE, SIM_BASE]),
-    });
-    const conn = await seedGoogle(db, ws, "ok");
-    await gw.client.syncTools(conn.id);
-    const tools = await seedWriteFlow(db, ws, conn);
-    gw.sent.length = 0;
-    fake.exchanges.length = 0;
-
-    const base = await taskWithToken(db, ws, { status: "executing" });
-    const rows = await rehearsalRows(db, ws, base.agent, "governed");
-    const task = await taskWithToken(db, ws, {
-      agent: base.agent,
-      rehearsalRunId: rows.runId,
-      rehearsalScenarioId: rows.scenarioId,
-      simExecutionId: rows.executionId,
-      status: "executing",
-    });
-    const { intentId } = await insertIntent(db, ws, {
-      taskId: task.taskId,
-      jobId: base.agent.jobId,
-      connector: { id: conn.id, slug: GCAL_SLUG },
-      tool: tools.create_event!,
-      args: { title: "勉強会", start: "2026-10-12T10:00:00+09:00", end: "2026-10-12T11:00:00+09:00" },
-    });
-
-    const r = await gw.client.executeIntent(intentId);
-    expect(r).toMatchObject({ intentId, status: "executed", failReason: null });
-
-    // 本物の Google へは一度も行かない（token の交換もなく、宛先の一覧にもない）
-    expect(fake.exchanges).toHaveLength(0);
-    expect(gw.sent.filter((s) => s.url.startsWith(GCAL_BASE))).toHaveLength(0);
-
-    const calls = gw.sent.filter((s) => s.rpc === "tools/call");
-    expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toBe(`${SIM_BASE}${SIM_GCAL_PATH}`);
-    const h = calls[0]!.headers;
-    expect(h[GCAL_HEADER.accessToken]).toBeUndefined();
-    expect(h[GCAL_HEADER.calendarId]).toBeUndefined();
-    expect(h[GCAL_HEADER.timeZone]).toBeUndefined();
-    expect(h[GCAL_HEADER.idempotencyKey]).toBeUndefined();
-    expect(h.authorization).toBeDefined();
-    expect(h).toMatchObject({
-      "x-ot-workspace-id": ws.workspaceId,
-      "x-ot-rehearsal-run-id": rows.runId,
-      "x-ot-sim-execution-id": rows.executionId,
-      "x-ot-intent-id": intentId,
-      "x-ot-shadow": "false",
-    });
-
-    // コネクタの行は本物の URL のまま（差し替えは送るときの宛先だけ）
-    const row = (await db.query<{ url: string }>("SELECT url FROM connectors WHERE id = $1", [conn.id])).rows[0]!;
-    expect(row.url).toBe(GCAL_URL);
   });
 });

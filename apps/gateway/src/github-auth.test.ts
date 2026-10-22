@@ -1,6 +1,6 @@
 // GitHub のコネクタの証明（18 §3.5、D-119、ADR-002）：GitHub App の JWT でインストールのトークンを作り、キャッシュする・
 // 保護したブランチへの許可は実行のときの行の値・アンインストール（404）は auth_required・同期では GitHub の頭を送らない・
-// リハーサル・影は模擬がないので拒否される
+// 本人の GitHub のコネクタの照合
 import { createPublicKey, createVerify, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
@@ -16,7 +16,6 @@ import {
   type GithubToolName,
 } from "@open-team/github-core";
 import { toolHashOf, type ArgRoleMap, type Json } from "@open-team/kernel";
-import { connectorBoundary, isOwnConnector, isOwnGithubConnector } from "./boundary.ts";
 import { ConnectorAuthRequired, ConnectorAuthUnsupported, ConnectorTokenUnavailable, defaultConnectorAuth, githubAppJwt } from "./context.ts";
 import { normalizePrivateKey, type GithubConfig } from "./env.ts";
 import { NOW, gatewayEnv, insertIntent, intentRow, rpcResponse, startGateway, taskWithToken, workspace, type FetchHook } from "./test-helpers.ts";
@@ -122,13 +121,13 @@ describe("GitHub App の JWT と環境変数の鍵", () => {
 describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
   it("インストールのトークンを1回だけ作り、期限（expires_at−60秒）までキャッシュする", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws);
     const fake = okFake();
     let t = NOW.getTime();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => new Date(t) } });
 
-    const h1 = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    const h1 = await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(h1[GITHUB_HEADER.token]).toBe(INSTALL_TOKEN);
     expect(h1[GITHUB_HEADER.allowProtectedWrite]).toBe("false");
     expect(h1[GITHUB_HEADER.idempotencyKey]).toBeUndefined();
@@ -136,27 +135,27 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
     expect(fake.issued[0]!.url).toBe(`${API}/app/installations/${INSTALLATION}/access_tokens`);
     expect(verifyJwt(fake.issued[0]!.authorization.replace(/^Bearer /, "")).iss).toBe("123456");
 
-    await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(fake.issued).toHaveLength(1);
     t += 3541_000;
-    await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" });
+    await provider({ connector: conn, intentId: null, purpose: "call" });
     expect(fake.issued).toHaveLength(2);
   });
 
   it("保護したブランチへの許可は、呼ぶときの行の値（切り替えたらすぐ効く）", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn, credentialId } = await seedGithub(db, ws);
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(okFake()), clock: { now: () => NOW } });
     await db.transaction((tx) => setGithubProtectedWrite(tx, ws.ctx, credentialId!, true));
-    expect((await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("true");
+    expect((await provider({ connector: conn, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("true");
     await db.transaction((tx) => setGithubProtectedWrite(tx, ws.ctx, credentialId!, false));
-    expect((await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("false");
+    expect((await provider({ connector: conn, intentId: null, purpose: "call" }))[GITHUB_HEADER.allowProtectedWrite]).toBe("false");
   });
 
   it("アンインストール（404）・一時停止（403）は ConnectorAuthRequired、5xx は ConnectorTokenUnavailable", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws);
     for (const [status, cls, reason] of [
       [404, ConnectorAuthRequired, "installation_gone"],
@@ -166,7 +165,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
       const fake = { ...okFake(), status };
       // キャッシュに当たらないよう、時計を毎回ずらす
       const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => new Date(NOW.getTime() + status * 3600_000) } });
-      const e = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" }).then(() => null, (x: unknown) => x);
+      const e = await provider({ connector: conn, intentId: null, purpose: "call" }).then(() => null, (x: unknown) => x);
       expect(e).toBeInstanceOf(cls);
       expect((e as { reason: string }).reason).toBe(reason);
     }
@@ -174,40 +173,27 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
 
   it("資格情報がない → ConnectorAuthRequired（no_credential）。トークンは作らない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws, false);
     const fake = okFake();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    await expect(provider({ connector: conn, simWorld: false, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "no_credential" });
+    await expect(provider({ connector: conn, intentId: null, purpose: "call" })).rejects.toMatchObject({ reason: "no_credential" });
     expect(fake.issued).toHaveLength(0);
   });
 
   it("同期（list）はトークンを作らず、URL が GITHUB_URL と違えば証明しない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws);
     const fake = okFake();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
-    const h = await provider({ connector: conn, simWorld: false, intentId: null, purpose: "list" });
+    const h = await provider({ connector: conn, intentId: null, purpose: "list" });
     expect(h[GITHUB_HEADER.token]).toBeUndefined();
     expect(h.authorization).toBe(`Bearer ${SHARED}`);
     expect(fake.issued).toHaveLength(0);
-    await expect(provider({ connector: { ...conn, url: "https://evil.example/mcp/github" }, simWorld: false, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(
+    await expect(provider({ connector: { ...conn, url: "https://evil.example/mcp/github" }, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(
       ConnectorAuthUnsupported,
     );
-  });
-});
-
-describe("境界（18 §3.5）", () => {
-  const conn = { url: GH_URL, auth: { type: "oauth", provider: "github" } as const };
-  it("本人の GitHub のコネクタはゲストでも通し、リハーサル・影は拒否する（模擬の GitHub はない）", () => {
-    expect(isOwnGithubConnector(conn, GH_BASE)).toBe(true);
-    expect(isOwnGithubConnector({ ...conn, auth: { type: "oauth", provider: "google" } }, GH_BASE)).toBe(false);
-    expect(isOwnConnector({ gcalOrigin: null, githubOrigin: GH_BASE }, conn)).toBe(true);
-    const base = { simWorldOrigin: null, connectorUrl: GH_URL, ownOAuthConnector: true };
-    expect(connectorBoundary({ ...base, workspaceKind: "guest", rehearsalRunId: null, shadow: false })).toEqual({ ok: true });
-    expect(connectorBoundary({ ...base, workspaceKind: "owner", rehearsalRunId: "r1", shadow: false })).toEqual({ ok: false, reasonCode: "rehearsal_real_connector" });
-    expect(connectorBoundary({ ...base, workspaceKind: "owner", rehearsalRunId: null, shadow: true })).toEqual({ ok: false, reasonCode: "shadow_real_connector" });
   });
 });
 
@@ -215,7 +201,7 @@ describe("実行（executeIntent）", () => {
   /** インストールのトークンのキャッシュはプロセスの中で共有なので、試験ごとに別のインストールにする */
   async function setupFlow(installationId: number) {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const fake = okFake();
     const gw = startGateway(db, providerEnv(), { hook: githubHook(fake) });
     const { conn, credentialId } = await seedGithub(db, ws, true, installationId);

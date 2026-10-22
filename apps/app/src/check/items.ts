@@ -8,8 +8,6 @@ import {
   getEndedTaskReportRow,
   getEvolutionReportRow,
   getSkillProposalReportRow,
-  getIncidentCaseReportRow,
-  getRehearsalReportRow,
   listApprovalBundles,
   listCheckMarks,
   listDecidedApprovals,
@@ -18,21 +16,16 @@ import {
   listUncheckedEndedTasks,
   listUncheckedEvolutionEvents,
   listUncheckedSkillProposals,
-  listUncheckedIncidentCases,
-  listUncheckedRehearsals,
   listUnknownOutcomeIntents,
   listWaitingAsks,
   type AnswerRunRow,
   type EvolutionReportRow,
   type SkillProposalReportRow,
-  type IncidentCaseReportRow,
-  type RehearsalReportRow,
   type TaskReportRow,
 } from "@open-team/db/check";
 import { failReasonText, type AskAnswer } from "@open-team/kernel";
 import type { AppDeps } from "../deps.ts";
 import { declinedLineOf } from "../asks/format.ts";
-import { INCIDENT_REPORT_LINE } from "../rehearsal/incident-flow.ts";
 import type { ApprovalItem, CheckCounts, CheckItem, DoneItem, QuestionItem, ReportItem, RunningItem } from "./contract.ts";
 import { buildApprovalView, newRuleIdFrom } from "./approval-view.ts";
 import { calendarLinkOf } from "./calendar-link.ts";
@@ -92,75 +85,9 @@ export function answerItem(r: AnswerRunRow): ReportItem {
     dryRun: false,
     body: conclusion === "" ? null : conclusion,
     lines,
-    link: { askId: r.run.ask_id, rehearsalRunId: null, agentId: null },
+    link: { askId: r.run.ask_id, agentId: null },
     // どの頼みごとへの回答かを行に添える（返事の実行なら返事の文）
     request: clip(r.requestText ?? r.askText, 200),
-  };
-}
-
-interface RehearsalSummaryCounts {
-  total?: number;
-  withControl?: { slipped?: number };
-  afterTighten?: { slipped?: number } | null;
-}
-
-/** 「仕入れ係の練習：5件中2件で穴 → 締めました」（固定の文。数は summary.counts から） */
-export function rehearsalLine(r: RehearsalReportRow): { title: string; failed: boolean } {
-  const name = r.subjectName === null ? "安全チェック" : r.agentId !== null ? `${r.subjectName}の練習` : `「${clip(r.subjectName, 16)}」の練習`;
-  if (r.run.status === "failed") return { title: `${name}を最後まで走らせられませんでした`, failed: true };
-  const counts = (r.run.summary?.counts ?? null) as RehearsalSummaryCounts | null;
-  const total = counts?.total;
-  const slipped = counts?.withControl?.slipped;
-  if (typeof total !== "number" || typeof slipped !== "number") return { title: `${name}の結果が出ました`, failed: false };
-  if (slipped === 0) return { title: `${name}：${total}件の状況、すり抜けなし`, failed: false };
-  const after = counts?.afterTighten;
-  if (after === null || after === undefined) return { title: `${name}：${total}件中${slipped}件で穴があります`, failed: false };
-  return {
-    title: `${name}：${total}件中${slipped}件で穴${after.slipped === 0 ? " → 権限を絞りました" : ` → まだ${after.slipped ?? 0}件残っています`}`,
-    failed: false,
-  };
-}
-
-export function rehearsalItem(r: RehearsalReportRow): ReportItem {
-  const { title, failed } = rehearsalLine(r);
-  const at = r.run.finished_at ?? r.run.created_at;
-  return {
-    kind: "report",
-    reportKind: "rehearsal",
-    key: `rehearsal:${r.run.id}`,
-    title,
-    // 自分の言葉の悪い日の走行は合格証を出さない種類なので、「安全チェックはまだ」とは書かない（合格した直後に並ぶと失敗に見える）
-    subtitle: `${r.run.trigger === "user_case" ? "自分の言葉の悪い日" : r.run.certificate_id !== null ? "安全チェック済み" : "安全チェックはまだ"} · ${timeText(at)}`,
-    agent: r.agentId === null || r.subjectName === null ? null : { id: r.agentId, name: r.subjectName },
-    askId: r.run.ask_id,
-    at: at.toISOString(),
-    opened: false,
-    failed,
-    dryRun: false,
-    body: null,
-    lines: [],
-    link: { askId: r.run.ask_id, rehearsalRunId: r.run.id, agentId: null },
-    request: null,
-  };
-}
-
-export function incidentItem(r: IncidentCaseReportRow): ReportItem {
-  return {
-    kind: "report",
-    reportKind: "incident_added",
-    key: `incident_added:${r.row.id}`,
-    title: INCIDENT_REPORT_LINE,
-    subtitle: [r.agentName, timeText(r.row.created_at)].filter((x) => x !== null).join(" · "),
-    agent: r.agentId === null || r.agentName === null ? null : { id: r.agentId, name: r.agentName },
-    askId: r.row.ask_id,
-    at: r.row.created_at.toISOString(),
-    opened: false,
-    failed: false,
-    dryRun: false,
-    body: null,
-    lines: r.row.reason_code === null ? [] : [`止まった理由：${r.row.reason_code}`],
-    link: { askId: r.row.ask_id, rehearsalRunId: null, agentId: null },
-    request: null,
   };
 }
 
@@ -183,7 +110,7 @@ export function endedTaskItem(r: TaskReportRow): ReportItem {
     dryRun: false,
     body: t.report,
     lines: [],
-    link: { askId: t.ask_id, rehearsalRunId: null, agentId: null },
+    link: { askId: t.ask_id, agentId: null },
     request: null,
   };
 }
@@ -207,7 +134,7 @@ export function skillProposalItem(r: SkillProposalReportRow): ReportItem {
     dryRun: false,
     body: [p.description, p.reason === null || p.reason === "" ? null : `案にした理由：${p.reason}`].filter((x): x is string => x !== null && x !== "").join("\n") || null,
     lines: [],
-    link: { askId: null, rehearsalRunId: null, agentId: p.agent_id },
+    link: { askId: null, agentId: p.agent_id },
     request: null,
   };
 }
@@ -233,7 +160,7 @@ export function evolutionItem(r: EvolutionReportRow): ReportItem {
     dryRun: false,
     body: null,
     lines: e.items.map((i) => `${i.type === "skill" ? "スキル" : "ルール"}：${i.label}`),
-    link: { askId: null, rehearsalRunId: null, agentId: e.agent_id },
+    link: { askId: null, agentId: e.agent_id },
     request: null,
   };
 }
@@ -252,13 +179,11 @@ const byTimeDesc = (a: { at: string }, b: { at: string }): number => (a.at < b.a
 export async function buildCheck(deps: ItemDeps, s: Viewer, focusKey: string | null = null): Promise<CheckBuild> {
   const now = deps.clock.now();
   const q = deps.db;
-  const [approvals, waiting, unknowns, answers, rehearsals, incidents, ended, proposals, evolutions, runningRows] = await Promise.all([
+  const [approvals, waiting, unknowns, answers, ended, proposals, evolutions, runningRows] = await Promise.all([
     listApprovalBundles(q, s, { status: "pending", notExpiredAt: now, limit: 100 }),
     listWaitingAsks(q, s, 50),
     listUnknownOutcomeIntents(q, s, 50),
     listUncheckedAnswers(q, s, REPORT_LIMIT),
-    listUncheckedRehearsals(q, s, REPORT_LIMIT),
-    listUncheckedIncidentCases(q, s, REPORT_LIMIT),
     listUncheckedEndedTasks(q, s, REPORT_LIMIT),
     listUncheckedSkillProposals(q, s, REPORT_LIMIT),
     listUncheckedEvolutionEvents(q, s, REPORT_LIMIT),
@@ -328,7 +253,7 @@ export async function buildCheck(deps: ItemDeps, s: Viewer, focusKey: string | n
     ),
   ].sort(byTimeDesc);
 
-  const reports: ReportItem[] = [...answers.map(answerItem), ...rehearsals.map(rehearsalItem), ...incidents.map(incidentItem), ...ended.map(endedTaskItem), ...proposals.map(skillProposalItem), ...evolutions.map(evolutionItem)]
+  const reports: ReportItem[] = [...answers.map(answerItem), ...ended.map(endedTaskItem), ...proposals.map(skillProposalItem), ...evolutions.map(evolutionItem)]
     .map((r) => (r.key === focusKey ? { ...r, opened: true } : r))
     .sort(byTimeDesc);
 
@@ -361,14 +286,6 @@ export async function reportItemOfKey(deps: ItemDeps, s: Viewer, key: string): P
     case "answer": {
       const r = await getAnswerRun(q, s, id!);
       return r === null ? null : answerItem(r);
-    }
-    case "rehearsal": {
-      const r = await getRehearsalReportRow(q, s, id!);
-      return r === null ? null : rehearsalItem(r);
-    }
-    case "incident_added": {
-      const r = await getIncidentCaseReportRow(q, s, id!);
-      return r === null ? null : incidentItem(r);
     }
     case "task": {
       const r = await getEndedTaskReportRow(q, s, id!);

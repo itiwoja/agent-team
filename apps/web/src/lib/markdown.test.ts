@@ -9,10 +9,10 @@ describe("parseMarkdown", () => {
   });
 
   it("見出し・水平線・段落を分ける", () => {
-    expect(parseMarkdown("結論です。\n\n---\n\n### 店舗の在庫確認結果\n確認したところ、以下の通りでした。")).toEqual([
+    expect(parseMarkdown("結論です。\n\n---\n\n### 今週の予定の確認結果\n確認したところ、以下の通りでした。")).toEqual([
       { kind: "paragraph", inline: [t("結論です。")] },
       { kind: "rule" },
-      { kind: "heading", level: 3, inline: [t("店舗の在庫確認結果")] },
+      { kind: "heading", level: 3, inline: [t("今週の予定の確認結果")] },
       { kind: "paragraph", inline: [t("確認したところ、以下の通りでした。")] },
     ]);
   });

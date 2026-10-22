@@ -11,7 +11,6 @@ import { trapTab } from "../ui/trapTab";
 import { connectHref } from "./GoogleCalendarLine";
 import { GithubMenuSection } from "./GithubLine";
 import { CheckSheet } from "./CheckSheet";
-import { RestartSheet } from "./RestartSheet";
 import { AgentsIcon, BackIcon, CalendarIcon, CheckIcon, Chevron, CloseIcon, ComposeIcon, MenuIcon, PacksIcon, TasksIcon } from "../ui/icons";
 import { useWorkspace } from "../workspace";
 
@@ -20,7 +19,6 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
   const route = useRoute();
   const attention = counts?.attention ?? 0;
   const [menuOpen, setMenuOpen] = useState(false);
-  const [restartOpen, setRestartOpen] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const checkBtnRef = useRef<HTMLButtonElement>(null);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -120,9 +118,8 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
           つながっていません
         </p>
       )}
-      {menuOpen && createPortal(<Menu attention={counts?.attention ?? 0} onClose={closeMenu} onRestart={() => setRestartOpen(true)} />, document.body)}
+      {menuOpen && createPortal(<Menu attention={counts?.attention ?? 0} onClose={closeMenu} />, document.body)}
       {sheetOpen && createPortal(<CheckSheet onClose={closeSheet} />, document.body)}
-      {restartOpen && <RestartSheet onClose={() => setRestartOpen(false)} />}
     </>
   );
 }
@@ -130,8 +127,8 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
 /** メニューに出す最近の依頼の数 */
 const RECENT = 5;
 
-function Menu({ attention, onClose, onRestart }: { attention: number; onClose: () => void; onRestart: () => void }) {
-  const { workspace, signOut, google, setGoogle } = useWorkspace();
+function Menu({ attention, onClose }: { attention: number; onClose: () => void }) {
+  const { signOut, google, setGoogle } = useWorkspace();
   const route = useRoute();
   const [gcalError, setGcalError] = useState(false);
   const disconnectGoogle = async () => {
@@ -144,19 +141,6 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
     }
   };
   const ref = useRef<HTMLDivElement>(null);
-  // 今日使える費用はログイン時の値のままだと古いので、開くたびに取り直す（取れなければ手元の値）
-  const [remainingUsd, setRemainingUsd] = useState(workspace.budget.remainingUsd);
-  useEffect(() => {
-    if (!workspace.guest) return;
-    let alive = true;
-    api
-      .me()
-      .then((m) => alive && setRemainingUsd(m.workspace.budget.remainingUsd))
-      .catch(() => undefined);
-    return () => {
-      alive = false;
-    };
-  }, [workspace.guest]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -225,7 +209,7 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
             <PacksIcon />
             <span>パック</span>
           </Link>
-          {/* 記録（SCR-010・/audit）はメニューに出さない。合格証の「監査ログ #N」から開く */}
+          {/* 記録（SCR-010・/audit）はメニューに出さない */}
           {recent && recent.length > 0 && (
             <section className="drawer-recent" aria-label="最近の依頼">
               <p className="drawer-recent-head">最近の依頼</p>
@@ -260,25 +244,6 @@ function Menu({ attention, onClose, onRestart }: { attention: number; onClose: (
             <span>つなぐ・設定</span>
             <Chevron size={14} />
           </summary>
-        {workspace.guest && (
-          <p className="drawer-note muted small">
-            ゲスト・あと{workspace.guest.daysLeft}日
-            <br />
-            今日使える AI の費用：あと ${Number(remainingUsd).toFixed(2)}
-          </p>
-        )}
-        {workspace.guest && (
-          <button
-            type="button"
-            className="btn btn-ghost drawer-restart"
-            onClick={() => {
-              onClose();
-              onRestart();
-            }}
-          >
-            最初からやり直す
-          </button>
-        )}
         {google.available && !google.connected && (
           <a className="drawer-item" href={connectHref()}>
             <CalendarIcon />

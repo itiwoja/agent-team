@@ -103,7 +103,7 @@ export function readLlmEnv(source: NodeJS.ProcessEnv = process.env): LlmConfig {
   };
 }
 
-/** Certificates must not survive a provider/endpoint/capability switch under the same model name. */
+/** 同じモデル名でも提供元・接続先・能力が変われば別のモデルとして見分ける識別子（API キーは含めない） */
 export function providerModelIdentity(config: LlmConfig | undefined, model: string): string {
   if (!config || config.provider === "gemini") return model;
   const hash = createHash("sha256").update(JSON.stringify([config.provider, config.baseUrl ?? null, config.profiles[model] ?? null])).digest("hex").slice(0, 20);

@@ -1,6 +1,6 @@
 // LLM Proxy（edge の llmMessages。FR-009、formation-runtime.md §3.10、M-14・M-15・M-19）
 // 1 トークンでタスクを引き直す → 2 入力の検証（Zod）→ 3 1分あたり60回 → 4 Router でモデル → 5 見積もり →
-// 6 callGemini の中の1トランザクション：Kill Switch・checkSpend（全体・ゲスト・リハーサル）・decide(llm_call) → 7 Gemini（やり直し）→
+// 6 callGemini の中の1トランザクション：Kill Switch・checkSpend（全体）・decide(llm_call) → 7 Gemini（やり直し）→
 // 8 1トランザクション：usage_records・tasks.cost_usd／steps_used・task_events・監査ログ llm.called → 9 応答のツール呼び出しを順に decide
 // （エージェントの MCP の書き込みも kind: 'tool_call' で1回だけ：M-14。書き込みはその結果で Intent にする：recordMcpIntent）。
 // 1つの応答で submit_report より後ろの呼び出しは判定せず Intent にもしない（決定 (e)。記録だけ：runner が捨てるのと合わせる）
@@ -25,7 +25,7 @@ import {
   type TaintState,
 } from "@open-team/kernel";
 import { EdgeError, type AssistantPart, type GovernanceEntry, type LlmMessagesResponse, type ToolCallPart } from "@open-team/runner";
-import { modelForPhase, modelForRole, type LlmRequest } from "@open-team/llm";
+import { modelForPhase, type LlmRequest } from "@open-team/llm";
 import { appendAuditLog, lockWorkspace, system, type TaskRow, type Tx, type Uuid, type WorkspaceRow, type WsCtx } from "@open-team/db";
 import {
   addTaskUsage,
@@ -40,7 +40,7 @@ import { loadTaskSetup, type TaskSetup } from "./context.ts";
 import { GeminiCallError, callGemini, promptHashOf, type GeminiCallContext } from "./gemini.ts";
 import { failTask, haltCauseOf, haltCauseOfSpend, haltTask } from "./halt.ts";
 import { loadDecideBase, parseMcpCallArgs, resolveMcpSubject, type DecideBase, type McpTarget } from "./inputs.ts";
-import { recordMcpIntent, shadowIgnores, type RecordedMcpIntent } from "./intents.ts";
+import { recordMcpIntent, type RecordedMcpIntent } from "./intents.ts";
 import { commandDeniedNote, commandTaintOf, judgeCommand, type CommandJudgement } from "./sandbox-command.ts";
 import { notifyTerminal, runHook, type EdgeRuntime } from "./runtime.ts";
 import { checkToolArguments } from "./schema-check.ts";
@@ -48,7 +48,7 @@ import { haltedDetails, isTerminalStatus, resolveTaskByToken } from "./tokens.ts
 import { charCount, toJsonObject } from "./util.ts";
 import { parseLlmMessagesRequest } from "./validate.ts";
 
-/** 判定の結果（kernel の DecideResult か、edge の境界の拒否。境界の理由コードは kernel の ReasonCode にない：BR-64 の guest_workspace） */
+/** 判定の結果（kernel の DecideResult） */
 export interface Judged {
   decision: Decision;
   reasonCode: string;
@@ -58,18 +58,6 @@ export interface Judged {
   inputsHash: string;
   operation: OperationType | null;
   detail?: DecisionDetail;
-}
-
-/** 実際に効かせる判定（影の走行は Breaker・deny・approve を記録だけにする：SW §4.5-2。境界の拒否は影でも効かせる） */
-export function enforcementOf(r: Pick<Judged, "decision" | "reasonCode">, shadow: boolean, boundary = false): { effective: Decision; enforced: boolean } {
-  if (!shadow || boundary) return { effective: r.decision, enforced: true };
-  if (shadowIgnores(r)) return { effective: "allow", enforced: false };
-  return { effective: r.decision, enforced: r.decision !== "allow" };
-}
-
-function agentModelOf(rt: EdgeRuntime): string {
-  const model = modelForRole(rt.models, "agent");
-  return rt.llm.modelIdentity?.(model) ?? model;
 }
 
 /** 判定の記録（policy_decisions）と、allow 以外・Intent への判定の監査ログ decision.made（API-037 の副作用・platform.md:128） */
@@ -85,7 +73,6 @@ async function recordDecision(
     flags: Flags;
     taint: TaintState;
     result: Judged;
-    enforced: boolean;
     intentId: Uuid | null;
   },
   now: Date,
@@ -107,7 +94,7 @@ async function recordDecision(
       matchedRule: d.result.matchedRule,
       matchedRuleId: d.result.matchedRuleId ?? null,
       detail: d.result.detail === undefined ? null : (structuredClone(d.result.detail) as unknown as JsonObject),
-      enforced: d.enforced,
+      enforced: true,
       inputsHash: d.result.inputsHash,
       kernelVersion: KERNEL_VERSION,
     },
@@ -133,7 +120,7 @@ async function recordDecision(
           // ルールに一致したときだけ id を足す（SG-09。ほかの判定の payload は今までの形のまま）
           ...(d.result.matchedRuleId === undefined ? {} : { matchedRuleId: d.result.matchedRuleId }),
           inputsHash: d.result.inputsHash,
-          enforced: d.enforced,
+          enforced: true,
           intentId: d.intentId,
         },
       },
@@ -146,20 +133,18 @@ async function recordDecision(
 interface BuiltCall {
   subject: Subject;
   mcp: McpTarget | null;
-  /** edge の境界で先に拒否する（BR-64：ゲストの web_search。decide の前：KD §8-38） */
-  boundary: { reasonCode: string; operation: OperationType } | null;
   /** run_command の写し先（SG-07）。ほかのツールは null */
   command: CommandJudgement | null;
 }
 
-async function buildCallSubject(tx: Tx, ctx: WsCtx, call: ToolCallPart, workspace: WorkspaceRow, taint: TaintState): Promise<BuiltCall> {
+async function buildCallSubject(tx: Tx, ctx: WsCtx, call: ToolCallPart, taint: TaintState): Promise<BuiltCall> {
   if (call.name === "mcp_call") {
     const parsed = parseMcpCallArgs(call.arguments);
     if (parsed === null) {
-      return { subject: { kind: "tool_call", actionType: "mcp_call", args: {}, paths: [], origin: "agent" }, mcp: null, boundary: null, command: null };
+      return { subject: { kind: "tool_call", actionType: "mcp_call", args: {}, paths: [], origin: "agent" }, mcp: null, command: null };
     }
     const r = await resolveMcpSubject(tx, ctx, parsed);
-    return { subject: r.subject, mcp: r.mcp, boundary: null, command: null };
+    return { subject: r.subject, mcp: r.mcp, command: null };
   }
   const subject: Subject = {
     kind: "tool_call",
@@ -169,16 +154,13 @@ async function buildCallSubject(tx: Tx, ctx: WsCtx, call: ToolCallPart, workspac
     paths: [],
     origin: "agent",
   };
-  if (call.name === "web_search" && workspace.kind === "guest") {
-    return { subject, mcp: null, boundary: { reasonCode: "guest_workspace", operation: "web_read" }, command: null };
-  }
   if (call.name === "run_command") {
     // SG-07：汚染（外の内容を読んだか）と形から、run_tests と run_shell のどちらとして判定するかをここで決める。
     // 汚染は decide の手順の条件には入れない（BR-39）。decide は subject.commandOperation と形だけを見る
     const command = judgeCommand(subject.args, taint);
-    return { subject: { ...subject, commandOperation: command.operation }, mcp: null, boundary: null, command };
+    return { subject: { ...subject, commandOperation: command.operation }, mcp: null, command };
   }
-  return { subject, mcp: null, boundary: null, command: null };
+  return { subject, mcp: null, command: null };
 }
 
 export interface JudgedCalls {
@@ -226,7 +208,7 @@ export async function judgeToolCalls(
   const ignored = calls.length - judgedCalls.length;
   if (judgedCalls.length === 0) return { content, governance: [], intents: [], halted: false, ignored };
 
-  const base: DecideBase = await loadDecideBase(tx, ctx, task, now, { modelId: agentModelOf(rt), taskPolicy: setup.taskPolicy });
+  const base: DecideBase = await loadDecideBase(tx, ctx, task, now, { taskPolicy: setup.taskPolicy });
   const policy: EffectivePolicy = base.taskPolicy.policy;
   let counters = base.counters;
   const governance: GovernanceEntry[] = [];
@@ -236,31 +218,17 @@ export async function judgeToolCalls(
   // SG-07：run_command の写し先に使う汚染（作業場が受け取る控えの汚染を先に足したもの）。run_command があるときだけ読む
   const commandTaint = judgedCalls.some((c) => c.name === "run_command") ? await commandTaintOf(tx, ctx, task, base.taint, now) : base.taint;
   for (const call of judgedCalls) {
-    const built = await buildCallSubject(tx, ctx, call, base.workspace, commandTaint);
-    let kernelResult: DecideResult | null = null;
-    let result: Judged;
-    if (built.boundary !== null) {
-      result = {
-        decision: "deny",
-        reasonCode: built.boundary.reasonCode,
-        matchedRule: null,
-        inputsHash: computeInputsHash(policy, built.subject, counters, base.flags, base.taint),
-        operation: built.boundary.operation,
-      };
-    } else {
-      kernelResult = decide(policy, built.subject, counters, base.flags, base.taint);
-      result = kernelResult;
-    }
-    const outcome = enforcementOf(result, task.shadow, built.boundary !== null);
+    const built = await buildCallSubject(tx, ctx, call, commandTaint);
+    const kernelResult: DecideResult = decide(policy, built.subject, counters, base.flags, base.taint);
+    const result: Judged = kernelResult;
 
     // MCP の書き込み（未分類も書き込み：ADR-022）は判定の結果で Intent にする（M-14）
     let intent: RecordedMcpIntent | null = null;
     let invalidArgs: string[] | null = null;
     const mcp = built.mcp;
-    if (mcp !== null && mcp.info.classification !== "read" && kernelResult !== null) {
-      // 実行されうる（allow・影）か承認に回る（approve）Intent は、入力スキーマに合わなければ作らない（M-12。ツールのエラーで返す）
-      const pendingOrRun = outcome.effective === "allow" || (outcome.effective === "approve" && kernelResult.decision === "approve");
-      if (pendingOrRun) {
+    if (mcp !== null && mcp.info.classification !== "read") {
+      // 実行されうる（allow）か承認に回る（approve）Intent は、入力スキーマに合わなければ作らない（M-12。ツールのエラーで返す）
+      if (result.decision === "allow" || result.decision === "approve") {
         const check = checkToolArguments(mcp.tool.input_schema, built.subject.args, rt.limits.mcpArgsMaxBytes);
         if (!check.ok) invalidArgs = check.issues;
       }
@@ -280,7 +248,7 @@ export async function judgeToolCalls(
       }
     }
 
-    const effective: Decision = invalidArgs !== null ? "allow" : outcome.effective;
+    const effective: Decision = invalidArgs !== null ? "allow" : result.decision;
     const callRecord: JsonObject = {
       toolCallId: call.id,
       name: call.name,
@@ -300,7 +268,6 @@ export async function judgeToolCalls(
         flags: base.flags,
         taint: base.taint,
         result,
-        enforced: outcome.enforced,
         intentId: intent?.intentId ?? null,
       },
       now,
@@ -335,8 +302,8 @@ export async function judgeToolCalls(
       ...(note !== undefined ? { note } : {}),
     });
 
-    if (outcome.effective === "halt") {
-      const cause = kernelResult === null ? null : haltCauseOf(kernelResult);
+    if (result.decision === "halt") {
+      const cause = haltCauseOf(kernelResult);
       if (cause !== null) await haltTask(tx, ctx, task, cause, now);
       halted = true;
       break;
@@ -384,7 +351,6 @@ export async function llmMessages(rt: EdgeRuntime, token: string, rawReq: unknow
     taskId: task.id,
     agentId: task.agent_id,
     askId: null,
-    rehearsalRunId: task.rehearsal_run_id,
     purpose: "agent",
     phase: req.phase,
     ...(signal !== undefined ? { signal } : {}),
@@ -404,7 +370,7 @@ export async function llmMessages(rt: EdgeRuntime, token: string, rawReq: unknow
       gctx,
       llmReq,
       {
-        // Kill Switch・全体 $15・ゲスト $4・リハーサル $3（M-19）。タスクの中で止めたら halted(budget_exceeded)＋監査ログ budget.exceeded
+        // Kill Switch・全体 $15（M-19）。タスクの中で止めたら halted(budget_exceeded)＋監査ログ budget.exceeded
         onStopped: async (tx, stop, now) => {
           const t = await lockTask(tx, ctx, task.id);
           if (t === null || isTerminalStatus(t.status)) return;
@@ -417,9 +383,8 @@ export async function llmMessages(rt: EdgeRuntime, token: string, rawReq: unknow
           if (t === null) return { ok: false, error: new EdgeError("UNAUTHORIZED") };
           if (t.status !== "running") return { ok: false, error: new EdgeError("TASK_HALTED", haltedDetails(t)) };
           const subject: Subject = { kind: "llm_call", actionType: null, args: {}, paths: [], estimatedCostUsd: fromMicroUsd(est) };
-          const base = await loadDecideBase(tx, ctx, t, now, { modelId: agentModelOf(rt), taskPolicy: setup.taskPolicy });
+          const base = await loadDecideBase(tx, ctx, t, now, { taskPolicy: setup.taskPolicy });
           const r = decide(base.taskPolicy.policy, subject, base.counters, base.flags, base.taint);
-          const outcome = enforcementOf(r, t.shadow);
           await recordDecision(
             tx,
             ctx,
@@ -432,12 +397,11 @@ export async function llmMessages(rt: EdgeRuntime, token: string, rawReq: unknow
               flags: base.flags,
               taint: base.taint,
               result: r,
-              enforced: outcome.enforced,
               intentId: null,
             },
             now,
           );
-          if (outcome.effective !== "halt") return { ok: true };
+          if (r.decision !== "halt") return { ok: true };
           const cause = haltCauseOf(r);
           if (cause !== null && (await haltTask(tx, ctx, t, cause, now)) !== null) state.terminal = true;
           return {
@@ -523,7 +487,7 @@ export async function llmMessages(rt: EdgeRuntime, token: string, rawReq: unknow
   if (state.judged !== null) {
     for (const i of state.judged.intents) {
       const hook = rt.hooks.onIntentRecorded;
-      if (hook) await runHook(rt, "onIntentRecorded", task.id, () => hook(ctx, { taskId: task.id, intentId: i.intentId, status: i.status, shadow: task.shadow }));
+      if (hook) await runHook(rt, "onIntentRecorded", task.id, () => hook(ctx, { taskId: task.id, intentId: i.intentId, status: i.status }));
     }
   }
   if (state.terminal) await notifyTerminalOf(rt, ctx, task.id);

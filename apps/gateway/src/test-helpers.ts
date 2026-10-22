@@ -1,24 +1,13 @@
-// 試験用の道具（index からは出さない）。sim-world を同じプロセスで本物の HTTP で起こし（保存はメモリ）、
+// 試験用の道具（index からは出さない）。試験の中だけの小さな MCP サーバー（偽のコネクタ）を同じプロセスで本物の HTTP で起こし、
 // gateway を app.request につなぎ、DB は @open-team/db/testing の試験ごとのデータベースを使う
 
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import { serve } from "@hono/node-server";
-import type { Hono } from "hono";
+import { Hono } from "hono";
+import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
 import { appendAuditLog, hashTaskToken, type Db } from "@open-team/db";
-import {
-  fxAgent,
-  fxHash,
-  fxRehearsalCase,
-  fxRehearsalRun,
-  fxRehearsalScenario,
-  fxSimExecution,
-  fxTask,
-  fxWorkspace,
-  type FxAgent,
-  type FxTaskOptions,
-  type FxWorkspace,
-} from "@open-team/db/testing";
+import { fxAgent, fxHash, fxTask, fxWorkspace, type FxAgent, type FxTaskOptions, type FxWorkspace } from "@open-team/db/testing";
 import { createGatewayClient, type GatewayClient } from "@open-team/gateway-client";
 import {
   computeMcpIntentHash,
@@ -32,101 +21,118 @@ import {
   type ToolHash,
 } from "@open-team/kernel";
 import { manualClock, memoryLogger, type ManualClock } from "@open-team/platform";
-import { SHOP_CONNECTORS, SHOP_WORLD, type FaultSpecInput, type SimToolListing } from "@open-team/sim-core";
-import { createApp as createSimApp, MemorySimStore, type SimWorldDeps, type SimWorldEnv } from "@open-team/sim-world";
 import { createGateway, type GatewayApp } from "./app.ts";
 import type { GatewayDeps } from "./context.ts";
 import type { GatewayEnv } from "./env.ts";
 
-export const SIM_TOKEN = "sim-world-shared-token-for-gateway-tests-0123";
 export const GW_TOKEN = "gateway-internal-token-for-gateway-tests-0123";
 export const APP_CALLER = { authorization: `Bearer ${GW_TOKEN}`, "x-ot-caller": "sa-app" } as const;
 export const NOW = new Date("2026-10-12T09:00:00.000Z");
 
-// ---- sim-world（本物の HTTP。ポートは OS が選ぶ）----
+// ---- 偽の MCP サーバー（本物の HTTP。ポートは OS が選ぶ）----
 
-export interface SimWorldHandle {
-  url: string;
-  store: MemorySimStore;
-  close(): Promise<void>;
-  admin(method: string, path: string, body?: unknown): Promise<{ status: number; json: any }>;
-  createDemoStore(workspaceId: string): Promise<{ id: string }>;
-  createExecution(i: {
-    workspaceId: string;
-    rehearsalRunId: string;
-    executionId: string;
-    variant: "governed" | "shadow";
-    faults: FaultSpecInput[];
-  }): Promise<void>;
-  getState(workspaceId: string, executionId: string): Promise<{ state: Record<string, any>; events: Array<Record<string, any>> }>;
+/** 偽のコネクタのツール（manifest の分類・役割つき） */
+export interface FakeToolSpec {
+  name: string;
+  description: string;
+  inputSchema: Record<string, unknown>;
+  classification: "read" | "write";
+  argRoles: ArgRoleMap;
+  /** tools/call の結果（text に入れる JSON） */
+  result: (args: Record<string, unknown>) => unknown;
+}
+export interface FakeConnectorSpec {
+  slug: string;
+  displayName: string;
+  /** サーバーの下のパス（コネクタの URL は <サーバーの URL><path>） */
+  path: string;
+  tools: FakeToolSpec[];
 }
 
-export async function startSimWorld(deps: Omit<SimWorldDeps, "store"> = {}): Promise<SimWorldHandle> {
-  const store = new MemorySimStore();
-  const env: SimWorldEnv = {
-    port: 0,
-    sharedToken: SIM_TOKEN,
-    databaseUrl: undefined,
-    commitSha: "test",
-  };
-  const app = createSimApp(env, { store, ...deps });
-  const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
-    const s = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }, () => resolve(s));
-  });
-  const port = (server.address() as AddressInfo).port;
-  const url = `http://127.0.0.1:${port}`;
-  const admin = async (method: string, path: string, body?: unknown) => {
-    const res = await fetch(`${url}/admin/v1${path}`, {
-      method,
-      headers: { authorization: `Bearer ${SIM_TOKEN}`, "x-ot-caller": "sa-app", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
-      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
-    });
-    const text = await res.text();
-    return { status: res.status, json: text ? JSON.parse(text) : null };
-  };
-  return {
-    url,
-    store,
-    close: () =>
-      new Promise<void>((resolve) => {
-        server.close(() => resolve());
-        (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
-      }),
-    admin,
-    async createDemoStore(workspaceId) {
-      const r = await admin("POST", "/demo-store", { workspaceId, world: "shop" });
-      if (r.status !== 201 && r.status !== 200) throw new Error(`デモ店舗を作れない：${r.status} ${JSON.stringify(r.json)}`);
-      return { id: r.json.execution.id as string };
-    },
-    async createExecution(i) {
-      const r = await admin("POST", "/executions", {
-        workspaceId: i.workspaceId,
-        world: "shop",
-        rehearsalRunId: i.rehearsalRunId,
-        executionId: i.executionId,
-        variant: i.variant,
-        scenario: {
-          schemaVersion: 1,
-          world: "shop",
-          seed: 1,
-          title: "試験の状況",
-          faults: i.faults,
-          agentRuns: i.faults.some((f) => (f as { id: string }).id === "F-01") ? 2 : 1,
-          endAt: "day2_end",
-          origin: { source: i.faults.length === 0 ? "incident" : "generated" },
-        },
-      });
-      if (r.status !== 201) throw new Error(`走行を作れない：${r.status} ${JSON.stringify(r.json)}`);
-    },
-    async getState(workspaceId, executionId) {
-      const r = await admin("GET", `/executions/${executionId}?workspaceId=${workspaceId}`);
-      if (r.status !== 200) throw new Error(`走行を読めない：${r.status} ${JSON.stringify(r.json)}`);
-      return { state: r.json.state, events: r.json.events };
-    },
-  };
-}
+const OBJ = (properties: Record<string, unknown>, required: string[] = []): Record<string, unknown> => ({ type: "object", properties, required, additionalProperties: false });
 
-/** サーバー側のツールの定義を試験の中で変える（F-08 の本番の形・ツールの増減：DR-01〜06） */
+/** 試験の例のコネクタ（在庫・仕入れ・振込・メール）。どれも一般的な MCP のコネクタとして扱う */
+export const FAKE_CONNECTORS: readonly FakeConnectorSpec[] = [
+  {
+    slug: "store",
+    displayName: "在庫",
+    path: "/mcp/store",
+    tools: [
+      {
+        name: "get_inventory",
+        description: "在庫の一覧を返します。",
+        inputSchema: OBJ({}),
+        classification: "read",
+        argRoles: {},
+        result: () => ({ items: [{ sku: "BEAN-HOUSE", quantity: 12 }] }),
+      },
+    ],
+  },
+  {
+    slug: "supplier",
+    displayName: "仕入れ先",
+    path: "/mcp/supplier",
+    tools: [
+      {
+        name: "list_products",
+        description: "仕入れ先の商品を返します。",
+        inputSchema: OBJ({ supplier_id: { type: "string" } }),
+        classification: "read",
+        argRoles: {},
+        result: () => ({ products: [{ sku: "BEAN-HOUSE", unit_price: 780 }] }),
+      },
+      {
+        name: "place_order",
+        description: "仕入れ先に発注します。",
+        inputSchema: OBJ(
+          {
+            supplier_id: { type: "string" },
+            items: {
+              type: "array",
+              items: OBJ({ sku: { type: "string" }, quantity: { type: "integer" }, unit_price: { type: "integer" } }, ["sku", "quantity", "unit_price"]),
+            },
+          },
+          ["supplier_id", "items"],
+        ),
+        classification: "write",
+        argRoles: { supplier_id: "destination" } as ArgRoleMap,
+        result: () => ({ order_id: `ord-${randomUUID().slice(0, 8)}`, status: "accepted" }),
+      },
+    ],
+  },
+  {
+    slug: "bank",
+    displayName: "銀行",
+    path: "/mcp/bank",
+    tools: [
+      {
+        name: "register_payee",
+        description: "振込先を登録します。",
+        inputSchema: OBJ({ account: { type: "string" }, supplier_id: { type: "string" } }, ["account", "supplier_id"]),
+        classification: "write",
+        argRoles: { account: "destination" } as ArgRoleMap,
+        result: () => ({ payee_id: `payee-${randomUUID().slice(0, 8)}` }),
+      },
+    ],
+  },
+  {
+    slug: "mail",
+    displayName: "メール",
+    path: "/mcp/mail",
+    tools: [
+      {
+        name: "list_inbox",
+        description: "受信箱を返します。",
+        inputSchema: OBJ({}),
+        classification: "read",
+        argRoles: {},
+        result: () => ({ messages: [] }),
+      },
+    ],
+  },
+];
+
+/** サーバー側のツールの定義を試験の中で変える（説明の変化・ツールの増減：DR-01〜06） */
 export interface ToolListOverrides {
   /** '<コネクタ>.<ツール>' → 新しい説明 */
   description: Map<string, string>;
@@ -135,7 +141,7 @@ export interface ToolListOverrides {
   /** 一覧から消す '<コネクタ>.<ツール>' */
   removed: Set<string>;
   /** 一覧に足す（コネクタごと） */
-  added: Map<string, SimToolListing[]>;
+  added: Map<string, Array<{ name: string; description: string; inputSchema: Record<string, unknown> }>>;
   reset(): void;
 }
 
@@ -155,25 +161,94 @@ export function toolListOverrides(): ToolListOverrides {
   return o;
 }
 
-/** tools/list の中身を overrides で変える sim-world（呼び出しの処理は本物の仕入れ係の世界のまま） */
-export async function startMutableSimWorld(o: ToolListOverrides): Promise<SimWorldHandle> {
-  const world = {
-    ...SHOP_WORLD,
-    listTools(state: Parameters<typeof SHOP_WORLD.listTools>[0], connector?: string): SimToolListing[] {
-      const base = SHOP_WORLD.listTools(state, connector)
-        .filter((t) => !o.removed.has(`${t.connector}.${t.name}`))
-        .map((t) => {
-          const key = `${t.connector}.${t.name}`;
-          return {
-            ...t,
-            ...(o.description.has(key) ? { description: o.description.get(key)! } : {}),
-            ...(o.inputSchema.has(key) ? { inputSchema: o.inputSchema.get(key)! } : {}),
-          } as SimToolListing;
+/** 偽のサーバーが受けた tools/call */
+export interface FakeCall {
+  connector: string;
+  tool: string;
+  arguments: Record<string, unknown>;
+  headers: Record<string, string>;
+}
+
+export interface FakeMcpHandle {
+  url: string;
+  /** 受けた tools/call（受けた順） */
+  calls: FakeCall[];
+  close(): Promise<void>;
+}
+
+/** 引数が入力スキーマに合うか（必須のキーがある・知らないキーがない。それ以上は見ない） */
+function argsFit(schema: Record<string, unknown>, args: Record<string, unknown>): boolean {
+  const props = (schema.properties ?? {}) as Record<string, unknown>;
+  const required = (schema.required ?? []) as string[];
+  if (required.some((k) => !(k in args))) return false;
+  return Object.keys(args).every((k) => k in props);
+}
+
+/**
+ * 偽の MCP サーバー（initialize・tools/list・tools/call だけ。応答は application/json）。
+ * token を渡すと Authorization: Bearer <token> のない要求を 403 で断る（呼び出し元の証明）
+ */
+export async function startFakeMcp(o: ToolListOverrides = toolListOverrides(), opts: { token?: string } = {}): Promise<FakeMcpHandle> {
+  const calls: FakeCall[] = [];
+  const app = new Hono();
+  app.use("*", async (c, next) => {
+    if (opts.token !== undefined && c.req.header("authorization") !== `Bearer ${opts.token}`) return c.body(null, 403);
+    await next();
+  });
+  app.get("*", (c) => c.body(null, 405));
+  app.delete("*", (c) => c.body(null, 405));
+  app.post("/mcp/:slug", async (c) => {
+    const spec = FAKE_CONNECTORS.find((x) => x.slug === c.req.param("slug"));
+    if (!spec) return c.json({ error: "not_found" }, 404);
+    const body = (await c.req.json()) as { id?: unknown; method?: string; params?: Record<string, any> };
+    const reply = (result: unknown) => c.json({ jsonrpc: "2.0", id: body.id ?? null, result });
+    if (typeof body.method === "string" && body.method.startsWith("notifications/")) return c.body(null, 202);
+    switch (body.method) {
+      case "initialize":
+        return reply({
+          protocolVersion: typeof body.params?.protocolVersion === "string" ? body.params.protocolVersion : LATEST_PROTOCOL_VERSION,
+          capabilities: { tools: {} },
+          serverInfo: { name: "fake-mcp", version: "0.0.0" },
         });
-      return [...base, ...(connector ? (o.added.get(connector) ?? []) : [...o.added.values()].flat())];
-    },
+      case "tools/list": {
+        const tools = spec.tools
+          .filter((t) => !o.removed.has(`${spec.slug}.${t.name}`))
+          .map((t) => {
+            const key = `${spec.slug}.${t.name}`;
+            return { name: t.name, description: o.description.get(key) ?? t.description, inputSchema: o.inputSchema.get(key) ?? t.inputSchema };
+          });
+        return reply({ tools: [...tools, ...(o.added.get(spec.slug) ?? [])] });
+      }
+      case "tools/call": {
+        const name = String(body.params?.name ?? "");
+        const args = (body.params?.arguments ?? {}) as Record<string, unknown>;
+        const tool = spec.tools.find((t) => t.name === name);
+        if (!tool) return c.json({ jsonrpc: "2.0", id: body.id ?? null, error: { code: -32602, message: `unknown tool ${name}` } });
+        const headers: Record<string, string> = {};
+        c.req.raw.headers.forEach((v, k) => {
+          headers[k] = v;
+        });
+        if (!argsFit(tool.inputSchema, args)) return reply({ content: [{ type: "text", text: "引数が入力スキーマに合いません" }], isError: true });
+        calls.push({ connector: spec.slug, tool: name, arguments: args, headers });
+        return reply({ content: [{ type: "text", text: JSON.stringify(tool.result(args)) }] });
+      }
+      default:
+        return c.json({ jsonrpc: "2.0", id: body.id ?? null, error: { code: -32601, message: "method not found" } });
+    }
+  });
+  const server = await new Promise<ReturnType<typeof serve>>((resolve) => {
+    const srv = serve({ fetch: app.fetch, port: 0, hostname: "127.0.0.1" }, () => resolve(srv));
+  });
+  const port = (server.address() as AddressInfo).port;
+  return {
+    url: `http://127.0.0.1:${port}`,
+    calls,
+    close: () =>
+      new Promise<void>((resolve) => {
+        server.close(() => resolve());
+        (server as unknown as { closeAllConnections?: () => void }).closeAllConnections?.();
+      }),
   };
-  return startSimWorld({ worlds: { shop: world as unknown as NonNullable<SimWorldDeps["worlds"]>["shop"] } });
 }
 
 // ---- gateway ----
@@ -250,14 +325,12 @@ export function connectionReset(): TypeError {
   return new TypeError("fetch failed", { cause: Object.assign(new Error("read ECONNRESET"), { code: "ECONNRESET" }) });
 }
 
-export function gatewayEnv(simUrl: string | null, over: Partial<GatewayEnv> = {}): GatewayEnv {
+export function gatewayEnv(connectorUrl: string | null = null, over: Partial<GatewayEnv> = {}): GatewayEnv {
   return {
     port: 0,
     databaseUrl: "postgres://unused",
-    allowedConnectorUrls: simUrl ? [simUrl] : [],
-    simWorldUrl: simUrl,
+    allowedConnectorUrls: connectorUrl ? [connectorUrl] : [],
     serviceAuth: { sharedToken: GW_TOKEN },
-    simWorldSharedToken: SIM_TOKEN,
     gcal: null,
     github: null,
     commitSha: "test",
@@ -323,19 +396,19 @@ export interface SeededConnector {
   url: string;
   tools: Record<string, SeededTool>;
 }
-export type SeededShop = Record<string, SeededConnector>;
+export type SeededConnectors = Record<string, SeededConnector>;
 
 /**
- * sim-world を普通のコネクタとして登録する（MT §3.14 の5〜7）：コネクタの行 → EP-51（tools/list）→ manifest の分類・役割で確定し
- * tool_hash を計算し直す（seed が app でやる処理を試験の中で行う）
+ * 偽の MCP サーバーのコネクタを登録する（MT §3.14 の5〜7）：コネクタの行 → EP-51（tools/list）→ manifest の分類・役割で確定し
+ * tool_hash を計算し直す（app がつなぐときにやる処理を試験の中で行う）
  */
-export async function seedShop(db: Db, client: GatewayClient, ws: FxWorkspace, simUrl: string, opts: { slugs?: string[] } = {}): Promise<SeededShop> {
-  const out: SeededShop = {};
-  for (const c of SHOP_CONNECTORS) {
+export async function seedConnectors(db: Db, client: GatewayClient, ws: FxWorkspace, serverUrl: string, opts: { slugs?: string[] } = {}): Promise<SeededConnectors> {
+  const out: SeededConnectors = {};
+  for (const c of FAKE_CONNECTORS) {
     if (opts.slugs && !opts.slugs.includes(c.slug)) continue;
-    const url = `${simUrl}${c.path}`;
+    const url = `${serverUrl}${c.path}`;
     const r = await db.query<{ id: string }>(
-      `INSERT INTO connectors (workspace_id, slug, display_name, kind, url, auth) VALUES ($1, $2, $3, 'sim', $4, $5) RETURNING id`,
+      `INSERT INTO connectors (workspace_id, slug, display_name, kind, url, auth) VALUES ($1, $2, $3, 'mcp_remote', $4, $5) RETURNING id`,
       [ws.workspaceId, c.slug, c.displayName, url, { type: "none" }],
     );
     const connectorId = r.rows[0]!.id;
@@ -352,7 +425,7 @@ export async function seedShop(db: Db, client: GatewayClient, ws: FxWorkspace, s
       await db.query(
         `UPDATE connector_tools SET classification = $2, arg_roles = $3, scope = $4, verify = $5, tool_hash = $6,
                 classified_by = 'system:seed', classified_at = $7 WHERE id = $1`,
-        [row.id, t.classification, t.argRoles, t.scope, t.verify, toolHash, NOW],
+        [row.id, t.classification, t.argRoles, null, "none", toolHash, NOW],
       );
       tools[t.name] = { id: row.id, name: t.name, toolHash, inputSchema: row.input_schema, description: row.description, argRoles: t.argRoles };
     }
@@ -395,7 +468,7 @@ export interface IntentInput {
   enforced?: boolean;
   /**
    * 承認の出どころ（SG-03）の証拠も入れるか（既定 true）。本番のタスクだけ：Kernel の判定の行（edge が残すもの）と、
-   * approve で approved 以降の状態なら人の承認（approved の承認の行と approval.decided）。合格証は入れない（insertCertificate）
+   * approve で approved 以降の状態なら人の承認（approved の承認の行と approval.decided）
    */
   provenance?: boolean;
 }
@@ -452,9 +525,7 @@ export async function insertIntent(db: Db, ws: FxWorkspace, i: IntentInput): Pro
   );
   const intentId = r.rows[0]!.id;
   if (i.provenance !== false) {
-    const task = (await db.query<{ rehearsal_run_id: string | null; shadow: boolean }>("SELECT rehearsal_run_id, shadow FROM tasks WHERE id = $1", [i.taskId])).rows[0]!;
-    // 本番のタスクだけ（edge は影・リハーサルでも判定の記録を残すが、gateway はそれを照合しない。既存の試験の判定の記録の数を変えない）
-    if (task.rehearsal_run_id === null && !task.shadow) {
+    {
       const decided = decision === "approve" && ["approved", "executing", "executed"].includes(status);
       const k = await insertKernelEvidence(db, ws, {
         taskId: i.taskId,
@@ -467,7 +538,6 @@ export async function insertIntent(db: Db, ws: FxWorkspace, i: IntentInput): Pro
         reasonCode,
         matchedRule,
         enforced,
-        certificateValid: decision === "allow",
         approval: decided,
       });
       if (decided) await decideApproval(db, ws, { taskId: i.taskId, intentId, intentHash, approvalId: k.approvalId! });
@@ -488,7 +558,6 @@ export interface KernelEvidenceInput {
   reasonCode: string;
   matchedRule: string | null;
   enforced?: boolean;
-  certificateValid?: boolean;
   /** 承認待ちの承認の行と approval.requested も作るか（edge は本番の approve で作る）。期限は既定 NOW + 24時間 */
   approval?: boolean | { expiresAt: Date };
   /** 監査ログ（intent.proposed・approval.requested・decision.made）を書くか（既定 true） */
@@ -498,7 +567,6 @@ export interface KernelEvidenceInput {
 /**
  * edge の LLM Proxy が1つのトランザクションで残す判定の記録（recordMcpIntent → recordDecision と同じ順と形）：
  * intent.proposed →（承認の行と approval.requested）→ policy_decisions（subject.call.intentId に Intent の ID）→ decision.made。
- * 形が edge の本物と合っていることは apps/app/src/rehearsal/provenance-shape.test.ts が確かめる
  */
 export async function insertKernelEvidence(db: Db, ws: FxWorkspace, k: KernelEvidenceInput): Promise<{ decisionId: string; approvalId: string | null }> {
   const enforced = k.enforced ?? true;
@@ -576,7 +644,7 @@ export async function insertKernelEvidence(db: Db, ws: FxWorkspace, k: KernelEvi
         k.taskId,
         k.intentId,
         subject,
-        { killSwitchEngaged: false, taskStatus: "running", certificateValid: k.certificateValid ?? false },
+        { killSwitchEngaged: false, taskStatus: "running" },
         k.decision,
         k.reasonCode,
         k.matchedRule,
@@ -662,22 +730,6 @@ export async function decideApproval(db: Db, ws: FxWorkspace, a: DecideApprovalI
   });
 }
 
-/** 判定の記録のない承認（ゲストのデモのデータの形）：承認の行を作って人が決める */
-export async function insertDecidedApproval(
-  db: Db,
-  ws: FxWorkspace,
-  a: Omit<DecideApprovalInput, "approvalId"> & { approverIds?: string[]; expiresAt?: Date },
-): Promise<string> {
-  const r = await db.query<{ id: string }>(
-    `INSERT INTO approvals (workspace_id, task_id, intent_id, status, risk_level, risk_score, approver_ids, expires_at, created_at, updated_at)
-     VALUES ($1, $2, $3, 'pending', 'medium', 3, $4, $5, $6, $6) RETURNING id`,
-    [ws.workspaceId, a.taskId, a.intentId, a.approverIds ?? [ws.userId], a.expiresAt ?? new Date(NOW.getTime() + 24 * 3600_000), new Date(NOW.getTime() - 120_000)],
-  );
-  const approvalId = r.rows[0]!.id;
-  await decideApproval(db, ws, { ...a, approvalId });
-  return approvalId;
-}
-
 /** 承認の行（承認待ちの Intent に） */
 export async function insertApproval(db: Db, ws: FxWorkspace, taskId: string, intentId: string, status: "pending" | "approved" = "pending"): Promise<string> {
   const decided = status === "approved";
@@ -688,76 +740,6 @@ export async function insertApproval(db: Db, ws: FxWorkspace, taskId: string, in
     [ws.workspaceId, taskId, intentId, status, [ws.userId], decided ? ws.userId : null, decided ? NOW : null, new Date(NOW.getTime() + 24 * 3600_000), NOW],
   );
   return r.rows[0]!.id;
-}
-
-/**
- * リハーサルの走行・試験・状況・sim の走行（DB の行。sim-world 側の走行は同じ ID で別に作る）。
- * 同じ仕事で動いている走行は1つ（rehearsal_runs_one_active_uq）なので、2つ目の種類は run を渡して同じ走行に足す
- */
-export async function rehearsalRows(
-  db: Db,
-  ws: FxWorkspace,
-  agent: FxAgent,
-  variant: "governed" | "shadow",
-  run?: { runId: string; scenarioId: string },
-): Promise<{ runId: string; scenarioId: string; executionId: string }> {
-  let ids = run;
-  if (!ids) {
-    const { runId } = await fxRehearsalRun(db, ws, { jobId: agent.jobId });
-    const { caseId } = await fxRehearsalCase(db, ws, { jobId: agent.jobId });
-    const { scenarioId } = await fxRehearsalScenario(db, ws, { runId, caseId });
-    ids = { runId, scenarioId };
-  }
-  const { executionId } = await fxSimExecution(db, ws, { rehearsalRunId: ids.runId, variant, id: randomUUID() });
-  return { ...ids, executionId };
-}
-
-/**
- * 有効な合格証（その仕事に付与したツールの [{ action, toolHash }]：M-49）。repo/rehearsal.ts の issueCertificate と同じく、
- * 監査ログ rehearsal.certificate_issued を書き、その seq を行の audit_seq に持たせる（同じ仕事の前の合格証は superseded にする）
- */
-export async function insertCertificate(db: Db, ws: FxWorkspace, jobId: string, actions: Array<{ action: string; toolHash: string }>): Promise<string> {
-  const { runId } = await fxRehearsalRun(db, ws, { jobId, status: "done" });
-  const certificateHash = fxHash(`cert:${randomUUID()}`);
-  const at = new Date(NOW.getTime() - 24 * 3600_000);
-  return db.transaction(async (tx) => {
-    await tx.query("UPDATE rehearsal_certificates SET revoked_at = $3, revoke_reason = 'superseded' WHERE workspace_id = $1 AND job_id = $2 AND revoked_at IS NULL", [
-      ws.workspaceId,
-      jobId,
-      at,
-    ]);
-    const issued = await appendAuditLog(
-      tx,
-      ws.workspaceId,
-      {
-        eventType: "rehearsal.certificate_issued",
-        actorType: "system",
-        actorId: "rehearsal",
-        payload: { jobId, runId, certificateHash, policyHash: fxHash("policy"), caseSetHash: fxHash("cases"), caseCount: 12, modelId: "gemini-test" },
-      },
-      at,
-    );
-    const r = await tx.query<{ id: string }>(
-      `INSERT INTO rehearsal_certificates (workspace_id, job_id, rehearsal_run_id, policy_hash, tool_hashes, model_id, case_set_hash, case_count,
-                                           summary, cost_usd, certificate_hash, audit_seq, issued_at)
-       VALUES ($1, $2, $3, $4, $5, 'gemini-test', $6, 12, '{}', '0.400000', $7, $8, $9) RETURNING id`,
-      [ws.workspaceId, jobId, runId, fxHash("policy"), actions, fxHash("cases"), certificateHash, issued.seq, at],
-    );
-    return r.rows[0]!.id;
-  });
-}
-
-/** 合格証を切る（repo/rehearsal.ts の revokeJobCertificate と同じく rehearsal.certificate_revoked を書く） */
-export async function revokeCertificate(db: Db, ws: FxWorkspace, certificateId: string, jobId: string): Promise<void> {
-  await db.transaction(async (tx) => {
-    await tx.query("UPDATE rehearsal_certificates SET revoked_at = $2, revoke_reason = 'widen' WHERE id = $1", [certificateId, NOW]);
-    await appendAuditLog(
-      tx,
-      ws.workspaceId,
-      { eventType: "rehearsal.certificate_revoked", actorType: "system", actorId: "rehearsal", payload: { certificateIds: [certificateId], jobIds: [jobId], reason: "widen" } },
-      NOW,
-    );
-  });
 }
 
 export async function intentRow(db: Db, intentId: string): Promise<Record<string, any>> {
@@ -775,9 +757,9 @@ export async function auditEvents(db: Db, workspaceId: string): Promise<Array<{ 
   ).rows;
 }
 
-/** ワークスペース（既定はオーナー。監査ログの起点つき） */
-export function workspace(db: Db, kind: "owner" | "guest" = "owner"): Promise<FxWorkspace> {
-  return fxWorkspace(db, { kind, audit: true });
+/** ワークスペース（オーナー。監査ログの起点つき）。second: 分離の試験で2つ目を作るとき（本番では作れない） */
+export function workspace(db: Db, second = false): Promise<FxWorkspace> {
+  return fxWorkspace(db, { audit: true, second });
 }
 
 /** 豆 20kg（いつもの発注。単価 780） */

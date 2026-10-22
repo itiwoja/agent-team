@@ -7,7 +7,7 @@ export const KERNEL_VERSION = "0.1.0";
 export type Json = null | boolean | number | string | Json[] | { [k: string]: Json };
 export type JsonObject = { [k: string]: Json };
 
-/** 小文字16進64桁（policyHash・intentHash・inputsHash・destinationKey・repeatKey・optionDigest・caseSetHash・certificateHash） */
+/** 小文字16進64桁（policyHash・intentHash・inputsHash・destinationKey・repeatKey・optionDigest） */
 export type Hex64 = string;
 /** tool_hash だけ接頭辞つき（M-07） */
 export type ToolHash = `sha256:${string}`;
@@ -189,7 +189,7 @@ export interface Subject {
   commandOperation?: "run_tests" | "run_shell";
 }
 
-/** 判定の入力のカウンタ（edge の loadDecideInputs が作る。G-01）。全体 $10・リハーサル $0.5 は持たない（M-19） */
+/** 判定の入力のカウンタ（edge の loadDecideInputs が作る。G-01）。全体 $10 は持たない（M-19） */
 export interface Counters {
   stepsUsed: number;
   costUsd: number;
@@ -207,8 +207,6 @@ export interface Counters {
 export interface Flags {
   killSwitchEngaged: boolean;
   taskStatus: TaskStatus;
-  /** 合格証が有効か（BR-81）。リハーサル・影の走行・FR-065・回帰の試験・FR-069 の再判定では true を渡す */
-  certificateValid: boolean;
 }
 
 /** 汚染の出どころ（M-06。mcp-taint・db と同じ形） */
@@ -262,7 +260,6 @@ export type ReasonCode =
   | "approval_required"
   | "unknown_outcome_pending"
   | "guard_exceeded"
-  | "certificate_missing"
   | "autonomy_auto"
   | "rule_matched"
   | "not_gated"
@@ -294,7 +291,7 @@ export interface DecideResult {
   reasonCode: ReasonCode;
   /** ポリシー上のキーのパス（例 'guards[0]'・'rules.items[2]'・'autonomy.mcp_write'。cross-check §4.2） */
   matchedRule: string | null;
-  /** 手順11でルールに一致したとき（rule_matched・certificate_missing）だけ、そのルールの id（SG-09。添字は定義の変更でずれるので id でも指す） */
+  /** 手順11でルールに一致したとき（rule_matched）だけ、そのルールの id（SG-09。添字は定義の変更でずれるので id でも指す） */
   matchedRuleId?: string;
   inputsHash: Hex64;
   operation: OperationType | null;

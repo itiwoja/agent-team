@@ -24,7 +24,7 @@ import { idParam, readJsonBody, readQuery, requireRole, sessionOf } from "../htt
 import { runIdempotent } from "../idempotency.ts";
 import type { ApiRouter } from "./router.ts";
 
-/** 依頼を頼める役割：owner・maintainer（Kill Switch の発動・リハーサルと同じ。viewer は見るだけ） */
+/** 依頼を頼める役割：owner・maintainer（Kill Switch の発動と同じ。viewer は見るだけ） */
 const ASKERS = ["owner", "maintainer"] as const;
 
 /** 試験で差し替えるための入れ物（生成の打ち切り・同時実行の待ち・edge の差し替え）。本番は deps のまま */

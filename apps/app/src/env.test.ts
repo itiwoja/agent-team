@@ -4,17 +4,14 @@ import { readAppEnv } from "./env.ts";
 
 const S32 = "s".repeat(32);
 const OWNER = "o".repeat(32);
-const GUEST = "g".repeat(32);
 
 const base = {
   PHASE0_ACCESS_TOKEN: OWNER,
   SESSION_COOKIE_SECRET: S32,
-  GUEST_ENTRY_TOKEN: GUEST,
   DATABASE_URL: "postgres://app@db/open_team",
   DATABASE_URL_MAINT: "postgres://maint@db/open_team",
   APP_BASE_URL: "http://localhost:5173",
   GATEWAY_URL: "http://localhost:8081",
-  SIM_WORLD_URL: "http://localhost:8082",
   COMMIT_SHA: "0123456789abcdef0123456789abcdef01234567",
 };
 
@@ -29,14 +26,7 @@ describe("readAppEnv", () => {
     expect(readAppEnv({ ...base, PHASE0_ACCESS_TOKEN: OWNER }).missing).toEqual([]);
   });
 
-  it("GUEST_RETEST_MODE は gemini のときだけ gemini、それ以外（なし・不正）は replay", () => {
-    const base = { PHASE0_ACCESS_TOKEN: OWNER, SESSION_COOKIE_SECRET: S32, DATABASE_URL: "postgres://x/y" };
-    expect(readAppEnv(base).env.guestRetestMode).toBe("replay");
-    expect(readAppEnv({ ...base, GUEST_RETEST_MODE: "gemini" }).env.guestRetestMode).toBe("gemini");
-    expect(readAppEnv({ ...base, GUEST_RETEST_MODE: "foo" }).env.guestRetestMode).toBe("replay");
-  });
-
-  it("GATEWAY_URL・SIM_WORLD_URL・INTERNAL_SHARED_TOKEN が任意（ないとき共有トークンは空）", () => {
+  it("GATEWAY_URL・INTERNAL_SHARED_TOKEN が任意（ないとき共有トークンは空）", () => {
     const r = readAppEnv({ PHASE0_ACCESS_TOKEN: OWNER, SESSION_COOKIE_SECRET: S32, DATABASE_URL: "postgres://x/y" });
     expect(r.missing).toEqual([]);
     expect(r.env.serviceAuth).toEqual({ sharedToken: undefined });

@@ -1,4 +1,4 @@
-// 編成の実行（FR-062）・回答（FR-063）の試験：本物に近い世界（Postgres・gateway・sim-world）で、LLM だけ台本。
+// 編成の実行（FR-062）・回答（FR-063）の試験：本物に近い世界（Postgres・gateway・例の MCP コネクタ）で、LLM だけ台本。
 // 形ごとの動かし方・受け渡し（input_task_ids・汚染の引き継ぎ）・失敗時の扱い（やり直す／ここまでで終える）・Kill Switch・hook と tick
 import type { Db, SessionCtx, TaskRow, Uuid } from "@open-team/db";
 import { insertAsk, insertAskMember } from "@open-team/db/app";
@@ -8,7 +8,7 @@ import { useTestDb } from "@open-team/db/testing";
 import { LlmError, ScriptedLlmClient, type ScriptedResponder } from "@open-team/llm";
 import type { AgentDefinitionInput } from "@open-team/kernel";
 import { afterEach, describe, expect, it } from "vitest";
-import { seedAgent, startRehearsalWorld, T0, type RehearsalWorld, type SeededAgent } from "../rehearsal/__fixtures__/world.ts";
+import { seedAgent, startTestWorld, T0, type TestWorld, type SeededAgent } from "../__fixtures__/world.ts";
 import { composeRunAnswer, storedAnswerView } from "./answer.ts";
 import { createFollowupsAfterTerminal } from "./followup.ts";
 import { asksOnTaskSettled, asksOnTasksTerminated, runAsksTick, STALE_TASK_MS } from "./hooks.ts";
@@ -16,7 +16,7 @@ import { queueReply, resumeAsk, resetAskStopForTest, settleDrivingRuns, settleFo
 import { buildAskDetail, listMessages } from "./view.ts";
 
 const T = useTestDb();
-let world: RehearsalWorld | null = null;
+let world: TestWorld | null = null;
 afterEach(async () => {
   await world?.close();
   world = null;
@@ -44,8 +44,8 @@ interface MemberSpec {
 }
 
 async function setup(shape: "single" | "parallel" | "aggregate" | "chain", names: string[], o: { aggregatorIndex?: number; dependsOn?: number[][] } = {}) {
-  const { db, url } = T();
-  const w = (world = await startRehearsalWorld(db, url));
+  const { db } = T();
+  const w = (world = await startTestWorld(db));
   const agents: SeededAgent[] = [];
   for (const [i, n] of names.entries()) agents.push(await seedAgent(db, w.ws, def(n, `MARK-${n}`, o.aggregatorIndex === i ? "briefer" : "researcher")));
   const specs: MemberSpec[] = agents.map((agent, i) => {
@@ -113,16 +113,16 @@ function ticking(): { now(): Date } {
   return { now: () => new Date((t += 1000)) };
 }
 
-function runDeps(w: RehearsalWorld, llm: ScriptedLlmClient): AskRunDeps {
+function runDeps(w: TestWorld, llm: ScriptedLlmClient): AskRunDeps {
   return { ...w.deps(llm), clock: ticking(), sleep: async () => {}, concurrency: { pollMs: 1, maxWaitMs: 50 } };
 }
 
 /** 人の操作（resume）に渡すセッション */
-function sessionOf(w: RehearsalWorld): SessionCtx {
+function sessionOf(w: TestWorld): SessionCtx {
   return { ...w.ws.ctx, userId: w.ws.userId, role: "owner", sessionId: "00000000-0000-4000-8000-000000000001", csrfToken: "x", lastSeenAt: T0, expiresAt: new Date(T0.getTime() + 3600_000) };
 }
 
-async function tasksOf(w: RehearsalWorld, askId: Uuid): Promise<TaskRow[]> {
+async function tasksOf(w: TestWorld, askId: Uuid): Promise<TaskRow[]> {
   const run = await getLatestLiveRun(w.db, w.ws.ctx, askId);
   return run === null ? [] : listRunTasks(w.db, w.ws.ctx, run.id);
 }
@@ -136,7 +136,7 @@ describe("single", () => {
 
     const tasks = await tasksOf(w, ask.id);
     expect(tasks).toHaveLength(1);
-    expect(tasks[0]).toMatchObject({ trigger_type: "ask", is_dry_run: false, rehearsal_run_id: null, shadow: false, status: "completed", report_kind: "answer", ask_id: ask.id });
+    expect(tasks[0]).toMatchObject({ trigger_type: "ask", is_dry_run: false, status: "completed", report_kind: "answer", ask_id: ask.id });
     const run = (await getLatestLiveRun(w.db, w.ws.ctx, ask.id))!;
     expect(run).toMatchObject({ status: "done", run_no: 1, trigger_type: "initial", answer_task_id: tasks[0]!.id });
     expect(run.answered_at).not.toBeNull();
@@ -389,7 +389,7 @@ describe("順番待ちの返事（動いている間の返事）", () => {
     const started = await Promise.all([startQueuedReply(deps, w.ws.ctx, ask.id), startQueuedReply(deps, w.ws.ctx, ask.id), runAsksTick(deps, new Date(T0.getTime() + 60_000))]);
     await Promise.all(started.flatMap((r) => (r !== null && "done" in r ? [r.done] : [])));
     await settleDrivingRuns(10_000);
-    const runs = await w.db.query<{ run_no: number }>("SELECT run_no FROM ask_runs WHERE ask_id = $1 AND mode = 'live' ORDER BY run_no", [ask.id]);
+    const runs = await w.db.query<{ run_no: number }>("SELECT run_no FROM ask_runs WHERE ask_id = $1 ORDER BY run_no", [ask.id]);
     expect(runs.rows.map((x) => x.run_no)).toEqual([1, 2]);
     expect(await listPendingReplies(w.db, w.ws.ctx, ask.id)).toEqual([]);
     expect((await buildAskDetail(w.db, w.ws.ctx, ask.id))!.turns.map((t) => t.text)).toEqual(["依頼の文", "取りこぼし"]);
@@ -697,14 +697,14 @@ describe("hook・tick", () => {
     await (await startAskRun(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" }))!.done;
     const run = (await getLatestLiveRun(w.db, w.ws.ctx, ask.id))!;
     expect(run.status).toBe("waiting_input");
-    await w.db.transaction((tx) => asksOnTasksTerminated(tx, w.ws.ctx, { tasks: [{ id: "x" as Uuid, jobId: "x" as Uuid, agentId: "x" as Uuid, askId: ask.id, askRunId: run.id, rehearsalRunId: null, shadow: false, previousStatus: "running" }], cause: "kill_switch", now: T0 }));
+    await w.db.transaction((tx) => asksOnTasksTerminated(tx, w.ws.ctx, { tasks: [{ id: "x" as Uuid, jobId: "x" as Uuid, agentId: "x" as Uuid, askId: ask.id, askRunId: run.id, previousStatus: "running" }], cause: "kill_switch", now: T0 }));
     expect((await getLatestLiveRun(w.db, w.ws.ctx, ask.id))!.status).toBe("cancelled");
     expect((await getAsk(w.db, w.ws.ctx, ask.id))!.status).toBe("cancelled");
   });
 });
 
 /** 担当ごとに queued のタスクを作る（実行の枠を作り、動かさない） */
-async function queueTasks(w: RehearsalWorld, askId: Uuid): Promise<{ runId: Uuid; tasks: TaskRow[] }> {
+async function queueTasks(w: TestWorld, askId: Uuid): Promise<{ runId: Uuid; tasks: TaskRow[] }> {
   const ctx = w.ws.ctx;
   const runId = await w.db.transaction(async (tx) => {
     const r = (await insertLiveRun(tx, ctx, askId, "initial", T0))!;

@@ -37,7 +37,7 @@ function coder(autonomy: AgentDefinitionInput["autonomy"] = {}): AgentDefinition
 }
 
 function ws(runShell?: WorkspacePolicy["autonomy"]["run_shell"]): WorkspacePolicy {
-  const w = defaultWorkspacePolicy("owner");
+  const w = defaultWorkspacePolicy();
   return runShell === undefined ? w : { ...w, autonomy: { ...w.autonomy, run_shell: runShell } };
 }
 
@@ -56,7 +56,7 @@ const COUNTERS: Counters = {
   intentsCount: 0,
   unknownOutcomeKeys: [],
 };
-const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running", certificateValid: true };
+const FLAGS: Flags = { killSwitchEngaged: false, taskStatus: "running" };
 const cmd = (command: string, commandOperation?: Subject["commandOperation"]): Subject => ({
   kind: "tool_call",
   actionType: "run_command",

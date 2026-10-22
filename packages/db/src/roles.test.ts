@@ -2,8 +2,8 @@
 import { describe, expect, it } from "vitest";
 import { appendAuditLog } from "./audit.ts";
 import { PG_ERROR, pgErrorInfo, type Db } from "./client.ts";
-import { getApprovalOfIntent, listCertificateAuditEvents, listJobCertificates, listKernelDecisionsOfIntent, listKillSwitchEngagedSeqs, listTaskAuditEvents } from "./repo/gateway.ts";
-import { fxAgent, fxApproval, fxConnector, fxIntent, fxSimExecution, fxTask, fxWorkspace, openRoleDb, useTestDb, type AppRole } from "./testing.ts";
+import { getApprovalOfIntent, listKernelDecisionsOfIntent, listKillSwitchEngagedSeqs, listTaskAuditEvents } from "./repo/gateway.ts";
+import { fxAgent, fxApproval, fxConnector, fxIntent, fxTask, fxWorkspace, openRoleDb, useTestDb, type AppRole } from "./testing.ts";
 
 const T = useTestDb();
 const NOW = new Date("2026-10-12T09:00:00.000Z");
@@ -25,7 +25,7 @@ async function expectDenied(p: Promise<unknown>): Promise<void> {
 }
 
 describe("ot_app（app）", () => {
-  it("業務の表は読み書きでき、監査ログは追記だけ。ワークスペース・利用者は消せず、sim は snapshots の読み取りだけ", async () => {
+  it("業務の表は読み書きでき、監査ログは追記だけ。ワークスペース・利用者は消せない", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db, { audit: true });
     const agent = await fxAgent(db, ws);
@@ -41,11 +41,6 @@ describe("ot_app（app）", () => {
       await expectDenied(app.query("DELETE FROM workspaces WHERE id = $1", [ws.workspaceId]));
       await expectDenied(app.query("DELETE FROM users WHERE id = $1", [ws.userId]));
       await expectDenied(app.query("UPDATE agent_snapshots SET warnings = '[]' WHERE id = $1", [agent.snapshotId]));
-      await expectDenied(app.query("SELECT * FROM sim.executions"));
-      await expectDenied(app.query("SELECT * FROM sim.events"));
-      // 試験にするときの店舗の写しは読める。消せない
-      await app.query("SELECT id FROM sim.snapshots WHERE workspace_id = $1", [ws.workspaceId]);
-      await expectDenied(app.query("DELETE FROM sim.snapshots"));
       await expectDenied(app.query("SELECT * FROM schema_migrations"));
       await expectDenied(app.query("DELETE FROM entry_attempts"));
     });
@@ -103,13 +98,7 @@ describe("ot_gateway の出どころの照合（SG-03）", () => {
     await db.transaction((tx) =>
       appendAuditLog(tx, ws.workspaceId, { eventType: "approval.decided", actorType: "user", actorId: ws.userId, taskId, payload: { approvalId, intentId, decision: "approve" } }, NOW),
     );
-    const other = "00000000-0000-4000-8000-000000000001";
-    await db.transaction(async (tx) => {
-      await appendAuditLog(tx, ws.workspaceId, { eventType: "rehearsal.certificate_issued", actorType: "system", actorId: "rehearsal", payload: { jobId: agent.jobId } }, NOW);
-      await appendAuditLog(tx, ws.workspaceId, { eventType: "rehearsal.certificate_issued", actorType: "system", actorId: "rehearsal", payload: { jobId: other } }, NOW);
-      await appendAuditLog(tx, ws.workspaceId, { eventType: "rehearsal.certificate_revoked", actorType: "system", actorId: "rehearsal", payload: { certificateIds: [other], jobIds: [other, agent.jobId], reason: "widen" } }, NOW);
-      await appendAuditLog(tx, ws.workspaceId, { eventType: "killswitch.engaged", actorType: "user", actorId: ws.userId, payload: {} }, NOW);
-    });
+    await db.transaction((tx) => appendAuditLog(tx, ws.workspaceId, { eventType: "killswitch.engaged", actorType: "user", actorId: ws.userId, payload: {} }, NOW));
     await asRole("ot_gateway", async (gw) => {
       const decisions = await listKernelDecisionsOfIntent(gw, ws.ctx, { id: intentId, task_id: taskId });
       expect(decisions).toHaveLength(1);
@@ -117,52 +106,25 @@ describe("ot_gateway の出どころの照合（SG-03）", () => {
       expect((await getApprovalOfIntent(gw, ws.ctx, intentId))?.id).toBe(approvalId);
       const audits = await listTaskAuditEvents(gw, ws.ctx, taskId);
       expect(audits.map((a) => [a.event_type, a.payload])).toEqual([["approval.decided", { approvalId, intentId, decision: "approve" }]]);
-      expect(await listJobCertificates(gw, ws.ctx, agent.jobId)).toEqual([]);
-      expect(await listKillSwitchEngagedSeqs(gw, ws.ctx)).toEqual([audits[0]!.seq + 4]);
-      // 仕事で絞る（発行は payload.jobId、失効は payload.jobIds に含むもの）
-      expect((await listCertificateAuditEvents(gw, ws.ctx, agent.jobId)).map((e) => e.event_type)).toEqual(["rehearsal.certificate_issued", "rehearsal.certificate_revoked"]);
-    });
-  });
-});
-
-describe("ot_sim（sim-world）", () => {
-  it("sim スキーマだけを使い（走行・事象・スナップショット）、事象は更新できず、public の表は見えない", async () => {
-    const { db } = T();
-    const ws = await fxWorkspace(db);
-    const agent = await fxAgent(db, ws);
-    await fxTask(db, ws, agent);
-    await asRole("ot_sim", async (sim) => {
-      const { executionId } = await fxSimExecution(sim, ws);
-      await sim.query("INSERT INTO sim.events (execution_id, seq, workspace_id, event) VALUES ($1, 1, $2, $3)", [
-        executionId,
-        ws.workspaceId,
-        { seq: 1, kind: "clock", caller: "clock" },
-      ]);
-      await sim.query("UPDATE sim.executions SET state = $2, version = version + 1 WHERE id = $1", [executionId, { changed: true }]);
-      await expectDenied(sim.query("UPDATE sim.events SET event = event"));
-      await expectDenied(sim.query("SELECT * FROM public.tasks"));
-      await expectDenied(sim.query("SELECT * FROM public.workspaces"));
-      // ワークスペースの sim の行を消せる（sim-world の掃除：store.deleteWorkspace）
-      const del = await sim.query("DELETE FROM sim.executions WHERE workspace_id = $1", [ws.workspaceId]);
-      expect(del.rowCount).toBe(1);
+      expect(await listKillSwitchEngagedSeqs(gw, ws.ctx)).toEqual([audits[0]!.seq + 1]);
     });
   });
 });
 
 describe("ot_retention（掃除）", () => {
-  it("ワークスペース・利用者・入口の試行を消せる。業務の表は直接は書けない", async () => {
+  it("古い入口の試行・冪等性のキー・SSE の事象だけを消せる。ワークスペース・利用者・業務の表は消せない", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db);
     const agent = await fxAgent(db, ws);
     await asRole("ot_retention", async (m) => {
+      await m.query("DELETE FROM entry_attempts WHERE created_at < now() - interval '1 day'");
+      await m.query("DELETE FROM idempotency_keys WHERE created_at < now() - interval '1 day'");
+      await m.query("DELETE FROM workspace_events WHERE created_at < now() - interval '1 day'");
       await expectDenied(m.query("DELETE FROM agents WHERE id = $1", [agent.agentId]));
       await expectDenied(m.query("INSERT INTO users (login) VALUES ('x')"));
-      await expectDenied(m.query("SELECT * FROM sim.executions"));
-      await m.query("DELETE FROM entry_attempts WHERE created_at < now() - interval '1 day'");
-      const r = await m.query("DELETE FROM workspaces WHERE id = $1 AND kind = 'guest'", [ws.workspaceId]);
-      expect(r.rowCount).toBe(1);
-      const u = await m.query("DELETE FROM users WHERE id = $1", [ws.userId]);
-      expect(u.rowCount).toBe(1);
+      await expectDenied(m.query("DELETE FROM workspaces WHERE id = $1", [ws.workspaceId]));
+      await expectDenied(m.query("DELETE FROM users WHERE id = $1", [ws.userId]));
+      await expectDenied(m.query("SELECT * FROM audit_logs"));
     });
   });
 });

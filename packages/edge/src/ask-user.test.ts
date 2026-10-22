@@ -5,15 +5,15 @@ import type { Db, Uuid, WsCtx } from "@open-team/db";
 import { useTestDb } from "@open-team/db/testing";
 import type { ScriptedStep } from "@open-team/llm";
 import { buildEdge, call, llmRequest, USAGE, type TestEdge } from "./__fixtures__/env.ts";
-import { T0, fxWorkspace, inboxDefinition, seedAgent, seedChainAsk, seedShopConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/shop.ts";
+import { T0, fxWorkspace, inboxDefinition, seedAgent, seedChainAsk, seedConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/seed.ts";
 import { ASK_USER_LIMIT_TEXT, ASK_USER_NO_ANSWER_TEXT, parseAskUserArgs } from "./ask-user.ts";
 import { normalizeNextActions } from "./validate.ts";
 
 const T = useTestDb();
 
 async function setup(db: Db) {
-  const ws = await fxWorkspace(db, { kind: "owner", audit: true });
-  await seedShopConnectors(db, ws);
+  const ws = await fxWorkspace(db, { audit: true });
+  await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());
   const ask = await seedChainAsk(db, ws, [

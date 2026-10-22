@@ -70,7 +70,6 @@ describe("ゴールデン（tech:394）", () => {
       template: "assistant",
       mcpGrants: { store: ["get_inventory"], supplier: ["list_products", "place_order"], bank: ["register_payee"] },
       webAllowDomains: [],
-      guestWorkspace: true,
       formation: { shape: "single", memberCount: 1, isAggregator: false },
       teamBoard: true,
       followup: false,
@@ -275,7 +274,6 @@ describe("テンプレートの指示の中身（§3.9 の1）", () => {
       template: "briefer",
       mcpGrants: {},
       webAllowDomains: [],
-      guestWorkspace: true,
       formation: { shape: "aggregate", memberCount: 3, isAggregator: true },
       teamBoard: false,
       followup: false,
@@ -403,7 +401,7 @@ describe("エージェントとして動く（10/14：見張りの前回の報�
   it("ask_user があるときだけ、外すと困る選択は聞けると書く（ないときは聞き返せないと書く）", () => {
     const ctx = inboxContext();
     expect(buildSystemPrompt(ctx, 0)).toContain("利用者に聞き返すことはできません");
-    ctx.tools = selectTaskTools({ template: "researcher", mcpGrants: { mail: ["list_inbox"] }, webAllowDomains: ["*"], guestWorkspace: false, formation: null, teamBoard: false, followup: false, askUser: true });
+    ctx.tools = selectTaskTools({ template: "researcher", mcpGrants: { mail: ["list_inbox"] }, webAllowDomains: ["*"], formation: null, teamBoard: false, followup: false, askUser: true });
     const sys = buildSystemPrompt(ctx, 0);
     expect(sys).toContain("ask_user で選択肢つきで利用者に聞いてください");
     expect(sys).not.toContain("利用者に聞き返すことはできません");
@@ -475,7 +473,6 @@ describe("タスクの入力（buildTaskInput。§3.9 の6）", () => {
       template: "researcher",
       mcpGrants: { mail: ["list_inbox"] },
       webAllowDomains: [],
-      guestWorkspace: true,
       formation: { shape: "chain", memberCount: 2, isAggregator: false },
       teamBoard: true,
       followup: true,

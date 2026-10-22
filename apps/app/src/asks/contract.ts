@@ -253,47 +253,6 @@ export const PendingIntentViewSchema = z.object({
 });
 export type PendingIntentView = z.infer<typeof PendingIntentViewSchema>;
 
-/** 止めた規則の貢献（防いだ額の降順。rehearsal/attribution.ts）。一度も発動しなかったガードは、実効ポリシーと照合できたときだけ（できなければ null） */
-export const RehearsalAttributionSchema = z.object({
-  contributions: z.array(
-    z.object({ ruleLabel: z.string(), reasonCode: z.string(), stoppedCount: z.number().int(), preventedDamageJpy: z.number().int() }),
-  ),
-  unfiredGuards: z.array(z.string()).nullable(),
-});
-export type RehearsalAttribution = z.infer<typeof RehearsalAttributionSchema>;
-
-/** この依頼の直近のリハーサル（順番の依頼だけ。なければ null＝「まだリハーサルしていません」） */
-export const AskRehearsalViewSchema = z.object({
-  runId: Uuid,
-  status: z.string(),
-  /** 合格証：valid＝有効、none＝なし（出していない・失効）。certificateState が valid のときだけ valid（従来の項目） */
-  certificate: z.enum(["valid", "none"]),
-  /**
-   * 現行の合格証（D-93）：担当の仕事ごとの最新の1枚をまとめた状態。valid＝全担当が有効、revoked＝どれかが失効（理由は下）、none＝出していない担当がある。
-   * 直近の走行ではなく依頼単位（再試験・自分の悪い日の走行が合格証を出さなくても、現行の合格証は変わらない）
-   */
-  certificateState: z.enum(["valid", "revoked", "none"]),
-  /** 失効の理由の区分（widen・tool_hash・model・case_added）。失効がなければ null */
-  certificateRevokeReason: z.enum(["widen", "tool_hash", "model", "case_added", "superseded"]).nullable(),
-  /** 失効の理由の固定文（例：「ツールの説明が変わったため」）。失効がなければ null */
-  certificateRevokeText: z.string().nullable(),
-  /** 現行の合格証が確かめた試験の件数（担当の合格証の合計）。合格証がなければ null */
-  certificateCaseCount: z.number().int().nullable(),
-  /** 現行の合格証のうち最も新しい発行の時刻。合格証がなければ null */
-  certificateIssuedAt: Iso.nullable(),
-  /** 担当の仕事の再リハーサル（合格証が切れたあとの自動の走行）が走っている */
-  recertifying: z.boolean(),
-  /** 切れたあとの再リハーサルが費用の上限で止まった（failed・abort_reason = budget）。自動の再リハーサルは翌日にやり直す（D-107） */
-  recertifyStoppedByBudget: z.boolean(),
-  preventedDamageJpy: z.number().int().nullable(),
-  damageJpy: z.number().int().nullable(),
-  /** どの規則が何円防いだか（走行の状況から。走行がなければ省く） */
-  attribution: RehearsalAttributionSchema.nullable().optional(),
-  createdAt: Iso,
-  finishedAt: Iso.nullable(),
-});
-export type AskRehearsalView = z.infer<typeof AskRehearsalViewSchema>;
-
 export const AskRunViewSchema = z.object({
   runId: Uuid,
   runNo: z.number().int(),
@@ -361,7 +320,6 @@ export const AskDetailResponseSchema = z.object({
   agentQuestions: z.array(AgentQuestionViewSchema),
   /** 順番待ちの返事（まだ始まっていないもの。古い順） */
   pendingReplies: z.array(PendingReplyViewSchema),
-  rehearsal: AskRehearsalViewSchema.nullable(),
   /** 順番の失敗のとき：[やり直す] [ここまでで終える] を出す（API-074）。止まった担当の名前と理由 */
   resume: z.object({ agentName: z.string(), reason: z.string() }).nullable(),
   /** 連絡板の通数（Should。ひとりは 0） */

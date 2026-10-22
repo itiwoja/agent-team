@@ -286,22 +286,15 @@ export const workspacePolicySchema = z.strictObject({
 /** 日の区切り（per_day_usd の「当日」）。すべてのワークスペース（オーナーも）を Asia/Tokyo で作る（M-59） */
 export const DAY_BOUNDARY_TIMEZONE = "Asia/Tokyo";
 
-/** sim-world の仕入れ係の世界のコネクタ（MT §2.10 の SHOP_CONNECTORS の slug。KC §8 #7） */
-export const SIM_SHOP_CONNECTOR_SLUGS: readonly string[] = deepFreeze(["bank", "mail", "store", "supplier"]);
-
 /**
  * 0-H で投入するワークスペースのポリシー（KC §2.3。例の値は policy-and-schema.md:43-65）。
- * オーナーとゲストの差は per_day_usd だけ（オーナー 10：M-59、ゲスト 4：BR-62・D-105・D-106。edge のゲスト1日 $4 と同じ値）。
- * ゲストの Web は BR-64 で gateway・edge が別に拒否するのでここは変えない。全体 $15・リハーサル $3 は compose の外（M-19・D-104・D-106）
+ * 1日は 10（M-59）。全体 $15 は compose の外（M-19・D-104・D-106）
  */
-export function defaultWorkspacePolicy(
-  kind: "owner" | "guest",
-  enabledConnectors: readonly string[] = SIM_SHOP_CONNECTOR_SLUGS,
-): WorkspacePolicy {
+export function defaultWorkspacePolicy(enabledConnectors: readonly string[] = []): WorkspacePolicy {
   return {
     version: 1,
     autonomy: { web_read: "auto", notify: "auto", mcp_read: "auto", mcp_write: "approve", open_pr: "approve", memory_write: "auto" },
-    budget: { per_task_usd: 0.5, per_day_usd: kind === "owner" ? 10 : 4, max_steps: 40, max_minutes: 15 },
+    budget: { per_task_usd: 0.5, per_day_usd: 10, max_steps: 40, max_minutes: 15 },
     breakers: { ...DEFAULT_BREAKERS },
     web: { deny_domains: ["*.internal", "localhost"], max_fetches_per_task: 30 },
     connectors: { enabled: uniqueSorted(enabledConnectors.map((c) => c.trim())) },
@@ -406,14 +399,11 @@ export interface AgentDefinition {
 }
 
 /**
- * 最初の境界（agents.md:61-70、A-79）。ワークスペースのポリシーより低い場合はそちらに合わせる（initialAgentDefinition）。
- * guest_per_day_usd：ゲストのワークスペースで作る担当の1日（D-105・D-106）。ゲストのワークスペースの1日（4）と同じにし、
- * 自分の依頼のリハーサル1回（約 $2。担当が1人でも全部を負う）と本番の実行が1日に収まるようにする。オーナーは budget.per_day_usd（1）のまま
+ * 最初の境界（agents.md:61-70、A-79）。ワークスペースのポリシーより低い場合はそちらに合わせる（initialAgentDefinition）
  */
 export const INITIAL_AGENT_BOUNDARY = deepFreeze({
   autonomy: { web_read: "auto", memory_write: "auto" } satisfies Partial<Record<OperationType, AutonomyLevel>>,
   budget: { per_task_usd: 0.2, per_day_usd: 1 },
-  guest_per_day_usd: 4,
   max_runs_per_day: 10,
 });
 
@@ -504,14 +494,13 @@ export function normalizeAgentDefinition(input: AgentDefinitionInput): AgentDefi
 
 /**
  * 新しく作るエージェントの最初の境界（agents.md:61-70、API-060。BR-74：編成で作る担当もここから）。
- * 各値は min(初期値, ワークスペースの値)、自律度は厳しい方（A-79）。1日の初期値はゲスト 2・オーナー 1（D-105）。notify・submit_report はテンプレートの組み込み。
- * Web の付与はオーナーだけ ['*']（ゲストは BR-64 で使えないので「できること」に出さない：KC §8 #22）
+ * 各値は min(初期値, ワークスペースの値)、自律度は厳しい方（A-79）。1日の初期値は 1。notify・submit_report はテンプレートの組み込み。
+ * Web の付与は ['*']
  */
 export function initialAgentDefinition(input: {
   name: string;
   role?: AgentRole | null;
   workspacePolicy: WorkspacePolicy;
-  workspaceKind: "owner" | "guest";
   ceilings?: Ceilings;
 }): AgentDefinition {
   const ceilings = input.ceilings ?? DEFAULT_CEILINGS;
@@ -522,7 +511,7 @@ export function initialAgentDefinition(input: {
     version: 2,
     name: input.name,
     role: input.role ?? null,
-    grants: { ...(input.workspaceKind === "owner" ? { web: { allow_domains: ["*"] } } : {}), connectors: {} },
+    grants: { web: { allow_domains: ["*"] }, connectors: {} },
     autonomy: {
       web_read: stricterAutonomy(ib.autonomy.web_read, wsLevel("web_read")),
       memory_write: stricterAutonomy(ib.autonomy.memory_write, wsLevel("memory_write")),
@@ -530,7 +519,7 @@ export function initialAgentDefinition(input: {
     rules: [],
     budget: {
       per_task_usd: Math.min(ib.budget.per_task_usd, ws.budget.per_task_usd, ceilings.budget.per_task_usd),
-      per_day_usd: Math.min(input.workspaceKind === "guest" ? ib.guest_per_day_usd : ib.budget.per_day_usd, ws.budget.per_day_usd, ceilings.budget.per_day_usd),
+      per_day_usd: Math.min(ib.budget.per_day_usd, ws.budget.per_day_usd, ceilings.budget.per_day_usd),
     },
     max_runs_per_day: Math.min(ib.max_runs_per_day, ceilings.max_runs_per_day),
     profile: [],

@@ -265,7 +265,7 @@ export async function callTool(rt: EdgeRuntime, token: string, toolCallId: strin
       return submitReport(rt, ctx, task, row);
     case "notify":
       return notify(rt, ctx, task, row);
-    // Web の検索・取得（web.ts。ゲストの web_search は判定で guest_workspace）
+    // Web の検索・取得（web.ts）
     case "web_search":
       return webSearch(rt, ctx, task, row);
     case "web_fetch":

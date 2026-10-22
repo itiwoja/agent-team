@@ -9,11 +9,11 @@ import { userTextWebUrlHashes } from "@open-team/edge";
 import type { AgentDefinitionInput } from "@open-team/kernel";
 import { ScriptedLlmClient } from "@open-team/llm";
 import { afterEach, describe, expect, it } from "vitest";
-import { seedAgent, startRehearsalWorld, T0, type RehearsalWorld } from "../rehearsal/__fixtures__/world.ts";
+import { seedAgent, startTestWorld, T0, type TestWorld } from "../__fixtures__/world.ts";
 import { startAskRun, type AskRunDeps } from "./run.ts";
 
 const T = useTestDb();
-let world: RehearsalWorld | null = null;
+let world: TestWorld | null = null;
 afterEach(async () => {
   await world?.close();
   world = null;
@@ -50,14 +50,14 @@ const llm = (): ScriptedLlmClient =>
     usage: USAGE,
   }));
 
-function runDeps(w: RehearsalWorld): AskRunDeps {
+function runDeps(w: TestWorld): AskRunDeps {
   let t = T0.getTime();
   return { ...w.deps(llm()), clock: { now: () => new Date((t += 1000)) }, sleep: async () => {}, concurrency: { pollMs: 1, maxWaitMs: 50 } };
 }
 
 async function setup() {
-  const { db, url } = T();
-  const w = (world = await startRehearsalWorld(db, url));
+  const { db } = T();
+  const w = (world = await startTestWorld(db));
   const agent = await seedAgent(db, w.ws, def);
   const ask = await db.transaction(async (tx) => {
     const a = await insertAsk(tx, w.ws.ctx, {
@@ -88,7 +88,7 @@ async function setup() {
   return { w, ask };
 }
 
-async function lastTask(w: RehearsalWorld, askId: Uuid): Promise<Uuid> {
+async function lastTask(w: TestWorld, askId: Uuid): Promise<Uuid> {
   const run = (await getLatestLiveRun(w.db, w.ws.ctx, askId))!;
   return (await listRunTasks(w.db, w.ws.ctx, run.id)).at(-1)!.id;
 }
@@ -125,7 +125,7 @@ describe("SG-04：依頼のタスクの見た URL の集合（createMemberTask�
   });
 
   /** 最初の回答のあと、reply を返事として送り、返事のタスクを返す */
-  async function replyWith(reply: string): Promise<{ w: RehearsalWorld; taskId: Uuid; answerTaskId: Uuid }> {
+  async function replyWith(reply: string): Promise<{ w: TestWorld; taskId: Uuid; answerTaskId: Uuid }> {
     const { w, ask } = await setup();
     const deps = runDeps(w);
     await (await startAskRun(deps, w.ws.ctx, ask.id, { requesterId: w.ws.userId, trigger: "initial" }))!.done;

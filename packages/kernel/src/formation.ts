@@ -51,7 +51,7 @@ export interface ProposedMember {
   job: { template: string; deliver: ReadonlyArray<{ to: string }> };
   grantsNeeded: { connectors: Readonly<Record<string, readonly string[]>> };
 }
-/** 設定プランナーの編成案（FR §2.3 FormationProposal のうち validateFormation が読む部分）。rules・shadow などは Zod の strict で先に落とす */
+/** 設定プランナーの編成案（FR §2.3 FormationProposal のうち validateFormation が読む部分）。rules などは Zod の strict で先に落とす */
 export interface FormationProposal {
   shape: Shape;
   /** まとめ役を含めない */

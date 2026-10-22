@@ -1,5 +1,5 @@
 // 承認（API-017・019）・チェック（GET /check・POST /check/:itemId・/done・/counts）・やっていることの取り消し（API-016）・tick
-// ゲストのワークスペースのデモ用のデータ（受信箱係 → 仕入れ係。送る前の確認が1件）を土台にする（本物の入口の経路）
+// オーナーで入り、順番の依頼（受信箱係 → 仕入れ係）の1回分（送る前の確認が1件）を入れた状態を土台にする（check/test-helpers.ts）
 import { effectivePolicyHash } from "@open-team/kernel";
 import { useTestDb } from "@open-team/db/testing";
 import { describe, expect, it } from "vitest";
@@ -9,22 +9,22 @@ import { OWNER_TOKEN, send } from "../test-helpers.ts";
 import type { ApprovalListResponse, ApprovalView, CheckCounts, CheckResponse, DecisionResponse, DoneResponse } from "./contract.ts";
 import { ApprovalView as ApprovalViewSchema, CheckResponse as CheckResponseSchema, DecisionResponse as DecisionResponseSchema } from "./contract.ts";
 import { productionEdgeHooks } from "./hooks.ts";
-import { call, enterGuest, guestHarness, type GuestHarness, type GuestSession } from "./test-helpers.ts";
+import { call, checkHarness, enterWithPendingApproval, type CheckHarness, type CheckSession } from "./test-helpers.ts";
 
 const T = useTestDb();
 
 /** 承認の tick の手順だけ動かす（依頼の tick は別の試験） */
-const mine = (h: GuestHarness) => ({ ...h.t.deps, tickSteps: [approvalsTickStep] });
+const mine = (h: CheckHarness) => ({ ...h.t.deps, tickSteps: [approvalsTickStep] });
 
-async function setup(o: Parameters<typeof guestHarness>[1] = {}): Promise<{ h: GuestHarness; g: GuestSession; approval: ApprovalView }> {
-  const h = guestHarness(T().db, o);
-  const g = await enterGuest(h.t);
+async function setup(o: Parameters<typeof checkHarness>[1] = {}): Promise<{ h: CheckHarness; g: CheckSession; approval: ApprovalView }> {
+  const h = checkHarness(T().db, o);
+  const g = await enterWithPendingApproval(h.t);
   const list = await call<ApprovalListResponse>(h.t, g, "GET", "/api/v1/approvals");
   return { h, g, approval: list.body.items[0]! };
 }
 
 const codeOf = (r: { body: unknown }): string => (r.body as { error: { code: string } }).error.code;
-const decide = (h: GuestHarness, g: GuestSession, a: Pick<ApprovalView, "id" | "intentHash">, extra: Record<string, unknown> = {}) =>
+const decide = (h: CheckHarness, g: CheckSession, a: Pick<ApprovalView, "id" | "intentHash">, extra: Record<string, unknown> = {}) =>
   call<DecisionResponse>(h.t, g, "POST", `/api/v1/approvals/${a.id}/decision`, { decision: "approve", intentHash: a.intentHash, ...extra });
 
 describe("GET /approvals（API-017）・カードの中身", () => {
@@ -33,19 +33,19 @@ describe("GET /approvals（API-017）・カードの中身", () => {
     expect(ApprovalViewSchema.safeParse(approval).success).toBe(true);
     expect(approval).toMatchObject({
       status: "pending",
-      title: "仕入れ先に発注を送る",
-      subtitle: "山田珈琲（supplier-01）",
+      title: "place_order を実行する",
+      subtitle: "supplier-01",
       action: "mcp.supplier.place_order",
       canDecide: true,
-      askId: g.firstAskId,
+      askId: g.askId,
       agent: { name: "仕入れ係" },
-      openReason: { code: "first_destination", text: "初めての送り先です", emphasis: "山田珈琲（supplier-01）" },
+      openReason: { code: "first_destination", text: "初めての送り先です", emphasis: "supplier-01" },
       taintNote: null,
       rule: { reasonCode: "approval_required", text: "ルールにより、送る前に確認が必要です" },
     });
-    expect(approval.destination.map((d) => [d.arg, d.label])).toEqual([["supplier_id", "山田珈琲"]]);
+    expect(approval.destination.map((d) => [d.arg, d.label])).toEqual([["supplier_id", null]]);
     expect(approval.options.map((d) => d.arg).sort()).toEqual(["items[].quantity", "items[].sku", "items[].unit_price"]);
-    expect(approval.options.find((d) => d.arg === "items[].quantity")?.text).toBe("20個");
+    expect(approval.options.find((d) => d.arg === "items[].quantity")?.text).toBe("20");
     expect(approval.content.map((d) => d.text)).toEqual(["いつもの量でお願いします"]);
     // 受け渡しで汚染されている：「受信箱係が読んだメールを受け取った」
     expect(approval.taint.tainted).toBe(true);
@@ -59,7 +59,7 @@ describe("GET /approvals（API-017）・カードの中身", () => {
     // SG-09：汚染されたタスクの書き込みから作るルールだと分かる印（作ることは止めない：BR-57）
     expect(approval.remember.taintedOrigin).toBe(true);
 
-    const byAsk = await call<ApprovalListResponse>(h.t, g, "GET", `/api/v1/approvals?askId=${g.firstAskId}`);
+    const byAsk = await call<ApprovalListResponse>(h.t, g, "GET", `/api/v1/approvals?askId=${g.askId}`);
     expect(byAsk.body.items).toHaveLength(1);
     const other = await call<ApprovalListResponse>(h.t, g, "GET", "/api/v1/approvals?askId=00000000-0000-4000-8000-000000000000");
     expect(other.body.items).toHaveLength(0);
@@ -75,7 +75,7 @@ describe("GET /check（SCR-019）", () => {
     const res = await call<CheckResponse>(h.t, g, "GET", "/api/v1/check");
     expect(CheckResponseSchema.safeParse(res.body).success).toBe(true);
     expect(res.body.items.map((i) => [i.kind, i.key.split(":")[0]])).toEqual([["approval", "approval"], ["report", "answer"]]);
-    expect(res.body.items[0]).toMatchObject({ kind: "approval", title: "仕入れ先に発注を送る", opened: true });
+    expect(res.body.items[0]).toMatchObject({ kind: "approval", title: "place_order を実行する", opened: true });
     const answer = res.body.items[1]!;
     expect(answer).toMatchObject({ kind: "report", reportKind: "answer", failed: false, subtitle: "仕入れ係 · 2人で", title: "豆が残り2kgなので、山田珈琲に20kgを発注します。" });
     expect(answer.kind === "report" ? answer.lines : []).toEqual(["受信箱係：新しいメール3通を確認しました", "仕入れ係：豆が残り2kgなので、山田珈琲に20kgを発注します。受信箱係に確かめました", "あなたの確認待ち：1件", "外部の内容をもとにしています（受信箱係が読んだメール）"]);
@@ -138,7 +138,7 @@ describe("POST /approvals/:id/decision（API-019）", () => {
     expect(ok.body.rule).toBeNull();
     expect(h.gateway.executed).toEqual([approval.intentId]);
     const db = T().db;
-    expect((await db.query<{ status: string }>("SELECT status FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]?.status).toBe("executed");
+    expect((await db.query<{ status: string }>("SELECT status FROM action_intents")).rows[0]?.status).toBe("executed");
     expect((await db.query<{ status: string; decided_by: string }>("SELECT status, decided_by FROM approvals")).rows[0]).toMatchObject({ status: "approved", decided_by: g.userId });
     const audit = (await db.query<{ event_type: string; payload: { decision?: string; remember?: boolean } }>("SELECT event_type, payload FROM audit_logs WHERE event_type = 'approval.decided'")).rows;
     expect(audit).toHaveLength(1);
@@ -147,7 +147,7 @@ describe("POST /approvals/:id/decision（API-019）", () => {
     expect((await call<CheckResponse>(h.t, g, "GET", "/api/v1/check")).body.items.map((i) => i.kind)).toEqual(["report"]);
     // 済んだもの：決定した承認
     const done = (await call<DoneResponse>(h.t, g, "GET", "/api/v1/done")).body;
-    expect(done.items[0]).toMatchObject({ kind: "approval", outcome: "approved", title: "仕入れ先に発注を送る" });
+    expect(done.items[0]).toMatchObject({ kind: "approval", outcome: "approved", title: "place_order を実行する" });
   });
 
   it("gateway に届かなくても承認は残り（Intent は approved のまま）、30秒後の tick が拾い直して実行する（G-02）", async () => {
@@ -158,32 +158,28 @@ describe("POST /approvals/:id/decision（API-019）", () => {
     expect(res.body.execution?.status).toBe("not_started");
     expect(res.body.approval.status).toBe("approved");
     const db = T().db;
-    expect((await db.query<{ status: string }>("SELECT status FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]?.status).toBe("approved");
+    expect((await db.query<{ status: string }>("SELECT status FROM action_intents")).rows[0]?.status).toBe("approved");
     // 30秒たつまでは拾わない
     const c0 = await runTick(mine(h));
     expect(c0).toMatchObject({ dispatched: 0 });
     h.gateway.failExecute(null);
     h.t.clock.advance(31_000);
     expect(await runTick(mine(h))).toMatchObject({ dispatched: 1 });
-    expect((await db.query<{ status: string }>("SELECT status FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]?.status).toBe("executed");
+    expect((await db.query<{ status: string }>("SELECT status FROM action_intents")).rows[0]?.status).toBe("executed");
   });
 
-  it("reject：却下になり、実行しない。回帰の試験（incident・user_reject）に入り、報告の行になる（BR-80）", async () => {
+  it("reject：却下になり、実行しない。タスクは確認で断った終わり方になり、送る前の確認の行が消える", async () => {
     const { h, g, approval } = await setup();
     const res = await call<DecisionResponse>(h.t, g, "POST", `/api/v1/approvals/${approval.id}/decision`, { decision: "reject", intentHash: approval.intentHash, comment: "数量が多い" });
     expect(res.status).toBe(200);
     expect(res.body.approval).toMatchObject({ status: "rejected", decisionComment: "数量が多い" });
     expect(res.body.execution).toBeNull();
-    expect(res.body.incidentLine).toBe("止めた発注を、次の安全チェックに足しました");
     expect(h.gateway.executed).toEqual([]);
     const db = T().db;
-    expect((await db.query<{ status: string }>("SELECT status FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]?.status).toBe("rejected");
-    const cases = (await db.query<{ source: string; incident_kind: string; fault_ids: string[] }>("SELECT source, incident_kind, fault_ids FROM rehearsal_cases WHERE source = 'incident'")).rows;
-    expect(cases).toHaveLength(1);
-    expect(cases[0]).toMatchObject({ source: "incident", incident_kind: "user_reject" });
-    expect((await db.query<{ status: string; status_detail: string | null }>("SELECT status, status_detail FROM tasks WHERE rehearsal_run_id IS NULL AND status NOT IN ('succeeded')")).rows[0]).toMatchObject({ status: "completed", status_detail: "actions_declined" });
+    expect((await db.query<{ status: string }>("SELECT status FROM action_intents")).rows[0]?.status).toBe("rejected");
+    expect((await db.query<{ status: string; status_detail: string | null }>("SELECT status, status_detail FROM tasks WHERE status NOT IN ('succeeded')")).rows[0]).toMatchObject({ status: "completed", status_detail: "actions_declined" });
     const check = (await call<CheckResponse>(h.t, g, "GET", "/api/v1/check")).body;
-    expect(check.items.map((i) => (i.kind === "report" ? i.reportKind : i.kind))).toEqual(expect.arrayContaining(["answer", "incident_added"]));
+    expect(check.items.map((i) => (i.kind === "report" ? i.reportKind : i.kind))).toContain("answer");
     expect(check.items.some((i) => i.kind === "approval")).toBe(false);
   });
 
@@ -228,7 +224,7 @@ describe("POST /approvals/:id/decision（API-019）", () => {
     const before = (await db.query<{ current_snapshot_id: string }>("SELECT current_snapshot_id FROM agents WHERE name = '仕入れ係'")).rows[0]!.current_snapshot_id;
     const res = await decide(h, g, approval, { remember: true, rememberFixedHash: approval.remember.fixedHash, freeOptions: ["items[].quantity"] });
     expect(res.status).toBe(200);
-    expect(res.body.rule).toMatchObject({ action: "mcp.supplier.place_order", free: ["items[].quantity"], labels: { supplier_id: "山田珈琲" } });
+    expect(res.body.rule).toMatchObject({ action: "mcp.supplier.place_order", free: ["items[].quantity"], labels: null });
     expect(res.body.rule?.match).toMatchObject({ supplier_id: "supplier-01", "items[].sku": ["BEAN-HOUSE"] });
     expect(res.body.rule?.match).not.toHaveProperty("items[].quantity");
     expect(res.body.execution?.status).toBe("executed");
@@ -236,7 +232,7 @@ describe("POST /approvals/:id/decision（API-019）", () => {
       "SELECT a.current_snapshot_id, s.definition FROM agents a JOIN agent_snapshots s ON s.id = a.current_snapshot_id WHERE a.name = '仕入れ係'",
     )).rows[0]!;
     expect(row.current_snapshot_id).not.toBe(before);
-    // ゲストの仕入れ係には、用意したリハーサルが試した候補のルール（r-0001。D-101）が最初から入っている。新しいルールは最後に足される
+    // 仕入れ係には前からあるルール（r-0001）が入っている。新しいルールは最後に足される
     expect(row.definition.rules).toHaveLength(2);
     expect(row.definition.rules[0]).toMatchObject({ id: "r-0001" });
     expect(row.definition.rules[1]).toMatchObject({ id: res.body.rule?.id, added_by: g.userId });
@@ -260,7 +256,7 @@ describe("POST /approvals/:id/decision（API-019）", () => {
     )).rows[0]!.definition;
     const rule = def.rules.find((r) => r.id === ruleId);
     expect(rule).toMatchObject({ added_by: g.userId, added_at: expect.any(String), source_intent_id: approval.intentId, created_while_tainted: true });
-    // 最初から入っている候補のルール（記録より前の形）も、そのまま読めて残る
+    // 前からあるルール（記録より前の形）も、そのまま読めて残る
     const legacy = def.rules.find((r) => r.id === "r-0001");
     expect(legacy).toBeDefined();
     expect(legacy).not.toHaveProperty("created_while_tainted");
@@ -324,7 +320,7 @@ describe("POST /approvals/:id/decision（API-019）", () => {
     expect(codeOf(res)).toBe("APPROVAL_NOT_PENDING");
     const db = T().db;
     expect((await db.query<{ status: string }>("SELECT status FROM approvals")).rows[0]?.status).toBe("expired");
-    expect((await db.query<{ status: string; expire_reason: string }>("SELECT status, expire_reason FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]).toMatchObject({ status: "expired", expire_reason: "superseded" });
+    expect((await db.query<{ status: string; expire_reason: string }>("SELECT status, expire_reason FROM action_intents")).rows[0]).toMatchObject({ status: "expired", expire_reason: "superseded" });
   });
 
   it("実行の前の再判定（M-20）：承認のあとに今のポリシーが deny になっていたら、実行せず expired（policy_changed）にする", async () => {
@@ -347,7 +343,7 @@ describe("POST /approvals/:id/decision（API-019）", () => {
     expect(res.status).toBe(200);
     expect(res.body.execution).toEqual({ status: "expired", failReason: null, expiredReason: "policy_changed" });
     expect(h.gateway.executed).toEqual([]);
-    expect((await db.query<{ status: string; expire_reason: string }>("SELECT status, expire_reason FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]).toMatchObject({ status: "expired", expire_reason: "policy_changed" });
+    expect((await db.query<{ status: string; expire_reason: string }>("SELECT status, expire_reason FROM action_intents")).rows[0]).toMatchObject({ status: "expired", expire_reason: "policy_changed" });
   });
 });
 
@@ -378,8 +374,8 @@ describe("Idempotency-Key と届いたか分からない書き込み（API-070�
       kind: "question",
       source: "unknown_outcome",
       key: `unknown_outcome:${approval.intentId}`,
-      title: "届いたか分かりません：仕入れ先に発注を送る",
-      question: { text: "発注が届いたか分かりません", choices: [{ id: "executed", label: "届いていた" }, { id: "failed", label: "届いていない" }], allowFreeText: false },
+      title: "届いたか分かりません：place_order を実行する",
+      question: { text: "書き込みが届いたか分かりません", choices: [{ id: "executed", label: "届いていた" }, { id: "failed", label: "届いていない" }], allowFreeText: false },
       opened: true,
     });
     // 質問は ○ では消せない
@@ -388,7 +384,7 @@ describe("Idempotency-Key と届いたか分からない書き込み（API-070�
     expect(retry.status).toBe(422);
     const ok = await call<{ status: string }>(h.t, g, "POST", `/api/v1/intents/${approval.intentId}/resolve`, { outcome: "failed" });
     expect(ok.body).toMatchObject({ status: "failed" });
-    expect((await db.query<{ status: string; fail_reason: string; resolution: string }>("SELECT status, fail_reason, resolution FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]).toMatchObject({ status: "failed", fail_reason: "confirmed_not_delivered", resolution: "confirmed_not_delivered" });
+    expect((await db.query<{ status: string; fail_reason: string; resolution: string }>("SELECT status, fail_reason, resolution FROM action_intents")).rows[0]).toMatchObject({ status: "failed", fail_reason: "confirmed_not_delivered", resolution: "confirmed_not_delivered" });
     expect(codeOf(await call(h.t, g, "POST", `/api/v1/intents/${approval.intentId}/outcome`, { outcome: "executed" }))).toBe("INTENT_NOT_UNKNOWN");
     expect((await call<CheckResponse>(h.t, g, "GET", "/api/v1/check")).body.items.some((i) => i.kind === "question")).toBe(false);
     expect((await db.query("SELECT 1 FROM audit_logs WHERE event_type = 'intent.resolved'")).rowCount).toBe(1);
@@ -404,14 +400,14 @@ describe("POST /tasks/:taskId/cancel（API-016）", () => {
     const db = T().db;
     expect((await db.query<{ status: string; status_detail: string; task_token_hash: unknown }>("SELECT status, status_detail, task_token_hash FROM tasks WHERE id = $1", [approval.taskId])).rows[0]).toMatchObject({ status: "cancelled", status_detail: "user", task_token_hash: null });
     expect((await db.query<{ status: string }>("SELECT status FROM approvals")).rows[0]?.status).toBe("expired");
-    expect((await db.query<{ status: string; expire_reason: string }>("SELECT status, expire_reason FROM action_intents WHERE task_id IN (SELECT id FROM tasks WHERE rehearsal_run_id IS NULL)")).rows[0]).toMatchObject({ status: "expired", expire_reason: "task_cancelled" });
+    expect((await db.query<{ status: string; expire_reason: string }>("SELECT status, expire_reason FROM action_intents")).rows[0]).toMatchObject({ status: "expired", expire_reason: "task_cancelled" });
     expect((await db.query("SELECT 1 FROM audit_logs WHERE event_type = 'task.cancelled'")).rowCount).toBe(1);
     expect(codeOf(await call(h.t, g, "POST", `/api/v1/tasks/${approval.taskId}/cancel`))).toBe("TASK_ALREADY_TERMINATED");
     expect((await call<CheckResponse>(h.t, g, "GET", "/api/v1/check")).body.counts.hasApproval).toBe(false);
     expect((await call<ApprovalListResponse>(h.t, g, "GET", "/api/v1/approvals")).body.items).toHaveLength(0);
   });
 
-  it("owner でも依頼者でもなければ 403。リハーサル・存在しないタスクは 404", async () => {
+  it("owner でも依頼者でもなければ 403。存在しないタスクは 404", async () => {
     const { h, g, approval } = await setup();
     await T().db.query("UPDATE memberships SET role = 'maintainer'");
     await T().db.query("UPDATE tasks SET requester_id = (SELECT id FROM users WHERE login = 'owner' UNION ALL SELECT gen_random_uuid() LIMIT 1) WHERE false");
@@ -436,31 +432,31 @@ describe("tick：承認の期限切れ", () => {
 });
 
 describe("本番の edge の hooks（productionEdgeHooks）", () => {
-  it("Intent を保存したあと：Kernel の approve を回帰の試験にし（BR-80）、送る前の確認の行を SSE に足す。approved は再判定のあと gateway を起こす", async () => {
+  it("Intent を保存したあと：送る前の確認の行を SSE に足す。approved は再判定のあと gateway を起こす", async () => {
     const { h, g, approval } = await setup();
     const hooks = productionEdgeHooks(h.t.deps);
-    const ctx = { workspaceId: g.workspaceId, kind: "guest" as const, userId: null };
-    await hooks.onIntentRecorded?.(ctx, { taskId: approval.taskId, intentId: approval.intentId, status: "pending_approval", shadow: false });
+    const ctx = { workspaceId: g.workspaceId, kind: "owner" as const, userId: null };
+    await hooks.onIntentRecorded?.(ctx, { taskId: approval.taskId, intentId: approval.intentId, status: "pending_approval" });
     const db = T().db;
-    // 汚染されたタスクの書き込みが確認に回った：kernel_approve の試験
-    const cases = (await db.query<{ source: string; incident_kind: string }>("SELECT source, incident_kind FROM rehearsal_cases WHERE source = 'incident'")).rows;
-    expect(cases).toEqual([{ source: "incident", incident_kind: "kernel_approve" }]);
     const events = (await db.query<{ type: string; data: { item?: { key: string; kind: string } } }>("SELECT type, data FROM workspace_events WHERE type = 'check.upsert'")).rows;
     expect(events).toHaveLength(1);
     expect(events[0]?.data.item).toMatchObject({ key: `approval:${approval.id}`, kind: "approval" });
-    // 同じ Intent をもう一度呼んでも試験は増えない（冪等）
-    await hooks.onIntentRecorded?.(ctx, { taskId: approval.taskId, intentId: approval.intentId, status: "pending_approval", shadow: false });
-    expect((await db.query("SELECT 1 FROM rehearsal_cases WHERE source = 'incident'")).rowCount).toBe(1);
-    // 影の走行は何もしない
-    await hooks.onIntentRecorded?.(ctx, { taskId: approval.taskId, intentId: approval.intentId, status: "approved", shadow: true });
     expect(h.gateway.executed).toEqual([]);
+    // ルールの allow で通った Intent（approved）は、再判定のあと実行する
+    await db.query("UPDATE approvals SET status = 'approved', decided_by = $1, decided_at = now()", [g.userId]);
+    await db.query("UPDATE action_intents SET status = 'approved'");
+    await hooks.onIntentRecorded?.(ctx, { taskId: approval.taskId, intentId: approval.intentId, status: "approved" });
+    expect(h.gateway.executed).toEqual([approval.intentId]);
   });
 });
 
-describe("オーナーのワークスペース", () => {
-  it("オーナーでも同じ API を使える（承認がなければ空）", async () => {
-    const h = guestHarness(T().db);
+describe("オーナーのワークスペース（確認がないとき）", () => {
+  it("承認がなければ一覧は空", async () => {
+    const h = checkHarness(T().db);
     const res = await send(h.t, "POST", "/api/v1/entry", { body: { token: OWNER_TOKEN } });
     expect(res.status).toBe(200);
+    const cookie = /ot_session=([^;]*)/.exec(res.headers.get("set-cookie") ?? "")?.[1] ?? "";
+    const list = await send(h.t, "GET", "/api/v1/approvals", { cookie });
+    expect(((await list.json()) as ApprovalListResponse).items).toEqual([]);
   });
 });

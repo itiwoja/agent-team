@@ -6,7 +6,6 @@
 // 汚染後の出口（SG-04・D-30。web-seen.ts）：受け取ったときに、検索結果のリンク・ページの中のリンクをタスクの「見た URL の集合」に足す。
 // 汚染されたあとの web_fetch は集合にある URL だけ（tainted_unknown_url）、web_search は検索語の長さと形を絞る（tainted_query_shape）。
 // サーバーの転送で着いた先は LLM が組み立てた URL ではないので、転送ごとの checkUrl（SSRF・ドメイン）だけで通す
-// リハーサルのタスクは本物の Web に出ない。代わりに模擬の世界の口（EdgeDeps.rehearsalWeb）を使い、統制（ドメイン・回数・汚染・囲み）は本番と同じ
 
 import { addTaintSource, wrapUntrusted, type DirectTaintSource, type TaintState } from "@open-team/kernel";
 import { toolErrorText, type ToolCallResult } from "@open-team/runner";
@@ -16,10 +15,10 @@ import { lockWorkspace, system, type PolicyDecisionRow, type TaskRow, type WsCtx
 import { addTaskUsage, addTaskWebUrls, countExecutedToolCalls, hasTaskWebUrl, isTaskTainted, lockTask, setTaskTaint } from "@open-team/db/edge";
 import { GeminiCallError, callGemini } from "./gemini.ts";
 import { loadTaskPolicy } from "./inputs.ts";
-import { type EdgeRuntime, type RehearsalWeb } from "./runtime.ts";
+import { type EdgeRuntime } from "./runtime.ts";
 import { haltedDetails } from "./tokens.ts";
 import { capBytes, isPlainObject, toJstIso, truncateChars } from "./util.ts";
-import { checkUrl, WebFetchError, type FetchedPage, type PageFetcher } from "./web-page.ts";
+import { WebFetchError, type FetchedPage } from "./web-page.ts";
 import {
   PAGE_LINKS_SHOWN_MAX,
   SEEN_URLS_MAX_PER_PAGE,
@@ -80,33 +79,6 @@ function linkMarkdown(title: string, url: string): string {
 }
 
 /**
- * リハーサルの取得（模擬の世界の口）。本番の fetchPage と同じく、取る前に checkUrl（付与ドメインの許可・拒否）を通す。
- * 中断は本番と同じく WEB_ABORTED にし、404 などは本番の WEB_HTTP_<status> で返す
- */
-function rehearsalFetcher(web: RehearsalWeb): PageFetcher {
-  return async (raw, domains, signal) => {
-    const url = checkUrl(raw, domains);
-    let res;
-    try {
-      res = await web.fetch({ url: url.toString(), ...(signal !== undefined ? { signal } : {}) });
-    } catch (e) {
-      if (signal?.aborted) throw new WebFetchError("WEB_ABORTED", "中断しました");
-      throw e;
-    }
-    if (res.status >= 400) throw new WebFetchError(`WEB_HTTP_${res.status}`, `HTTP ${res.status}`);
-    let finalUrl: URL;
-    try {
-      finalUrl = checkUrl(res.finalUrl, domains);
-    } catch {
-      // リハーサル口が返す最終 URL も本番の転送先と同じポリシーで拒否する
-      throw new WebFetchError("WEB_DOMAIN_NOT_ALLOWED", "転送先は取得を許されていません");
-    }
-    const page: FetchedPage = { url: finalUrl.toString(), status: res.status, contentType: "text/plain", title: res.title, text: res.body };
-    return page;
-  };
-}
-
-/**
  * 受け取った外部の内容でタスクを汚染してコミットする（止まっていたら halted を返す）。
  * 同じトランザクションで、受け取った内容の中のリンク（正規化済み）をタスクの見た URL の集合に足す（SG-04。上限を超えた分は足さない）
  */
@@ -137,17 +109,14 @@ async function commitTaint(
 
 /** web_search（Google 検索の Grounding） */
 export async function webSearch(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row: PolicyDecisionRow): Promise<ToolCallResult> {
-  const rehearsalWeb = rt.rehearsalWeb;
-  if (task.rehearsal_run_id !== null && rehearsalWeb === null) return { kind: "text", text: toolErrorText("WEB_NOT_AVAILABLE") };
   const args = parseSearchArgs(row.subject.args);
   if (args === null) return { kind: "text", text: toolErrorText("WEB_INVALID_QUERY") };
   // 汚染後は、読んだ本文の断片を検索語に載せて外へ出す経路を細くする（SG-04。外に出る前に、いまの汚染の値で見る）
   if (!taintedQueryShapeOk(args.query) && (await isTaskTainted(rt.db, ctx, task.id))) {
     return { kind: "text", text: toolErrorText(TAINTED_QUERY_SHAPE) };
   }
-  // 検索の語句は Google（リハーサルでは模擬の世界）に渡るので、既知の秘密を外してから送る
+  // 検索の語句は Google に渡るので、既知の秘密を外してから送る
   const query = maskSecrets(args.query, rt.knownSecrets);
-  if (task.rehearsal_run_id !== null && rehearsalWeb !== null) return rehearsalSearch(rt, ctx, task, rehearsalWeb, args, query);
   const ask = [
     `今日は ${toJstIso(rt.clock.now()).slice(0, 10)}（日本時間）です。`,
     `次のことを Google 検索で調べてください：${query}`,
@@ -175,7 +144,6 @@ export async function webSearch(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row:
         taskId: task.id,
         agentId: task.agent_id,
         askId: null,
-        rehearsalRunId: task.rehearsal_run_id,
         purpose: "agent",
         phase: "investigate",
         ...(signal !== undefined ? { signal } : {}),
@@ -223,42 +191,8 @@ export async function webSearch(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row:
   return { kind: "text", text: wrapUntrusted("web_search", content) };
 }
 
-/** リハーサルの検索（模擬の世界の口。Gemini は呼ばない＝費用0）。結果は本番と同じく汚染して囲む */
-async function rehearsalSearch(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, web: RehearsalWeb, args: SearchArgs, query: string): Promise<ToolCallResult> {
-  const signal = rt.signalFor?.(task.id);
-  let results;
-  try {
-    results = await web.search({ query, maxResults: args.maxResults, ...(signal !== undefined ? { signal } : {}) });
-  } catch (e) {
-    if (signal?.aborted) return await abortedHalt(rt, ctx);
-    rt.log.warn("edge.web_search_failed", "Web の検索に失敗しました", { taskId: task.id, error: e instanceof Error ? e.message : String(e) });
-    return { kind: "text", text: toolErrorText("WEB_SEARCH_FAILED") };
-  }
-
-  const shown = results.slice(0, args.maxResults);
-  const halted = await commitTaint(rt, ctx, task, { kind: "web_search", at: rt.clock.now().toISOString() }, normalizeWebUrls(shown.map((r) => r.url)));
-  if (halted !== null) return halted;
-  const lines = [`検索：${query}`, ""];
-  if (shown.length === 0) {
-    lines.push("結果：見つかりませんでした");
-  } else {
-    lines.push("結果：");
-    shown.forEach((r, i) => lines.push(`${i + 1}. ${linkMarkdown(r.title, r.url)}`, `   ${r.snippet.replace(/\s+/g, " ").trim()}`));
-  }
-  const content = capBytes(maskSecrets(lines.join("\n"), rt.knownSecrets), rt.limits.mcpResultMaxBytes).text;
-  return { kind: "text", text: wrapUntrusted("web_search", content) };
-}
-
-/** このタスクの取得（リハーサルは模擬の世界の口。口がなければ null） */
-function fetcherFor(rt: EdgeRuntime, task: TaskRow): PageFetcher | null {
-  if (task.rehearsal_run_id === null) return rt.fetchPage;
-  return rt.rehearsalWeb === null ? null : rehearsalFetcher(rt.rehearsalWeb);
-}
-
 /** web_fetch（付与されたドメインのページを取る） */
 export async function webFetch(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row: PolicyDecisionRow): Promise<ToolCallResult> {
-  const fetcher = fetcherFor(rt, task);
-  if (fetcher === null) return { kind: "text", text: toolErrorText("WEB_NOT_AVAILABLE") };
   const args = row.subject.args;
   if (!isPlainObject(args) || typeof args.url !== "string" || args.url.trim() === "") {
     return { kind: "text", text: toolErrorText("WEB_INVALID_URL") };
@@ -274,7 +208,7 @@ export async function webFetch(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row: 
 
   let page;
   try {
-    page = await fetcher(requested, { allow: tp.policy.web.allow_domains, deny: tp.policy.web.deny_domains }, rt.signalFor?.(task.id));
+    page = await rt.fetchPage(requested, { allow: tp.policy.web.allow_domains, deny: tp.policy.web.deny_domains }, rt.signalFor?.(task.id));
   } catch (e) {
     // 自分の決まった文だけを返す（外部の文字列を受け取っていないので汚染しない）
     if (e instanceof WebFetchError && e.code === "WEB_ABORTED") return await abortedHalt(rt, ctx);

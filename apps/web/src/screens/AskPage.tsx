@@ -1,7 +1,7 @@
-// SCR-021：依頼（`/asks/:askId`）。上から「あなたの番（止まった担当・送る前の確認）」→「回答」→「担当」→「安全チェック」。
-// 担当と安全チェックは1行にたたみ、いま動いているときだけ開いておく（読む量をいま要るものに絞る）
+// SCR-021：依頼（`/asks/:askId`）。上から「あなたの番（止まった担当・送る前の確認）」→「回答」→「担当」。
+// 担当は1行にたたみ、いま動いているときだけ開いておく（読む量をいま要るものに絞る）
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError, describeError, taskFilesUrl, type AgentQuestionView, type ApprovalItem, type AskAnswerView, type AskDetail, type AskMessageView, type AskRehearsalView, type AskTurnView, type StageActivity, type StageView } from "../api";
+import { api, ApiError, describeError, taskFilesUrl, type AgentQuestionView, type ApprovalItem, type AskAnswerView, type AskDetail, type AskMessageView, type AskTurnView, type StageActivity, type StageView } from "../api";
 import { Avatar } from "../components/Avatar";
 import { CheckRow } from "../components/CheckRow";
 import { LoadError } from "../components/LoadError";
@@ -9,14 +9,12 @@ import { GoogleCalendarHint } from "../components/GoogleCalendarLine";
 import { GithubHint } from "../components/GithubLine";
 import { Markdown } from "../components/Markdown";
 import { SkeletonCards } from "../components/Skeleton";
-import { RehearsalSection } from "../components/Rehearsal";
-import { FIRST_VISIT_NOTE, FIRST_VISIT_SELF, formatTime, PREPARED_NOTE } from "../lib/format";
+import { formatTime } from "../lib/format";
 import { noticeHeadline, noticeLead } from "../lib/notice";
 import { noAnswerText, pendingReplyLabel, replyAvailability, replySentNote, showsRequest, turnLabel, turnsOf } from "../lib/turns";
 import { moodOfStage } from "../lib/avatar";
 import { activityMark, stageClock } from "../lib/progress";
 import { dependencies, isWorking, stageLabel, teamCounts } from "../lib/teamActivity";
-import { askHeadLine, certificateTone, type CertificateTone } from "../lib/rehearsal";
 import { useScreenTitle } from "../lib/title";
 import { copyLabel, canCopy, useCopy } from "../lib/useCopy";
 import { useElapsedSeconds } from "../lib/useElapsed";
@@ -27,9 +25,6 @@ import { useWorkspace, useWorkspaceEvent } from "../workspace";
 
 /** 担当が動いている間に取り直す間隔 */
 const LIVE_POLL_MS = 3000;
-
-/** 走っている走行の状態（Rehearsal.tsx の ACTIVE と同じ） */
-const RUN_ACTIVE = new Set(["queued", "generating", "running"]);
 
 /** URL の #の後ろの要素 ID（空や壊れた符号化なら null） */
 export function targetIdOf(hash: string): string | null {
@@ -98,10 +93,9 @@ export function AskPage({ askId }: { askId: string }) {
   }, [load]);
 
   useWorkspaceEvent((type, data) => {
-    if (type === "reset" || type === "rehearsal.run") return void load();
+    if (type === "reset") return void load();
     const forThis = (data as { askId?: string } | null)?.askId === askId;
-    // 状況が1件終わるたびにも取り直す（合格証の自動の再リハーサルは依頼の走行の一覧に出ないので、走り出したことをここで知る）
-    if ((type.startsWith("ask.") && forThis) || type.startsWith("check.") || type === "rehearsal.scenario") {
+    if ((type.startsWith("ask.") && forThis) || type.startsWith("check.")) {
       clearTimeout(timer.current);
       timer.current = setTimeout(() => void load(), 300);
     }
@@ -151,8 +145,6 @@ export function AskPage({ askId }: { askId: string }) {
     return error ? <LoadError message={error} onRetry={load} /> : <SkeletonCards count={2} sizes={["lg", "sm"]} head />;
   }
   const { ask, formation } = detail;
-  // 編成を作った Gemini の記録がなく、編成ができている依頼は、事前に用意したもの（Gemini を呼んでいない）
-  const prepared = detail.planner === null && formation !== null && ask.status !== "failed" && ask.status !== "generating";
 
   return (
     <div className="ask">
@@ -176,15 +168,6 @@ export function AskPage({ askId }: { askId: string }) {
             {n}
           </p>
         ))}
-        {prepared && <p className="muted gemini-line">{PREPARED_NOTE}</p>}
-        {prepared && (
-          <p className="muted gemini-line">
-            {FIRST_VISIT_NOTE}
-            <Link to="/" className="link">
-              {FIRST_VISIT_SELF}
-            </Link>
-          </p>
-        )}
       </header>
 
       {/* あなたの番：止まった担当のやり直し・送る前の確認。あれば回答より先に */}
@@ -216,18 +199,6 @@ export function AskPage({ askId }: { askId: string }) {
       )}
 
       <Stages detail={detail} messages={messages} stale={Boolean(error) || !online} />
-
-      {/* 編成ができずに失敗した依頼には、練習させる担当がいない。区画は1行にたたみ、試している間だけ開く */}
-      {formation && (
-        <details className="fold rehearsal-fold" id="rehearsal" open={detail.rehearsal ? rehearsalActive(detail.rehearsal) : false}>
-          <summary className="fold-summary">
-            <h2 className="fold-title">安全チェック</h2>
-            <span className={`fold-note is-${rehearsalTone(detail.rehearsal)}`}>{askHeadLine(detail.rehearsal, detail.rehearsal ? rehearsalActive(detail.rehearsal) : false)}</span>
-            <Chevron />
-          </summary>
-          <RehearsalSection askId={askId} summary={detail.rehearsal} />
-        </details>
-      )}
     </div>
   );
 }
@@ -258,15 +229,6 @@ function AskTitle({ text }: { text: string }) {
       )}
     </>
   );
-}
-
-function rehearsalActive(r: AskRehearsalView): boolean {
-  return RUN_ACTIVE.has(r.status) || r.recertifying;
-}
-
-/** 状態の札の色（文は lib/rehearsal の askHeadLine）。未実施は muted の札 */
-function rehearsalTone(r: AskRehearsalView | null): CertificateTone {
-  return r ? certificateTone(r, rehearsalActive(r)) : "none";
 }
 
 /** 依頼が失敗したとき（回答の代わり）。赤は点とアイコンだけに使い、面は --surface のまま */

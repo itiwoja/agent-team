@@ -1,17 +1,13 @@
-// ワークスペースの分離の試験（db-schema.md §7.4 の T-60・T-61、DB I-41 の複合 FK）。
+// ワークスペースの分離の試験（ワークスペースはオーナーの1つだけだが、workspace_id で絞る作りを2つ目の試験用のワークスペースで確かめる。db-schema.md §7.4 の T-60、DB I-41 の複合 FK）。
 // 別のワークスペースの行は DB の FK でも指せない（リポジトリ層が workspace_id で絞り忘れても、つなぎ間違いは入らない）
 import { describe, expect, it } from "vitest";
 import { isForeignKeyViolation, type Db } from "./client.ts";
 import { issueSession, resolveSession } from "./session.ts";
-import { stopWorkspaceForCleanup } from "./system/cleanup.ts";
 import {
   fxAgent,
   fxAsk,
   fxConnector,
   fxIntent,
-  fxRehearsalCase,
-  fxRehearsalRun,
-  fxSimExecution,
   fxTask,
   fxWorkspace,
   useTestDb,
@@ -23,7 +19,7 @@ const NOW = new Date("2026-10-12T09:00:00.000Z");
 
 async function twoWorkspaces(db: Db) {
   const a = await fxWorkspace(db);
-  const b = await fxWorkspace(db);
+  const b = await fxWorkspace(db, { second: true });
   const agentA = await fxAgent(db, a, { name: "A係" });
   const agentB = await fxAgent(db, b, { name: "B係" });
   const connA = await fxConnector(db, a);
@@ -67,20 +63,9 @@ describe("別のワークスペースの行を指せない（複合 FK）", () =
       "approvals_intent_fk",
     );
   });
-
-  it("A の走行・試験に B の仕事、A の sim の走行に B の走行、A のタスクに B の sim の走行は付けられない", async () => {
-    const { db } = T();
-    const { a, b, agentA, agentB } = await twoWorkspaces(db);
-    await expectFk(fxRehearsalRun(db, a, { jobId: agentB.jobId }), "rehearsal_runs_job_fk");
-    await expectFk(fxRehearsalCase(db, a, { jobId: agentB.jobId }), "rehearsal_cases_job_fk");
-    const runB = await fxRehearsalRun(db, b, { jobId: agentB.jobId });
-    await expectFk(fxSimExecution(db, a, { rehearsalRunId: runB.runId }), "sim_executions_rehearsal_run_fk");
-    const liveB = await fxSimExecution(db, b);
-    await expectFk(fxTask(db, a, agentA, { simExecutionId: liveB.executionId }), "tasks_sim_execution_fk");
-  });
 });
 
-describe("T-60・T-61（DB の範囲）", () => {
+describe("T-60（DB の範囲）", () => {
   it("T-60 セッションは自分のワークスペースの文脈だけを返し、その文脈では別のワークスペースの行は「ない」", async () => {
     const { db } = T();
     const { a, b } = await twoWorkspaces(db);
@@ -97,17 +82,4 @@ describe("T-60・T-61（DB の範囲）", () => {
     expect((await getWorkspace(db, ctxA))?.id).toBe(a.workspaceId);
   });
 
-  it("T-61 A を止めても（Kill Switch）、B の kill_switch_engaged・タスクは変わらない", async () => {
-    const { db } = T();
-    const { a, b, agentA, agentB } = await twoWorkspaces(db);
-    const tA = await fxTask(db, a, agentA);
-    const tB = await fxTask(db, b, agentB);
-    await db.transaction((tx) => stopWorkspaceForCleanup(tx, a.ctx, NOW));
-    const ws = await db.query<{ id: string; kill_switch_engaged: boolean }>("SELECT id, kill_switch_engaged FROM workspaces WHERE id = ANY($1::uuid[])", [
-      [a.workspaceId, b.workspaceId],
-    ]);
-    expect(Object.fromEntries(ws.rows.map((r) => [r.id, r.kill_switch_engaged]))).toEqual({ [a.workspaceId]: true, [b.workspaceId]: false });
-    const tasks = await db.query<{ id: string; status: string }>("SELECT id, status FROM tasks WHERE id = ANY($1::uuid[])", [[tA.taskId, tB.taskId]]);
-    expect(Object.fromEntries(tasks.rows.map((r) => [r.id, r.status]))).toEqual({ [tA.taskId]: "halted", [tB.taskId]: "running" });
-  });
 });

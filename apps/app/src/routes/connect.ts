@@ -1,4 +1,4 @@
-// Google カレンダーの接続（16 §3.6、ADR-040）。ゲストのワークスペースでもオーナーでも同じ（セッション必須）
+// Google カレンダーの接続（16 §3.6、ADR-040）。セッション必須
 //   GET    /api/v1/connect/google/start?tz=<IANA>   state を Cookie に置いて Google の同意画面へ
 //   GET    /api/v1/connect/google/callback          state を照合 → code を交換 → 必要な権限の確認 → カレンダー → 1トランザクション → 同期・分類
 //   DELETE /api/v1/connect/google                   切断（DB だけ。Google 側の取り消しは下の TODO）
@@ -153,7 +153,7 @@ async function cleanupAfterCommit(deps: AppDeps, s: SessionCtx, connectorId: str
 const errorName = (e: unknown): string => (e instanceof Error ? e.name : "unknown");
 
 export function connectRoutes(r: ApiRouter, deps: AppDeps): void {
-  // 同意画面へ（ゲストもオーナーも。セッションは既定の守りで必須）
+  // 同意画面へ（セッションは既定の守りで必須）
   r.get("/connect/google/start", (c) => {
     const env = deps.env.googleConnect;
     if (!env) return backTo(c, "unavailable");

@@ -7,10 +7,6 @@ import {
   fxApproval,
   fxConnector,
   fxIntent,
-  fxRehearsalCase,
-  fxRehearsalRun,
-  fxRehearsalScenario,
-  fxSimExecution,
   fxTask,
   fxWorkspace,
   openRoleDb,
@@ -35,7 +31,6 @@ import {
   lockIdempotencyKey,
   releaseKillSwitchTx,
   saveIdempotencyRecord,
-  upsertSimConnector,
   WORKSPACE_EVENTS_CHANNEL,
   workspaceEventExists,
 } from "./app.ts";
@@ -53,9 +48,9 @@ async function asApp(url: string): Promise<Db> {
 }
 
 describe("Kill Switch の DB の部分", () => {
-  it("engageKillSwitchTx：終了していないタスクを halted・トークン失効、承認・未実行の Intent を expired、executing は残す、走行と状況を cancelled（ot_app の権限で通る）", async () => {
+  it("engageKillSwitchTx：終了していないタスクを halted・トークン失効、承認・未実行の Intent を expired、executing は残す（ot_app の権限で通る）", async () => {
     const { db, url } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const conn = await fxConnector(db, ws);
     const agent = await fxAgent(db, ws);
     const running = await fxTask(db, ws, agent, { status: "running" });
@@ -63,38 +58,25 @@ describe("Kill Switch の DB の部分", () => {
     const pending = await fxIntent(db, ws, { taskId: running.taskId, jobId: agent.jobId, connectorId: conn.connectorId });
     await fxApproval(db, ws, { taskId: running.taskId, intentId: pending.intentId });
     const executing = await fxIntent(db, ws, { taskId: running.taskId, jobId: agent.jobId, connectorId: conn.connectorId, status: "executing" });
-    const run = await fxRehearsalRun(db, ws, { jobId: agent.jobId, status: "generating" });
-    const kase = await fxRehearsalCase(db, ws, { jobId: agent.jobId });
-    const scenario = await fxRehearsalScenario(db, ws, { runId: run.runId, caseId: kase.caseId });
-    const exec = await fxSimExecution(db, ws, { rehearsalRunId: run.runId, variant: "shadow" });
-    const shadowTask = await fxTask(db, ws, agent, {
-      status: "running",
-      rehearsalRunId: run.runId,
-      rehearsalScenarioId: scenario.scenarioId,
-      shadow: true,
-      simExecutionId: exec.executionId,
-    });
+    const queued = await fxTask(db, ws, agent, { status: "queued" });
 
     const app = await asApp(url);
     const r = await app.transaction((tx) => engageKillSwitchTx(tx, ws.ctx, { by: ws.userId, reason: "r", now: NOW }));
-    expect(r).toMatchObject({ alreadyEngaged: false, engagedAt: NOW, expiredIntentIds: [pending.intentId], cancelledRehearsalRunIds: [run.runId] });
-    expect(r?.haltedTasks.map((t) => t.id)).toEqual([running.taskId, shadowTask.taskId].sort());
-    expect(r?.haltedTasks.find((t) => t.id === shadowTask.taskId)).toMatchObject({ shadow: true, rehearsalRunId: run.runId, previousStatus: "running" });
+    expect(r).toMatchObject({ alreadyEngaged: false, engagedAt: NOW, expiredIntentIds: [pending.intentId] });
+    expect(r?.haltedTasks.map((t) => t.id)).toEqual([running.taskId, queued.taskId].sort());
+    expect(r?.haltedTasks.find((t) => t.id === queued.taskId)).toMatchObject({ previousStatus: "queued" });
     expect(r?.expiredApprovalIds).toHaveLength(1);
     const statuses = await db.query<{ id: string; status: string }>("SELECT id, status FROM tasks ORDER BY id");
     expect(Object.fromEntries(statuses.rows.map((x) => [x.id, x.status]))).toEqual({
       [running.taskId]: "halted",
       [done.taskId]: "completed",
-      [shadowTask.taskId]: "halted",
+      [queued.taskId]: "halted",
     });
     expect((await db.query<{ status: string }>("SELECT status FROM action_intents WHERE id = $1", [executing.intentId])).rows[0]?.status).toBe("executing");
-    expect((await db.query<{ status: string; abort_reason: string }>("SELECT status, abort_reason FROM rehearsal_scenarios")).rows).toEqual([
-      { status: "cancelled", abort_reason: "kill_switch" },
-    ]);
 
     // 2回目は何もしない（冪等）
     const again = await app.transaction((tx) => engageKillSwitchTx(tx, ws.ctx, { by: ws.userId, reason: "x", now: new Date(NOW.getTime() + 1000) }));
-    expect(again).toEqual({ alreadyEngaged: true, engagedAt: NOW, haltedTasks: [], expiredApprovalIds: [], expiredIntentIds: [], cancelledRehearsalRunIds: [] });
+    expect(again).toEqual({ alreadyEngaged: true, engagedAt: NOW, haltedTasks: [], expiredApprovalIds: [], expiredIntentIds: [] });
     expect((await db.query<{ kill_switch_reason: string }>("SELECT kill_switch_reason FROM workspaces")).rows[0]?.kill_switch_reason).toBe("r");
   });
 
@@ -105,7 +87,7 @@ describe("Kill Switch の DB の部分", () => {
     expect(await db.transaction((tx) => releaseKillSwitchTx(tx, ws.ctx, NOW))).toEqual({ wasEngaged: false });
     const row = await db.query("SELECT kill_switch_engaged, kill_switch_engaged_at, kill_switch_reason FROM workspaces");
     expect(row.rows[0]).toEqual({ kill_switch_engaged: false, kill_switch_engaged_at: null, kill_switch_reason: null });
-    const missing = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "guest" as const, userId: null };
+    const missing = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "owner" as const, userId: null };
     expect(await db.transaction((tx) => releaseKillSwitchTx(tx, missing, NOW))).toBeNull();
     expect(await db.transaction((tx) => engageKillSwitchTx(tx, missing, { by: null, reason: null, now: NOW }))).toBeNull();
   });
@@ -113,7 +95,7 @@ describe("Kill Switch の DB の部分", () => {
   it("findStoppedTasks：終了状態のタスクと Kill Switch。ほかのワークスペースのタスクは見ない、ワークスペースが消えていたら全部", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const agentA = await fxAgent(db, a);
     const agentB = await fxAgent(db, b);
     const live = await fxTask(db, a, agentA, { status: "running" });
@@ -121,7 +103,7 @@ describe("Kill Switch の DB の部分", () => {
     const foreign = await fxTask(db, b, agentB, { status: "failed" });
     expect(await findStoppedTasks(db, a.ctx, [live.taskId, ended.taskId, foreign.taskId])).toEqual({ killSwitchEngaged: false, terminalTaskIds: [ended.taskId] });
     expect(await findStoppedTasks(db, a.ctx, [])).toEqual({ killSwitchEngaged: false, terminalTaskIds: [] });
-    const gone = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "guest" as const, userId: null };
+    const gone = { workspaceId: "00000000-0000-4000-8000-000000000000", kind: "owner" as const, userId: null };
     expect(await findStoppedTasks(db, gone, [live.taskId])).toEqual({ killSwitchEngaged: true, terminalTaskIds: [live.taskId] });
   });
 });
@@ -130,7 +112,7 @@ describe("ワークスペースの事象（SSE）", () => {
   it("appendWorkspaceEvent は行を足し、コミットで '<ws>:<id>' を NOTIFY。読み出しはワークスペースで絞って id の昇順（ot_app の権限で通る）", async () => {
     const { db, url } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const app = await asApp(url);
     const got: string[] = [];
     const l = await db.listen(WORKSPACE_EVENTS_CHANNEL, (p) => got.push(p));
@@ -173,18 +155,17 @@ describe("ワークスペースの事象（SSE）", () => {
 });
 
 describe("監査ログの一覧", () => {
-  it("seq の降順・beforeSeq・影の行の除外（payload.enforced = false）・hasMore", async () => {
+  it("seq の降順・beforeSeq・0024 より前の影の行の除外（payload.enforced = false）・hasMore", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db, { audit: true });
     await db.transaction(async (tx) => {
       await appendAuditLog(tx, ws.workspaceId, { eventType: "decision.made", actorType: "system", actorId: "app", payload: { enforced: false } }, NOW);
       await appendAuditLog(tx, ws.workspaceId, { eventType: "decision.made", actorType: "system", actorId: "app", payload: { enforced: true } }, NOW);
     });
-    const r = await listAuditLogs(db, ws.ctx, { limit: 1, beforeSeq: null, includeShadow: false });
+    const r = await listAuditLogs(db, ws.ctx, { limit: 1, beforeSeq: null });
     expect(r.rows.map((x) => x.seq)).toEqual([3]);
     expect(r.hasMore).toBe(true);
-    expect((await listAuditLogs(db, ws.ctx, { limit: 10, beforeSeq: 3, includeShadow: false })).rows.map((x) => x.seq)).toEqual([1]);
-    expect((await listAuditLogs(db, ws.ctx, { limit: 10, beforeSeq: null, includeShadow: true })).rows.map((x) => x.seq)).toEqual([3, 2, 1]);
+    expect((await listAuditLogs(db, ws.ctx, { limit: 10, beforeSeq: 3 })).rows.map((x) => x.seq)).toEqual([1]);
   });
 });
 
@@ -192,7 +173,7 @@ describe("冪等性のキー", () => {
   it("保存・24時間の内だけ見つかる・同じキーは上書き・ワークスペースで分かれる", async () => {
     const { db } = T();
     const a = await fxWorkspace(db);
-    const b = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     const key = "0B7B8C1E-2F2D-4B8A-9D0E-0A1B2C3D4E5F";
     await db.transaction(async (tx) => {
       await lockIdempotencyKey(tx, a.ctx, key);
@@ -212,7 +193,7 @@ describe("冪等性のキー", () => {
 describe("オーナーの初期投入に使う行", () => {
   it("insertWorkspacePolicyIfMissing：どの版もなければ v1、あれば今のものを返す（ot_app の権限で通る）", async () => {
     const { db, url } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const app = await asApp(url);
     const first = await app.transaction((tx) => insertWorkspacePolicyIfMissing(tx, ws.ctx, { policy: { version: 1, a: 1 }, policyHash: "c".repeat(64), createdBy: null, now: NOW }));
     expect(first).toMatchObject({ created: true, row: { version: 1, policy: { version: 1, a: 1 } } });
@@ -221,23 +202,10 @@ describe("オーナーの初期投入に使う行", () => {
     expect((await getLatestWorkspacePolicy(app, ws.ctx))?.policy_hash).toBe("c".repeat(64));
   });
 
-  it("upsertSimConnector：なければ作る・同じなら何もしない・URL が変われば揃える・sim でない同じ slug は例外", async () => {
-    const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
-    const seed = { slug: "store", displayName: "店舗の在庫", url: "http://sim/mcp/shop/store", auth: { type: "none" as const } };
-    const a = await db.transaction((tx) => upsertSimConnector(tx, ws.ctx, seed, NOW));
-    expect(a).toMatchObject({ created: true, updated: false, row: { kind: "sim", enabled: true } });
-    const b = await db.transaction((tx) => upsertSimConnector(tx, ws.ctx, seed, NOW));
-    expect(b).toMatchObject({ created: false, updated: false, row: { id: a.row.id } });
-    const c = await db.transaction((tx) => upsertSimConnector(tx, ws.ctx, { ...seed, url: "https://sim2/mcp/shop/store" }, NOW));
-    expect(c).toMatchObject({ created: false, updated: true, row: { id: a.row.id, url: "https://sim2/mcp/shop/store", auth: { type: "none" } } });
-    await db.query("INSERT INTO connectors (workspace_id, slug, display_name, kind, url) VALUES ($1, 'mail', 'm', 'mcp_remote', 'https://x')", [ws.workspaceId]);
-    await expect(db.transaction((tx) => upsertSimConnector(tx, ws.ctx, { ...seed, slug: "mail" }, NOW))).rejects.toThrow(/sim でない/);
-  });
 
   it("applyToolClassification：違うときだけ書く（2回目は false）。needs_review の行は触らない", async () => {
     const { db } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const c = await fxConnector(db, ws, { tools: [{ name: "place_order", classification: "unclassified" }] });
     const toolId = c.tools.place_order!.id;
     const input = { classification: "write" as const, argRoles: { supplier_id: "destination" }, scope: null, verify: "none" as const, toolHash: `sha256:${"e".repeat(64)}` as const, classifiedBy: "system:seed", now: NOW };
@@ -251,7 +219,7 @@ describe("オーナーの初期投入に使う行", () => {
 
   it("insertAgentWithSnapshot：エージェントと有効なスナップショットを作り current にする。findAgentByName は removed を除く（ot_app の権限で通る）", async () => {
     const { db, url } = T();
-    const ws = await fxWorkspace(db, { kind: "owner" });
+    const ws = await fxWorkspace(db);
     const app = await asApp(url);
     const r = await app.transaction((tx) =>
       insertAgentWithSnapshot(tx, ws.ctx, {
@@ -278,8 +246,8 @@ describe("オーナーの初期投入に使う行", () => {
 describe("表示に使う行", () => {
   it("getMemberUser はそのワークスペースの所属だけ。getWorkspaceDayCostUsd はタイムゾーンの今日だけを足す", async () => {
     const { db } = T();
-    const a = await fxWorkspace(db, { kind: "owner" });
-    const b = await fxWorkspace(db);
+    const a = await fxWorkspace(db);
+    const b = await fxWorkspace(db, { second: true });
     expect(await getMemberUser(db, a.ctx, a.userId)).toMatchObject({ id: a.userId, role: "owner" });
     expect(await getMemberUser(db, a.ctx, b.userId)).toBeNull();
     const agent = await fxAgent(db, a);

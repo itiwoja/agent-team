@@ -1,7 +1,7 @@
 // MCP の引数を入力スキーマで確かめる（M-12、KD §8-17：スキーマにない最上位のキーがある呼び出しは Intent にせずツールのエラーで返す）。
 // 1. 最上位のキーが inputSchema.properties にあるか（properties がなければ、どのキーもない扱い＝厳しい側）
 // 2. JSON のバイト数（64KB。IA §3.5-2）
-// 3. zod の fromJSONSchema で中身も確かめる（sim-world の入力も strict：SW:324-340。計測の measureEdge と同じ扱い）。
+// 3. zod の fromJSONSchema で中身も確かめる。
 //    スキーマを変換できなければ 3 は飛ばす（1・2 は必ず効く）
 
 import { z } from "zod";

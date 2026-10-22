@@ -23,7 +23,7 @@ import type { RetryInfo } from "./retry.ts";
 import { buildToolDeclarations, EMPTY_MCP_FUNCTION_TABLE } from "./tools.ts";
 import { LlmError, type LlmClient, type LlmRequest } from "./types.ts";
 
-// ---- 試験の材料（仕入れ係：sim-world の supplier・mail） ----
+// ---- 試験の材料（仕入れ係：例の MCP コネクタの supplier・mail） ----
 
 const placeOrderSchema = {
   type: "object",

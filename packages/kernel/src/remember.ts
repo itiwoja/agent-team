@@ -21,9 +21,9 @@ export interface CanOfferRememberInput {
   effectiveMcpWrite: AutonomyLevel;
   /** ワークスペースのポリシーの rules.enabled */
   rulesEnabled: boolean;
-  /** Hard Ceiling で handoff だけを許す操作か（BR-36。0-H の sim のツールは false：MT D-41） */
+  /** Hard Ceiling で handoff だけを許す操作か（BR-36） */
   isHandoffOnly: boolean;
-  /** tasks.is_dry_run（試し実行・リハーサル・影の走行は true） */
+  /** tasks.is_dry_run（試し実行は true） */
   isDryRun: boolean;
   /** そのエージェントの今のルールの数 */
   currentRuleCount: number;

@@ -59,9 +59,9 @@ describe("EnvReader（足りない・不正な名前だけを積む。D-47）", 
   it("url は正規化（末尾の / を除く・ホストを小文字）し、認証情報・クエリ・#・http(s) 以外は不正", () => {
     const r = new EnvReader({
       A: "https://Gateway-123.asia-northeast1.run.app/",
-      B: "https://u:p@sim-world.run.app",
-      C: "https://sim-world.run.app?x=1",
-      D: "https://sim-world.run.app#f",
+      B: "https://u:p@app.run.app",
+      C: "https://app.run.app?x=1",
+      D: "https://app.run.app#f",
       E: "ftp://example.com",
       F: "not a url",
       G: "http://localhost:8081/",

@@ -1,7 +1,7 @@
 // Kill Switch（EP-27・28。FR-015、SO §3.15、AS §3.9、09_api/policies.md:71-83）
-// 発動：maintainer 以上（ゲストは owner）。1つのトランザクションで、ワークスペースの行 → タスク → 承認 → Intent の順にロックし（M-21）、
-//   全タスク（リハーサル・影も）を halted(kill_switch)・タスクのトークンを失効、承認待ちと未実行の Intent を expired、走っているリハーサルを
-//   cancelled、終了したタスクの処理（BR-80 の回帰の試験・順番の進め方：hooks.tasksTerminated）、監査ログ killswitch.engaged、
+// 発動：maintainer 以上。1つのトランザクションで、ワークスペースの行 → タスク → 承認 → Intent の順にロックし（M-21）、
+//   全タスクを halted(kill_switch)・タスクのトークンを失効、承認待ちと未実行の Intent を expired、
+//   終了したタスクの処理（順番の進め方：hooks.tasksTerminated）、監査ログ killswitch.engaged、
 //   SSE の事象 killswitch、NOTIFY ot_kill_switch（コミットで届く）。コミットのあと、このインスタンスの登録簿もすぐ中断する
 // 解除：owner だけ（BR-17）。理由は1〜500文字。止めたタスクは再開しない。監査ログ killswitch.released、SSE の事象 killswitch
 // どちらも冪等（発動中の発動・解除中の解除は何もせず今の状態を返し、監査ログも増やさない：09_api/policies.md:75）
@@ -54,7 +54,6 @@ export async function engageKillSwitchInTx(
         reason: input.reason,
         affectedTaskIds,
         expiredIntentIds: res.expiredIntentIds,
-        cancelledRehearsalRunIds: res.cancelledRehearsalRunIds,
       },
     },
     now,

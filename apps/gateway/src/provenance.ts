@@ -3,17 +3,17 @@
 // action_intents を UPDATE できるので、app が破られると「列を1つ書き換えるだけ」で任意の書き込みが gateway を通る。
 // ここでは実行の前に「判定が実際に行われた証拠」を DB の別の行で確かめ、欠けていれば実行しない（理由コード approval_provenance）。
 //
-// 証拠の重み：ot_app は action_intents・approvals・policy_decisions・rehearsal_certificates の列と時刻を UPDATE・DELETE できるので、
+// 証拠の重み：ot_app は action_intents・approvals・policy_decisions の列と時刻を UPDATE・DELETE できるので、
 // それらは「一致しているか」を見るだけで、偽れる。audit_logs は ot_app でも追記しかできず（UPDATE・DELETE・TRUNCATE はロールとトリガーで拒否）、
-// seq はワークスペースごとの詰まった連番で前に割り込めない。そこで「すでに起きたこと（失効・却下・実行）」と「起きた順番（合格証の発行 →
-// 判定 → 承認）」は監査ログで確かめる。「無い」ことの証明（却下・失効・実行が無い）は監査ログが消せないので偽れない。
+// seq はワークスペースごとの詰まった連番で前に割り込めない。そこで「すでに起きたこと（失効・却下・実行）」と「起きた順番（判定 → 承認）」は
+// 監査ログで確かめる。「無い」ことの証明（却下・失効・実行が無い）は監査ログが消せないので偽れない。
 // ただし ot_app は監査ログを足せるので、「有る」ことの証明（判定・承認の記録）は追記で偽れる。足した行は seq が後ろになるので、順番の
-// 照合（発行 < 判定 < 承認）と、元からある記録との食い違い（全部が一致すること）で止まる範囲が広がるが、完全ではない。根本は SG-02
+// 照合（判定 < 承認）と、元からある記録との食い違い（全部が一致すること）で止まる範囲が広がるが、完全ではない。根本は SG-02
 // （状態遷移を DB の関数に閉じる）と SG-01（人の承認の署名）。
 //
-// 照合の規則（本番のタスクの Intent。どれかが欠けたら拒否。detail は PROVENANCE_FAILURES）
-//   P-0 入口：試し実行（リハーサルでない）の Intent は simulated にしかならない（BR-24）→ dry_run_intent。enforced = false は影だけ
-//       （BR-67③）→ not_enforced。allow・approve 以外の decision → decision_not_executable
+// 照合の規則（試し実行でないタスクの Intent。どれかが欠けたら拒否。detail は PROVENANCE_FAILURES）
+//   P-0 入口：試し実行の Intent は simulated にしかならない（BR-24）→ dry_run_intent。判定を効かせていない Intent（enforced = false）
+//       → not_enforced。allow・approve 以外の decision → decision_not_executable
 //   P-H 履歴（監査ログ）：その Intent の終わりを示す記録（action.executed・action.failed・action.unknown_outcome・intent.expired・
 //       intent.resolved・approval.expired・approval.invalidated、task.cancelled の expiredIntentIds）→ already_finished。
 //       タスクが終了状態になった記録（task.status_changed の to）→ task_ended。送り始めた記録 action.started の数が、送信前の失敗で
@@ -28,29 +28,13 @@
 //       approval.decided はその承認にちょうど1件で approve（reject があれば approval_rejected）、行為者が decided_by、intentHash が
 //       Intent と一致。approval.requested があり期限が承認の行と同じで、決定の時刻がその期限より前。順番は
 //       判定（decision.made）< 承認の要求 < 承認の決定（seq）→ approval_order_invalid
-//   P-3 allow：判定が rule_matched（rules.items[n]）で flags.certificateValid。合格証の行（この仕事・この action と tool_hash を含む）の
-//       発行の監査ログ（audit_seq の行が rehearsal.certificate_issued で jobId・certificateHash が一致）が判定より前にあり、
-//       発行から判定までの間に、その合格証の失効（rehearsal.certificate_revoked）も同じ仕事の次の発行（superseded）もない
-//
-// 照合しないもの（既存の振る舞いを変えない。理由）
-//   - リハーサルの走行のタスク（rehearsal_run_id がある：影・governed・承認した分岐 governed_approve）。
-//     影は Kernel の判定（deny・approve）を無視して実行する仕様（BR-67③、SW §4.5-3）で、承認した分岐は「人が承認したことにした」写しを
-//     承認の行も判定の行も作らずに実行する（DB §4.6、SW §4.4.3 の4、apps/app/src/rehearsal/run.ts の runApproveBranch）。
-//     どちらも書き込み先は境界（connectorBoundary の rehearsal_real_connector・shadow_real_connector。影でも必ず効かせる：SH-06）が
-//     sim-world に閉じるので、出どころを偽っても本物の外へは書けない。照合を足すと影・リハーサルの比較が成り立たなくなる。
-//     影でも効かせる intentHash の再計算・境界・Kill Switch・二重の実行の防止は今までどおり（execute.ts）
-//   - ゲストのワークスペースで sim-world へ書く approve の Intent に限り、判定の行・decision.made・intent.proposed・approval.requested が
-//     1件もないときは P-1 と、P-2 の要求・判定との順番だけを求めない。ゲストのデモのデータ（apps/app/src/guest-seed.ts）は承認待ちの
-//     Intent をこれらなしで入れるため。人の承認（行と approval.decided）と P-H は求める。どれか1件でもあれば例外にせず全部を照合する。
-//     ゲストの書き込み先は境界（guest_workspace：BR-64）が sim-world に閉じる。guest-seed が判定の記録を残すようになったらこの例外は外す
+//   P-3 allow：判定が rule_matched（rules.items[n]）で、P-1 の判定の記録（行と監査ログ）がそろっている → rule_not_matched
 //
 // gateway は decide を呼ばない（M-20、execute.ts:10）。ここで確かめるのは証拠の「存在と一致と順番」だけで、判定のやり直しはしない。
 
-import type { ActionIntentRow, ApprovalRow, PolicyDecisionRow, RehearsalCertificateRow, Tx, WsCtx } from "@open-team/db";
+import type { ActionIntentRow, ApprovalRow, PolicyDecisionRow, Tx, WsCtx } from "@open-team/db";
 import {
   getApprovalOfIntent,
-  listCertificateAuditEvents,
-  listJobCertificates,
   listKernelDecisionsOfIntent,
   listKillSwitchEngagedSeqs,
   listTaskAuditEvents,
@@ -91,15 +75,10 @@ export const PROVENANCE_FAILURES = [
   "approval_request_mismatch",
   "approval_order_invalid",
   "rule_not_matched",
-  "certificate_flag_missing",
-  "certificate_missing",
 ] as const;
 export type ProvenanceFailure = (typeof PROVENANCE_FAILURES)[number];
 
-export type ProvenanceResult =
-  /** checked = false は照合の対象外（リハーサルの走行のタスク） */
-  | { ok: true; checked: boolean }
-  | { ok: false; detail: ProvenanceFailure };
+export type ProvenanceResult = { ok: true } | { ok: false; detail: ProvenanceFailure };
 
 /** 照合に使う証拠（DB から読んだもの） */
 export interface ProvenanceEvidence {
@@ -109,30 +88,20 @@ export interface ProvenanceEvidence {
   taskAudits: readonly ProvenanceAuditEvent[];
   /** ワークスペースの killswitch.engaged の seq */
   killSwitchSeqs: readonly number[];
-  certificates: readonly RehearsalCertificateRow[];
-  /** その仕事の合格証の発行・失効の監査ログ（seq の順） */
-  certificateAudits: readonly ProvenanceAuditEvent[];
 }
 
 export type ProvenanceIntent = Pick<
   ActionIntentRow,
-  "id" | "task_id" | "job_id" | "action" | "payload" | "tool_hash" | "decision" | "reason_code" | "matched_rule" | "enforced" | "intent_hash" | "policy_hash"
+  "id" | "task_id" | "action" | "payload" | "decision" | "reason_code" | "matched_rule" | "enforced" | "intent_hash" | "policy_hash"
 >;
 
 export interface ProvenanceInput {
-  task: Pick<GatewayTaskRow, "is_dry_run" | "rehearsal_run_id" | "shadow">;
+  task: Pick<GatewayTaskRow, "is_dry_run">;
   intent: ProvenanceIntent;
-  /** ゲストのワークスペースで、書き込み先が sim-world（境界で確かめた URL）か */
-  guestSimWrite: boolean;
 }
 
 type Fail = { ok: false; detail: ProvenanceFailure };
 const fail = (detail: ProvenanceFailure): Fail => ({ ok: false, detail });
-
-/** 照合の対象か（本番のタスクだけ。リハーサル・影は対象外：冒頭の「照合しないもの」） */
-export function provenanceApplies(task: Pick<GatewayTaskRow, "rehearsal_run_id" | "shadow">): boolean {
-  return task.rehearsal_run_id === null && !task.shadow;
-}
 
 function isObject(v: unknown): v is Record<string, unknown> {
   return v !== null && typeof v === "object" && !Array.isArray(v);
@@ -240,7 +209,7 @@ const FINISHED_EVENTS = new Set([
   "approval.invalidated",
 ]);
 
-/** P-H：履歴。anchorSeq は判定の seq（ゲストのデモの例外は 0：Intent はワークスペースを作ったときからある） */
+/** P-H：履歴。anchorSeq は判定の seq */
 function checkHistory(intent: ProvenanceIntent, ev: ProvenanceEvidence, anchorSeq: number): Fail | null {
   const mine = aboutIntent(ev.taskAudits, intent.id);
   if (mine.some((a) => FINISHED_EVENTS.has(a.event_type))) return fail("already_finished");
@@ -270,7 +239,7 @@ function checkHistory(intent: ProvenanceIntent, ev: ProvenanceEvidence, anchorSe
 }
 
 /** P-2：人の承認 */
-function checkApproval(intent: ProvenanceIntent, ev: ProvenanceEvidence, decisionSeq: number | null): Fail | null {
+function checkApproval(intent: ProvenanceIntent, ev: ProvenanceEvidence, decisionSeq: number): Fail | null {
   const approval = ev.approval;
   if (approval === null) return fail("approval_missing");
   if (approval.intent_id !== intent.id || approval.task_id !== intent.task_id) return fail("approval_mismatch");
@@ -293,8 +262,6 @@ function checkApproval(intent: ProvenanceIntent, ev: ProvenanceEvidence, decisio
   // 人が画面で見て承認した intentHash（ADR-005）と、いま実行しようとしている Intent が同じ
   if (d.payload.intentHash !== intent.intent_hash) return fail("approval_hash_mismatch");
 
-  // ゲストのデモの例外（decisionSeq = null）は承認の要求の記録もない
-  if (decisionSeq === null) return null;
   const requested = ofApproval.filter((a) => a.event_type === "approval.requested");
   if (requested.length === 0) return fail("approval_request_missing");
   const req = requested[0]!;
@@ -306,74 +273,37 @@ function checkApproval(intent: ProvenanceIntent, ev: ProvenanceEvidence, decisio
   return null;
 }
 
-/** P-3：ルールで allow。判定より前に発行され、判定の時点で切れていなかった合格証が、この action と tool_hash を含んでいた */
-function checkRuleAllow(intent: ProvenanceIntent, d: PolicyDecisionRow, decisionSeq: number, ev: ProvenanceEvidence): Fail | null {
+/** P-3：ルールで allow（ルールの記録：rule_matched と rules.items[n]） */
+function checkRuleAllow(d: PolicyDecisionRow): Fail | null {
   if (d.reason_code !== "rule_matched" || typeof d.matched_rule !== "string" || !/^rules\.items\[\d+\]$/.test(d.matched_rule)) {
     return fail("rule_not_matched");
   }
-  const flags: unknown = d.flags;
-  if (!isObject(flags) || flags.certificateValid !== true) return fail("certificate_flag_missing");
-  const valid = ev.certificates.some((c) => {
-    if (c.job_id !== intent.job_id) return false;
-    if (!Array.isArray(c.tool_hashes) || !c.tool_hashes.some((e) => isObject(e) && e.action === intent.action && e.toolHash === intent.tool_hash)) return false;
-    // 発行の記録（行の audit_seq が指す監査ログ）。列は書けても、指す先の監査ログは前に割り込めない
-    const issued = ev.certificateAudits.find(
-      (a) => a.seq === c.audit_seq && a.event_type === "rehearsal.certificate_issued" && a.payload.jobId === c.job_id && a.payload.certificateHash === c.certificate_hash,
-    );
-    if (issued === undefined || issued.seq >= decisionSeq) return false;
-    // 発行から判定までの間の失効：この合格証の取り消し、同じ仕事の次の発行（superseded。行ごとの監査ログはない）
-    return !ev.certificateAudits.some(
-      (a) =>
-        a.seq > issued.seq &&
-        a.seq < decisionSeq &&
-        ((a.event_type === "rehearsal.certificate_revoked" && Array.isArray(a.payload.certificateIds) && a.payload.certificateIds.includes(c.id)) ||
-          (a.event_type === "rehearsal.certificate_issued" && a.payload.jobId === c.job_id)),
-    );
-  });
-  return valid ? null : fail("certificate_missing");
+  return null;
 }
 
 /** 照合（純粋な関数。DB は読まない） */
 export function judgeProvenance(i: ProvenanceInput, ev: ProvenanceEvidence): ProvenanceResult {
-  if (!provenanceApplies(i.task)) return { ok: true, checked: false };
   const { intent } = i;
   // P-0
   if (i.task.is_dry_run) return fail("dry_run_intent");
   if (intent.enforced !== true) return fail("not_enforced");
   if (intent.decision !== "allow" && intent.decision !== "approve") return fail("decision_not_executable");
 
-  // ゲストのデモのデータ（判定の記録が何もない承認待ちの Intent）だけの例外（冒頭の「照合しないもの」）。1件でもあれば全部を照合する
-  const noKernelTrace =
-    ev.decisions.length === 0 &&
-    kernelDecisionAudits(ev.taskAudits, intent.id).length === 0 &&
-    proposalAudits(ev.taskAudits, intent.id).length === 0 &&
-    !ev.taskAudits.some((a) => a.event_type === "approval.requested" && a.payload.intentId === intent.id);
-  const guestSeed = noKernelTrace && i.guestSimWrite && intent.decision === "approve";
+  const kernel = judgeKernelEvidence(intent, ev.decisions, ev.taskAudits);
+  if (!kernel.ok) return kernel;
 
-  let kernel: { row: PolicyDecisionRow; decisionSeq: number } | null = null;
-  if (!guestSeed) {
-    const k = judgeKernelEvidence(intent, ev.decisions, ev.taskAudits);
-    if (!k.ok) return k;
-    kernel = k;
-  }
-
-  const history = checkHistory(intent, ev, kernel?.decisionSeq ?? 0);
+  const history = checkHistory(intent, ev, kernel.decisionSeq);
   if (history !== null) return history;
 
-  if (intent.decision === "approve") return checkApproval(intent, ev, kernel?.decisionSeq ?? null) ?? { ok: true, checked: true };
-  // allow の Intent は kernel がある（ゲストの例外は approve だけ）
-  return checkRuleAllow(intent, kernel!.row, kernel!.decisionSeq, ev) ?? { ok: true, checked: true };
+  if (intent.decision === "approve") return checkApproval(intent, ev, kernel.decisionSeq) ?? { ok: true };
+  return checkRuleAllow(kernel.row) ?? { ok: true };
 }
 
 /** 証拠を読んで照合する（prepare のトランザクションの中。読むだけで、行はロックしない） */
 export async function checkProvenance(tx: Tx, ctx: WsCtx, i: ProvenanceInput): Promise<ProvenanceResult> {
-  if (!provenanceApplies(i.task)) return { ok: true, checked: false };
   const decisions = await listKernelDecisionsOfIntent(tx, ctx, i.intent);
   const taskAudits = await listTaskAuditEvents(tx, ctx, i.intent.task_id);
   const killSwitchSeqs = await listKillSwitchEngagedSeqs(tx, ctx);
   const approval = i.intent.decision === "approve" ? await getApprovalOfIntent(tx, ctx, i.intent.id) : null;
-  const allow = i.intent.decision === "allow";
-  const certificates = allow ? await listJobCertificates(tx, ctx, i.intent.job_id) : [];
-  const certificateAudits = allow ? await listCertificateAuditEvents(tx, ctx, i.intent.job_id) : [];
-  return judgeProvenance(i, { decisions, approval, taskAudits, killSwitchSeqs, certificates, certificateAudits });
+  return judgeProvenance(i, { decisions, approval, taskAudits, killSwitchSeqs });
 }

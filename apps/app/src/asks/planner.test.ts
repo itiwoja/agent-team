@@ -2,7 +2,7 @@
 import { ScriptedLlmClient } from "@open-team/llm";
 import { shapeLine } from "@open-team/kernel";
 import { describe, expect, it } from "vitest";
-import { jsonReply } from "../rehearsal/test-helpers.ts";
+import { jsonReply } from "../test-helpers.ts";
 import { AskPlanError, jobHintsOf, planFormation, plannerJsonSchema, plannerSystemPrompt, plannerUserPrompt, positionsFor, type PlannerAgent, type PlannerInput } from "./planner.ts";
 
 const A1 = "11111111-1111-4111-8111-111111111111";

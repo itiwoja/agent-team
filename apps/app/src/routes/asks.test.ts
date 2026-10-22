@@ -1,27 +1,25 @@
-// 依頼の API（routes/asks.ts：API-072〜077 と一覧）の試験：本物に近い世界（Postgres・gateway・sim-world）で、LLM だけ台本。
+// 依頼の API（routes/asks.ts：API-072〜077 と一覧）の試験：本物に近い世界（Postgres・gateway・例の MCP コネクタ）で、LLM だけ台本。
 // 設定プランナーの編成 → 担当の作成・使い回し → 実行 → 回答までを HTTP で通す
 import { issueSession } from "@open-team/db";
-import { insertWorkspacePolicyIfMissing } from "@open-team/db/app";
 import { insertUsageRecord } from "@open-team/db/edge";
 import { useTestDb } from "@open-team/db/testing";
-import { defaultWorkspacePolicy, hashCanonical, type JsonObject } from "@open-team/kernel";
 import { DEFAULT_AGENT_MODEL, LlmError, ScriptedLlmClient, type ScriptedResponder } from "@open-team/llm";
 import { afterEach, describe, expect, it } from "vitest";
 import { AskDetailResponseSchema, AskSummarySchema, ListAsksResponseSchema, type AskDetailResponse, type AskSummary } from "../asks/contract.ts";
-import { T0, startRehearsalWorld, type RehearsalWorld } from "../rehearsal/__fixtures__/world.ts";
-import { jsonReply } from "../rehearsal/test-helpers.ts";
+import { T0, startTestWorld, type TestWorld } from "../__fixtures__/world.ts";
+import { jsonReply } from "../test-helpers.ts";
 import { makeTestApp, send, type TestApp } from "../test-helpers.ts";
 import { startAskRun } from "../asks/run.ts";
 
 const T = useTestDb();
-let world: RehearsalWorld | null = null;
+let world: TestWorld | null = null;
 afterEach(async () => {
   await world?.close();
   world = null;
 });
 
 interface Setup {
-  w: RehearsalWorld;
+  w: TestWorld;
   t: TestApp;
   cookie: string;
   csrf: string;
@@ -63,14 +61,12 @@ function llmOf(s: { planner: unknown[]; plannerCalls: number }, behavior: Record
 }
 
 async function setup(planner: unknown[], behavior: Record<string, "report" | "fail" | "next"> = {}): Promise<Setup> {
-  const { db, url } = T();
-  const w = (world = await startRehearsalWorld(db, url));
-  const policy = defaultWorkspacePolicy("owner");
-  await db.transaction((tx) => insertWorkspacePolicyIfMissing(tx, w.ws.ctx, { policy: policy as unknown as JsonObject, policyHash: hashCanonical(policy), createdBy: null, now: T0 }));
+  const { db } = T();
+  const w = (world = await startTestWorld(db));
   const state = { planner, plannerCalls: 0 };
   const llm = llmOf(state, behavior);
   const t = makeTestApp(db, {
-    deps: { gatewayClient: w.gatewayClient, simClient: w.simClient, llm, clock: ticking() },
+    deps: { gatewayClient: w.gatewayClient, llm, clock: ticking() },
     env: { gemini: { apiKey: undefined, agentModel: DEFAULT_AGENT_MODEL, plannerModel: DEFAULT_AGENT_MODEL, compareModels: [] } },
   });
   const issued = await issueSession(db, { workspaceId: w.ws.workspaceId, userId: w.ws.userId, ipHash: null, userAgent: null, now: T0 });
@@ -243,7 +239,7 @@ describe("POST /asks（API-072）", () => {
 
     // 全体の1日の上限（$15）に達している
     await T().db.transaction((tx) =>
-      insertUsageRecord(tx, s.w.ws.ctx, { taskId: null, agentId: s.w.agent.agentId, askId: null, rehearsalRunId: null, provider: "google", model: "m", phase: "planner", inputTokens: 1, outputTokens: 1, estimatedCostUsd: "15.000000", costUsd: "15.000000", latencyMs: 1, promptHash: "h" }, T0),
+      insertUsageRecord(tx, s.w.ws.ctx, { taskId: null, agentId: s.w.agent.agentId, askId: null, provider: "google", model: "m", phase: "planner", inputTokens: 1, outputTokens: 1, estimatedCostUsd: "15.000000", costUsd: "15.000000", latencyMs: 1, promptHash: "h" }, T0),
     );
     const over = await post(s, "/asks", { text: "お金がない" });
     expect(over.status).toBe(429);

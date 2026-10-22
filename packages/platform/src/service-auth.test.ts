@@ -17,21 +17,20 @@ import {
 const TOKEN = "t".repeat(MIN_SECRET_LENGTH);
 const LOCAL: ServiceAuthConfig = { sharedToken: TOKEN };
 
-const SIM_URL = "http://localhost:8788";
 const GATEWAY_URL = "http://localhost:8787";
 
 const h = (init: Record<string, string>): Headers => new Headers(init);
 
-describe("共有トークン＋x-ot-caller（G-11。apps/sim-world の auth.ts と同じ形）", () => {
+describe("共有トークン＋x-ot-caller（G-11）", () => {
   const auth = createServiceAuth(LOCAL);
 
   it("serviceAuthHeaders は Authorization: Bearer <INTERNAL_SHARED_TOKEN> と x-ot-caller", async () => {
     expect(await auth.serviceAuthHeaders("sa-app", GATEWAY_URL)).toEqual({ authorization: `Bearer ${TOKEN}`, [CALLER_HEADER]: "sa-app" });
-    expect(await auth.serviceAuthHeaders("sa-gateway", SIM_URL)).toEqual({ authorization: `Bearer ${TOKEN}`, [CALLER_HEADER]: "sa-gateway" });
+    expect(await auth.serviceAuthHeaders("sa-gateway", GATEWAY_URL)).toEqual({ authorization: `Bearer ${TOKEN}`, [CALLER_HEADER]: "sa-gateway" });
   });
 
   it("自分で作ったヘッダーは、許す呼び出し元なら通る", async () => {
-    const headers = new Headers(await auth.serviceAuthHeaders("sa-gateway", SIM_URL));
+    const headers = new Headers(await auth.serviceAuthHeaders("sa-gateway", GATEWAY_URL));
     expect(await auth.checkServiceCaller(headers, ["sa-gateway"])).toEqual({ ok: true, caller: "sa-gateway" });
   });
 
@@ -41,13 +40,13 @@ describe("共有トークン＋x-ot-caller（G-11。apps/sim-world の auth.ts �
     ["1文字だけ違うトークン", { authorization: `Bearer ${TOKEN.slice(0, -1)}x`, [CALLER_HEADER]: "sa-app" }, "bad_token"],
     ["Bearer でない（トークンだけ）", { authorization: TOKEN, [CALLER_HEADER]: "sa-app" }, "bad_token"],
     ["呼び出し元の名前なし", { authorization: `Bearer ${TOKEN}` }, "unknown_caller"],
-    ["知らない呼び出し元（sa-sim）", { authorization: `Bearer ${TOKEN}`, [CALLER_HEADER]: "sa-sim" }, "unknown_caller"],
+    ["知らない呼び出し元（sa-unknown）", { authorization: `Bearer ${TOKEN}`, [CALLER_HEADER]: "sa-unknown" }, "unknown_caller"],
   ])("%s → 拒否（%s）", async (_label, headers, reason) => {
     expect(await auth.checkServiceCaller(h(headers), ["sa-app", "sa-gateway"])).toMatchObject({ ok: false, reason });
   });
 
-  it("知っている呼び出し元でも、許す一覧になければ caller_not_allowed（SO-SIM-01 の local 版：sa-app で MCP）", async () => {
-    const headers = new Headers(await auth.serviceAuthHeaders("sa-app", SIM_URL));
+  it("知っている呼び出し元でも、許す一覧になければ caller_not_allowed（sa-app で MCP）", async () => {
+    const headers = new Headers(await auth.serviceAuthHeaders("sa-app", GATEWAY_URL));
     expect(await auth.checkServiceCaller(headers, ["sa-gateway"])).toEqual({ ok: false, reason: "caller_not_allowed", caller: "sa-app" });
     expect(await auth.checkServiceCaller(headers, [])).toMatchObject({ ok: false, reason: "caller_not_allowed" });
   });
@@ -66,15 +65,15 @@ describe("共有トークン＋x-ot-caller（G-11。apps/sim-world の auth.ts �
 
 describe("verifyServiceCaller（Hono のミドルウェア）", () => {
   function makeApp(auth: ServiceAuth) {
-    const mem = memoryLogger({ service: "sim-world" });
+    const mem = memoryLogger({ service: "gateway" });
     const app = new Hono<PlatformEnv>();
     app.use("*", requestContext({ logger: mem.logger }));
     app.onError(errorHandler());
     app.notFound(notFoundHandler());
     app.use("/mcp/*", auth.verifyServiceCaller(["sa-gateway"]));
     app.use("/admin/v1/*", auth.verifyServiceCaller(["sa-app"]));
-    app.post("/mcp/:world/:service", (c) => c.json({ caller: c.var.serviceCaller }));
-    app.post("/admin/v1/demo-store", (c) => c.json({ caller: c.var.serviceCaller }));
+    app.post("/mcp/:server/:tool", (c) => c.json({ caller: c.var.serviceCaller }));
+    app.post("/admin/v1/settings", (c) => c.json({ caller: c.var.serviceCaller }));
     return { app, ...mem };
   }
 
@@ -86,28 +85,28 @@ describe("verifyServiceCaller（Hono のミドルウェア）", () => {
   it("通れば c.var.serviceCaller に呼び出し元（local）", async () => {
     const auth = createServiceAuth(LOCAL);
     const { app } = makeApp(auth);
-    expect((await call(app, "/mcp/shop/supplier", await auth.serviceAuthHeaders("sa-gateway", SIM_URL))).json).toEqual({ caller: "sa-gateway" });
-    expect((await call(app, "/admin/v1/demo-store", await auth.serviceAuthHeaders("sa-app", SIM_URL))).json).toEqual({ caller: "sa-app" });
+    expect((await call(app, "/mcp/example/search", await auth.serviceAuthHeaders("sa-gateway", GATEWAY_URL))).json).toEqual({ caller: "sa-gateway" });
+    expect((await call(app, "/admin/v1/settings", await auth.serviceAuthHeaders("sa-app", GATEWAY_URL))).json).toEqual({ caller: "sa-app" });
   });
 
   it("I-20 拒否は 403 FORBIDDEN の共通の形で、理由は応答に出さずログ internal_auth.denied にだけ（トークンは出さない）", async () => {
     const auth = createServiceAuth(LOCAL);
     const { app, records, lines } = makeApp(auth);
-    const r = await call(app, "/admin/v1/demo-store", { authorization: "Bearer secret-wrong-token-0123", [CALLER_HEADER]: "sa-app" });
+    const r = await call(app, "/admin/v1/settings", { authorization: "Bearer secret-wrong-token-0123", [CALLER_HEADER]: "sa-app" });
     expect(r.status).toBe(403);
     expect(r.json.error).toEqual({ code: "FORBIDDEN", message: "この呼び出し元は使えません", requestId: r.requestId });
     expect(JSON.stringify(r.json)).not.toContain("bad_token");
     const denied = records.find((x) => x.event === "internal_auth.denied");
-    expect(denied).toMatchObject({ severity: "WARNING", reason: "bad_token", path: "/admin/v1/demo-store", method: "POST", requestId: r.requestId });
+    expect(denied).toMatchObject({ severity: "WARNING", reason: "bad_token", path: "/admin/v1/settings", method: "POST", requestId: r.requestId });
     expect(lines.join("\n")).not.toContain("secret-wrong-token-0123");
     expect(lines.join("\n")).not.toContain(TOKEN);
   });
 
-  it("SO-SIM-01・SO-SIM-03 呼び出し元を取り違えると 403（local：sa-app で MCP、sa-gateway で管理 API）", async () => {
+  it("呼び出し元を取り違えると 403（local：sa-app で MCP、sa-gateway で管理 API）", async () => {
     const auth = createServiceAuth(LOCAL);
     const { app, records } = makeApp(auth);
-    expect((await call(app, "/mcp/shop/supplier", await auth.serviceAuthHeaders("sa-app", SIM_URL))).status).toBe(403);
-    expect((await call(app, "/admin/v1/demo-store", await auth.serviceAuthHeaders("sa-gateway", SIM_URL))).status).toBe(403);
+    expect((await call(app, "/mcp/example/search", await auth.serviceAuthHeaders("sa-app", GATEWAY_URL))).status).toBe(403);
+    expect((await call(app, "/admin/v1/settings", await auth.serviceAuthHeaders("sa-gateway", GATEWAY_URL))).status).toBe(403);
     expect(records.filter((x) => x.event === "internal_auth.denied").map((x) => [x.reason, x.caller])).toEqual([
       ["caller_not_allowed", "sa-app"],
       ["caller_not_allowed", "sa-gateway"],

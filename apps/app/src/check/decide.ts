@@ -1,8 +1,7 @@
 // API-019：承認の決定（approve / reject / remember）。ADR-005：表示した intentHash が今の Intent と違えば 409 INTENT_CHANGED。
 // トランザクションの順（M-21）：ワークスペースの行 → タスク → 承認 → Intent。Kill Switch 発動中は承認も却下も 423。
-// 1つのトランザクションで決定・Intent の状態・ルールの追加・合格証の失効・監査ログ approval.decided・SSE の事象を書き、
+// 1つのトランザクションで決定・Intent の状態・ルールの追加・監査ログ approval.decided・SSE の事象を書き、
 // 外部（gateway の実行）はコミットのあとに呼ぶ（G-14）。実行の失敗は承認を取り消さない（Intent は approved のまま。tick が拾い直す）
-// 却下（user_reject）は同じトランザクションで回帰の試験にする（BR-80。失敗しても却下は成立：SAVEPOINT）
 
 import { appendAuditLog, lockWorkspace, type EffectivePolicies, type SessionCtx, type Tx, type Uuid } from "@open-team/db";
 import { getLatestWorkspacePolicy, listConnectors, listConnectorTools } from "@open-team/db/app";
@@ -19,7 +18,6 @@ import {
 } from "@open-team/db/check";
 import { lockTask as lockEdgeTask } from "@open-team/db/edge";
 import { recomputeTaskStatus } from "@open-team/db/gateway";
-import { revokeJobCertificate } from "@open-team/db/rehearsal";
 import { GatewayClientError } from "@open-team/gateway-client";
 import {
   CEILINGS_VERSION,
@@ -39,7 +37,6 @@ import { AppError } from "@open-team/platform";
 import type { AppDeps } from "../deps.ts";
 import { advanceAsk } from "../asks/run.ts";
 import { catalogOf } from "../owner-setup.ts";
-import { recordUserRejection, incidentReportLine } from "../rehearsal/incident-flow.ts";
 import { buildApprovalView, fixedHashOf, intentWasTainted, newRuleIdFrom, planRemember } from "./approval-view.ts";
 import { calendarLinkOf } from "./calendar-link.ts";
 import type { DecisionBody, DecisionResponse, ExecutionView, RuleView } from "./contract.ts";
@@ -51,7 +48,7 @@ type Deps = Pick<AppDeps, "db" | "clock" | "ids" | "log" | "gatewayClient" | "en
 const newRuleId = (deps: Pick<AppDeps, "ids">): string => newRuleIdFrom(deps.ids.newId());
 
 type TxOutcome =
-  | { kind: "decided"; decision: "approve" | "reject"; intentId: Uuid; askId: Uuid | null; rule: Rule | null; incidentLine: string | null }
+  | { kind: "decided"; decision: "approve" | "reject"; intentId: Uuid; askId: Uuid | null; rule: Rule | null }
   /** 期限切れ・ツールの変化：状態を書いてコミットしてから 409 を返す */
   | { kind: "stale"; error: AppError };
 
@@ -105,11 +102,10 @@ export async function decideApproval(deps: Deps, s: SessionCtx, approvalId: Uuid
       await decideIntentRow(tx, s, intent.id, "rejected", now);
       await audit(tx, s, "reject", { approval, intentId: intent.id, taskId: task.id, intentHash: intent.intent_hash, comment, rule: null }, now);
       const change = await recomputeTaskStatus(tx, s, task.id, now);
-      const incident = await recordUserRejection(tx, s, { taskId: task.id, intentId: intent.id }, now, deps.log);
       if (change?.terminal) for (const hook of deps.hooks.taskSettled ?? []) await hook(tx, s, { taskId: task.id, status: change.to, now });
       await publishCheckRemove(tx, s, `approval:${approvalId}`, now);
       await publishCheckCounts(tx, deps, s, now);
-      return { kind: "decided", decision: "reject", intentId: intent.id, askId: task.ask_id, rule: null, incidentLine: incidentReportLine(incident) };
+      return { kind: "decided", decision: "reject", intentId: intent.id, askId: task.ask_id, rule: null };
     }
 
     // approve（[以後も許可] を含む）
@@ -121,7 +117,7 @@ export async function decideApproval(deps: Deps, s: SessionCtx, approvalId: Uuid
     await recomputeTaskStatus(tx, s, task.id, now);
     await publishCheckRemove(tx, s, `approval:${approvalId}`, now);
     await publishCheckCounts(tx, deps, s, now);
-    return { kind: "decided", decision: "approve", intentId: intent.id, askId: task.ask_id, rule, incidentLine: null };
+    return { kind: "decided", decision: "approve", intentId: intent.id, askId: task.ask_id, rule };
   }, { retryOnce: true });
 
   if (out.kind === "stale") throw out.error;
@@ -143,7 +139,6 @@ export async function decideApproval(deps: Deps, s: SessionCtx, approvalId: Uuid
     rule: out.rule === null ? null : ruleView(out.rule),
     // 実行できたときだけ、保存された結果から「カレンダーで開く」のリンクを付ける（実行のあとの Intent を読み直した結果）
     execution: withCalendarLink(execution, after.intent.action, after.intent.result),
-    incidentLine: out.incidentLine,
   };
 }
 
@@ -190,7 +185,7 @@ async function audit(
   );
 }
 
-/** [以後も許可]：出せる条件・固定される値の確認・ルールの追加（定義への widen）・合格証の失効。外れたら 422 / 409 */
+/** [以後も許可]：出せる条件・固定される値の確認・ルールの追加（定義への widen）。外れたら 422 / 409 */
 async function rememberRule(
   tx: Tx,
   deps: Deps,
@@ -263,8 +258,6 @@ async function rememberRule(
     now,
   });
   if (applied === null) throw new AppError("CHANGE_NOT_PENDING", "設定が別の変更で更新されました。もう一度確認してください");
-  // 広げる変更：その仕事の合格証を切る（FR-067・BR-81）。再リハーサルは tick が拾う
-  await revokeJobCertificate(tx, s, b.task.job_id, "widen", now);
   return rule;
 }
 

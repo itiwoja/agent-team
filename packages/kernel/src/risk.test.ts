@@ -1,7 +1,6 @@
 import fc from "fast-check";
 import { describe, expect, it } from "vitest";
 import {
-  CERTIFICATE_MISSING_NOTE,
   OPEN_ROWS_FIRST_THRESHOLD,
   RISK_REASON_CODES,
   buildConfirmPresentation,
@@ -217,7 +216,7 @@ describe("guardReasonLine（UI §4.6.3-3、ask-and-check.md:128）", () => {
 
 describe("buildConfirmPresentation（BR-70・D-59、UI §4.6.3、IA §3.11）", () => {
   it("C19-16：approval_required・汚染なし・初めてでない → 閉じたまま。理由の行も汚染の行もない", () => {
-    expect(present()).toEqual({ open: false, reasonLines: [], secondLines: [], taintLine: null, certificateNote: null });
+    expect(present()).toEqual({ open: false, reasonLines: [], secondLines: [], taintLine: null });
   });
 
   it("C19-06・U-8：guard_exceeded は開いた状態、1行目の上に上限の理由（単位は manifest の units）", () => {
@@ -284,20 +283,14 @@ describe("buildConfirmPresentation（BR-70・D-59、UI §4.6.3、IA §3.11）", 
     expect(p.taintLine).toBe("受信箱係が読んだメールのあとの送信です");
   });
 
-  it("C19-15：certificate_missing だけ → 閉じたまま・理由の行なし。開いた中の文を返す", () => {
-    const p = present({ reasonCode: "certificate_missing" });
-    expect(p).toEqual({ open: false, reasonLines: [], secondLines: [], taintLine: null, certificateNote: CERTIFICATE_MISSING_NOTE });
-    expect(CERTIFICATE_MISSING_NOTE).toBe("安全チェックがまだなので確認に回しています");
-  });
-
   it("汚染されていない taint の値（EMPTY_TAINT）は汚染の行を出さない", () => {
     expect(present({ taint: EMPTY_TAINT }).taintLine).toBeNull();
   });
 
-  it("性質：open は理由の行があるときだけ。汚染・certificate_missing だけでは開かない（毎回開くと読まずに押す：D-59）", () => {
+  it("性質：open は理由の行があるときだけ。汚染だけでは開かない（毎回開くと読まずに押す：D-59）", () => {
     fc.assert(
       fc.property(
-        fc.constantFrom("approval_required", "guard_exceeded", "unknown_outcome_pending", "certificate_missing", null),
+        fc.constantFrom("approval_required", "guard_exceeded", "unknown_outcome_pending", null),
         fc.boolean(),
         fc.boolean(),
         fc.constantFrom(null, mailRead, handoff),

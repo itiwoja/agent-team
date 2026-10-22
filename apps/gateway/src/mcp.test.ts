@@ -1,38 +1,39 @@
 // MCP のクライアント（SDK の Streamable HTTP）と失敗の分け方（IA §3.12 の McpCallOutcome・§8-12、BR-59・D-18、MT D-11・BD-12）
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { randomUUID } from "node:crypto";
-import { SHOP_TOOL_DESCRIPTIONS } from "@open-team/sim-core";
 import { isPresendNetworkError, networkCodeOf, openMcpSession, type McpTarget } from "./mcp.ts";
-import { simHeadersOf } from "./context.ts";
 import {
   BEANS_20,
-  SIM_TOKEN,
+  FAKE_CONNECTORS,
   connectionRefused,
   connectionReset,
   hangUntilAborted,
   recordingFetch,
   rpcResponse,
-  startSimWorld,
+  startFakeMcp,
+  toolListOverrides,
+  type FakeMcpHandle,
   type FetchHook,
   type SentRequest,
-  type SimWorldHandle,
 } from "./test-helpers.ts";
 
-let sim: SimWorldHandle;
+const TOKEN = "fake-mcp-shared-token-for-gateway-tests-0123";
+let fake: FakeMcpHandle;
 beforeAll(async () => {
-  sim = await startSimWorld();
+  fake = await startFakeMcp(toolListOverrides(), { token: TOKEN });
 });
 afterAll(async () => {
-  await sim.close();
+  await fake.close();
 });
 
-const auth = { authorization: `Bearer ${SIM_TOKEN}`, "x-ot-caller": "sa-gateway" };
+const auth = { authorization: `Bearer ${TOKEN}`, "x-ot-caller": "sa-gateway" };
 
-async function demoTarget(service: string): Promise<{ target: McpTarget; workspaceId: string; demoId: string }> {
-  const workspaceId = randomUUID();
-  const { id } = await sim.createDemoStore(workspaceId);
-  const headers = { ...auth, ...simHeadersOf({ workspaceId, rehearsalRunId: null, simExecutionId: null, taskId: null, intentId: null, shadow: false }) };
-  return { target: { url: `${sim.url}/mcp/shop/${service}`, headers }, workspaceId, demoId: id };
+function targetOf(service: string): McpTarget {
+  return { url: `${fake.url}/mcp/${service}`, headers: { ...auth } };
+}
+
+/** その試験の間に偽のサーバーが受けた place_order の数 */
+function ordersSince(before: number): number {
+  return fake.calls.slice(before).filter((c) => c.tool === "place_order").length;
 }
 
 function hooked(hook: FetchHook): { fetch: typeof fetch; sent: SentRequest[] } {
@@ -40,59 +41,50 @@ function hooked(hook: FetchHook): { fetch: typeof fetch; sent: SentRequest[] } {
   return { fetch: recordingFetch(sent, hook), sent };
 }
 
-describe("openMcpSession（本物の sim-world）", () => {
-  it("initialize → tools/list → tools/call。注釈は無し、説明は manifest の固定の文", async () => {
-    const { target, workspaceId, demoId } = await demoTarget("supplier");
+describe("openMcpSession（本物の HTTP の偽のサーバー）", () => {
+  it("initialize → tools/list → tools/call。注釈は無し、説明はサーバーの文", async () => {
+    const target = targetOf("supplier");
+    const before = fake.calls.length;
     const { fetch: f, sent } = hooked(() => null);
     const opened = await openMcpSession(target, { fetch: f });
     if (!opened.ok) throw new Error(JSON.stringify(opened.failure));
     const listed = await opened.session.listTools();
     expect(listed.ok && listed.tools.map((t) => t.name)).toEqual(["list_products", "place_order"]);
     if (listed.ok) {
-      expect(listed.tools[1]!.description).toBe(SHOP_TOOL_DESCRIPTIONS["supplier.place_order"]);
+      expect(listed.tools[1]!.description).toBe(FAKE_CONNECTORS.find((c) => c.slug === "supplier")!.tools[1]!.description);
       expect(listed.tools[1]!.annotations).toBeNull();
     }
     const out = await opened.session.callTool("place_order", BEANS_20);
     expect(out.kind).toBe("ok");
     await opened.session.close();
-    expect((await sim.getState(workspaceId, demoId)).state.orders).toHaveLength(1);
-    // 頭：呼び出し元の証明と X-OT-*（M-43）が tools/call に付いている
+    expect(ordersSince(before)).toBe(1);
+    // 頭：呼び出し元の証明が tools/call に付いている
     const call = sent.find((s) => s.rpc === "tools/call")!;
-    expect(call.headers).toMatchObject({ authorization: `Bearer ${SIM_TOKEN}`, "x-ot-caller": "sa-gateway", "x-ot-workspace-id": workspaceId, "x-ot-shadow": "false" });
-    expect(call.headers["x-ot-rehearsal-run-id"]).toBeUndefined();
+    expect(call.headers).toMatchObject({ authorization: `Bearer ${TOKEN}`, "x-ot-caller": "sa-gateway" });
   });
 
   it("isError（引数の誤り）は is_error（応答が返った）", async () => {
-    const { target } = await demoTarget("supplier");
-    const opened = await openMcpSession(target);
+    const opened = await openMcpSession(targetOf("supplier"));
     if (!opened.ok) throw new Error("つながらない");
     const out = await opened.session.callTool("place_order", { supplier_id: "supplier-01", items: [], extra: 1 });
     expect(out.kind).toBe("is_error");
     await opened.session.close();
   });
 
-  it("SW-05 X-OT-Workspace-Id のない tools/list は拒否される（JSON-RPC のエラー → rpc_error）", async () => {
-    const opened = await openMcpSession({ url: `${sim.url}/mcp/shop/store`, headers: auth });
-    if (!opened.ok) throw new Error("initialize は頭なしで通る");
-    const listed = await opened.session.listTools();
-    expect(listed).toEqual({ ok: false, failure: { kind: "rpc_error", code: expect.any(Number) } });
-    await opened.session.close();
-  });
-
   it("呼び出し元の証明がない → initialize が 403（auth）", async () => {
-    const opened = await openMcpSession({ url: `${sim.url}/mcp/shop/store`, headers: {} });
+    const opened = await openMcpSession({ url: `${fake.url}/mcp/store`, headers: {} });
     expect(opened).toEqual({ ok: false, failure: { kind: "auth", status: 403 } });
   });
 
   it("つなげない（ECONNREFUSED）→ network・送信前", async () => {
-    const { target } = await demoTarget("store");
+    const target = targetOf("store");
     const { fetch: f } = hooked(() => connectionRefused());
     const opened = await openMcpSession(target, { fetch: f });
     expect(opened).toEqual({ ok: false, failure: { kind: "network", presend: true, code: "ECONNREFUSED" } });
   });
 
   it("BD-12 MCP サーバーが 302 で別のホストに飛ばす → 追わない（http 302。飛び先には送らない）", async () => {
-    const { target } = await demoTarget("store");
+    const target = targetOf("store");
     const { fetch: f, sent } = hooked((req) =>
       req.rpc === "initialize" ? new Response(null, { status: 302, headers: { location: "https://evil.example/mcp" } }) : null,
     );
@@ -104,20 +96,19 @@ describe("openMcpSession（本物の sim-world）", () => {
 
 describe("tools/call の結果の分け方（IA §3.12 の表・§8-12）", () => {
   async function callWith(hook: FetchHook, timeoutMs?: number) {
-    const { target, workspaceId, demoId } = await demoTarget("supplier");
+    const before = fake.calls.length;
     const { fetch: f, sent } = hooked((req, real, init) => (req.rpc === "tools/call" ? hook(req, real, init) : null));
-    const opened = await openMcpSession(target, { fetch: f });
+    const opened = await openMcpSession(targetOf("supplier"), { fetch: f });
     if (!opened.ok) throw new Error("つながらない");
     const out = await opened.session.callTool("place_order", BEANS_20, timeoutMs);
     await opened.session.close();
-    const orders = (await sim.getState(workspaceId, demoId)).state.orders as unknown[];
-    return { out, sent, orders };
+    return { out, sent, orders: ordersSince(before) };
   }
 
   it("名前解決・接続拒否（ECONNREFUSED）→ presend_failure（送っていない）", async () => {
     const { out, orders } = await callWith(() => connectionRefused());
     expect(out).toEqual({ kind: "presend_failure", detail: "network_ECONNREFUSED" });
-    expect(orders).toHaveLength(0);
+    expect(orders).toBe(0);
   });
   it("送ったあとに接続が切れた（ECONNRESET）→ postsend_unknown（注文は反映済み。再試行しない）", async () => {
     const { out, orders } = await callWith(async (_req, real) => {
@@ -125,7 +116,7 @@ describe("tools/call の結果の分け方（IA §3.12 の表・§8-12）", () =
       throw connectionReset();
     });
     expect(out).toEqual({ kind: "postsend_unknown", detail: "disconnect_ECONNRESET" });
-    expect(orders).toHaveLength(1);
+    expect(orders).toBe(1);
   });
   it("G-11 応答が返らない → タイムアウトで postsend_unknown（timeout）", async () => {
     const { out } = await callWith((_req, _real, init) => hangUntilAborted(init), 200);

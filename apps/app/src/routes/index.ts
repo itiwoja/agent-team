@@ -13,11 +13,7 @@ import { connectGithubRoutes } from "./connect-github.ts";
 import { askRoutes } from "./asks.ts";
 import { auditRoutes } from "./audit.ts";
 import { checkRoutes } from "./check.ts";
-import { guestRoutes } from "./guest.ts";
 import { internalRoutes } from "./internal.ts";
-import { rehearsalRoutes } from "./rehearsal.ts";
-import { rehearsalTightenRoutes } from "./rehearsal-tighten.ts";
-import { userCaseRoutes } from "./rehearsal-user-cases.ts";
 import type { ApiRouter } from "./router.ts";
 import { sessionRoutes } from "./session.ts";
 import { streamRoutes } from "./stream.ts";
@@ -28,7 +24,7 @@ import { workspaceRoutes } from "./workspace.ts";
 export type ApiRouteModule = (r: ApiRouter, deps: AppDeps) => void;
 export type InternalRouteModule = (r: Hono<AppHonoEnv>, deps: AppDeps) => void;
 
-export const API_ROUTE_MODULES: readonly ApiRouteModule[] = [sessionRoutes, workspaceRoutes, auditRoutes, streamRoutes, rehearsalRoutes, userCaseRoutes, rehearsalTightenRoutes, approvalRoutes, checkRoutes, taskRoutes, askRoutes, agentRoutes, guestRoutes, connectRoutes, connectGithubRoutes, taskFilesRoutes, packRoutes];
+export const API_ROUTE_MODULES: readonly ApiRouteModule[] = [sessionRoutes, workspaceRoutes, auditRoutes, streamRoutes, approvalRoutes, checkRoutes, taskRoutes, askRoutes, agentRoutes, connectRoutes, connectGithubRoutes, taskFilesRoutes, packRoutes];
 export const INTERNAL_ROUTE_MODULES: readonly InternalRouteModule[] = [internalRoutes];
 
 export { apiRouter, type ApiHandler, type ApiRouter, type RouteAuth, type RouteOptions } from "./router.ts";

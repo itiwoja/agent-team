@@ -1,6 +1,6 @@
 // MCP の結果を文字にして、秘密情報をマスクし、64KB で切る（A-86、MT §3.10 の3・§3.12.5 の8・§3.12.6 の7）。
 // 読み取りの応答（EP-49 の content）と、書き込みの result（action_intents.result）の両方で同じ関数を使う。
-// マスクは platform の maskSecrets（既知の値＋決まった形）。sim-world のカナリア（OT-CANARY-…）はわざと当てない（漏えいの試験を壊さない）
+// マスクは platform の maskSecrets（既知の値＋決まった形）
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { canonicalJson } from "@open-team/kernel";
@@ -17,7 +17,7 @@ export const OMITTED_AUDIO = "（音声は省略）";
 /**
  * 結果の content[] を1つの文字にする（MT §3.10 の3）：text はそのまま、image・audio は省略の印、resource は文字のものだけ本文、
  * resource_link は本文がないので入れない。文字の部分が1つもなく structuredContent があれば、その正規形 JSON
- * （sim-world は text と structuredContent に同じ値を入れるので、両方を入れると二重になる）。部分は改行でつなぐ
+ * （text と structuredContent に同じ値を入れるサーバーがあり、両方を入れると二重になる）。部分は改行でつなぐ
  */
 export function toolResultText(result: Pick<CallToolResult, "content" | "structuredContent">): string {
   const parts: string[] = [];

@@ -39,8 +39,6 @@ const TABLE: Record<number, string[]> = {
     "ASK_NOT_WAITING",
     "ASK_ALREADY_FINISHED",
     "CHECK_ITEM_NOT_CHECKABLE",
-    "REHEARSAL_ALREADY_RUNNING",
-    "REHEARSAL_NOT_RUNNING",
     "PROPOSAL_NOT_PENDING",
     "CHANGE_NOT_PENDING",
     "TASK_NOT_RUNNABLE",
@@ -50,12 +48,12 @@ const TABLE: Record<number, string[]> = {
   ],
   413: ["PAYLOAD_TOO_LARGE"],
   415: ["UNSUPPORTED_MEDIA_TYPE"],
-  422: ["RULE_NOT_ALLOWED", "NOT_IN_CATALOG", "PROPOSAL_NOT_NARROW", "CONNECTOR_NOT_ALLOWED", "AGENT_SCHEMA_INVALID", "AGENT_EXCEEDS_POLICY", "AGENT_LIMIT_REACHED"],
+  422: ["RULE_NOT_ALLOWED", "NOT_IN_CATALOG", "PROPOSAL_NOT_NARROW", "AGENT_SCHEMA_INVALID", "AGENT_EXCEEDS_POLICY", "AGENT_LIMIT_REACHED"],
   423: ["KILL_SWITCH_ENGAGED"],
-  429: ["RATE_LIMITED", "GUEST_LIMIT_REACHED", "DAILY_BUDGET_EXCEEDED", "REHEARSAL_BUDGET_EXCEEDED", "USER_CASE_DAILY_LIMIT"],
+  429: ["RATE_LIMITED", "DAILY_BUDGET_EXCEEDED", "USER_CASE_DAILY_LIMIT"],
   500: ["INTERNAL_ERROR"],
   502: ["LLM_UPSTREAM_ERROR"],
-  503: ["SETUP_REQUIRED", "SIM_WORLD_UNAVAILABLE"],
+  503: ["SETUP_REQUIRED"],
 };
 
 describe("エラーコード（cross-check §4.4）", () => {
@@ -70,7 +68,6 @@ describe("エラーコード（cross-check §4.4）", () => {
       "WRONG_TOKEN",
       "BAD_ORIGIN",
       "BAD_CONTENT_TYPE",
-      "REHEARSAL_BUSY",
       "CASE_ALREADY_REMOVED",
       "GUEST_CAPACITY",
       "GUEST_IP_LIMIT",
@@ -125,12 +122,12 @@ describe("Zod の検証 → VALIDATION_ERROR（AS §3.0 の 10）", () => {
     items: z.array(z.strictObject({ sku: z.string(), quantity: z.number().int().positive() })),
   });
 
-  it("BR-67① 知らないキー（shadow・rehearsalRunId）はキーごとに1件の details", () => {
-    const r = Body.safeParse({ title: "x", items: [], shadow: true, rehearsalRunId: "r" });
+  it("知らないキー（ownerId・role）はキーごとに1件の details", () => {
+    const r = Body.safeParse({ title: "x", items: [], ownerId: "u", role: "owner" });
     expect(r.success).toBe(false);
     expect(zodIssuesToDetails(r.error!.issues)).toEqual([
-      { field: "shadow", reason: "unrecognized_key" },
-      { field: "rehearsalRunId", reason: "unrecognized_key" },
+      { field: "ownerId", reason: "unrecognized_key" },
+      { field: "role", reason: "unrecognized_key" },
     ]);
   });
 
@@ -150,12 +147,12 @@ describe("Zod の検証 → VALIDATION_ERROR（AS §3.0 の 10）", () => {
   it("parseInput は通れば値、外れれば AppError(VALIDATION_ERROR)", () => {
     expect(parseInput(Body, { title: "t", items: [] })).toEqual({ title: "t", items: [] });
     try {
-      parseInput(Body, { title: "t", items: [], shadow: true });
+      parseInput(Body, { title: "t", items: [], ownerId: "u" });
       expect.unreachable();
     } catch (e) {
       expect(e).toBeInstanceOf(AppError);
       expect((e as AppError).status).toBe(400);
-      expect((e as AppError).details).toEqual([{ field: "shadow", reason: "unrecognized_key" }]);
+      expect((e as AppError).details).toEqual([{ field: "ownerId", reason: "unrecognized_key" }]);
     }
   });
 
@@ -292,16 +289,16 @@ describe("Hono の onError・notFound（errorHandler・notFoundHandler）", () =
   });
 
   it("mapError で apps の独自の例外を AppError に直せる。requestContext がなくても requestId を作る", async () => {
-    class SimDown extends Error {}
+    class NotReady extends Error {}
     const app = new Hono();
-    app.onError(errorHandler({ mapError: (e) => (e instanceof SimDown ? new AppError("SIM_WORLD_UNAVAILABLE") : undefined) }));
+    app.onError(errorHandler({ mapError: (e) => (e instanceof NotReady ? new AppError("SETUP_REQUIRED") : undefined) }));
     app.get("/", () => {
-      throw new SimDown("x");
+      throw new NotReady("x");
     });
     const res = await app.request("/");
     expect(res.status).toBe(503);
     const b = await body(res);
-    expect(b.error.code).toBe("SIM_WORLD_UNAVAILABLE");
+    expect(b.error.code).toBe("SETUP_REQUIRED");
     expect(b.error.requestId).toMatch(/^req_/);
     expect(res.headers.get("x-request-id")).toBe(b.error.requestId);
   });

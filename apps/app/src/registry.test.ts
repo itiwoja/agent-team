@@ -12,12 +12,12 @@ describe("RunningTaskRegistry", () => {
     const a2 = new AbortController();
     const b1 = new AbortController();
     r.register("t-2", WS_A, a2);
-    r.register("t-1", WS_A.toUpperCase(), a1, "rehearsal_run");
+    r.register("t-1", WS_A.toUpperCase(), a1, "ask_generate");
     r.register("t-3", WS_B, b1);
     expect(r.abortWorkspace(WS_A, "kill_switch")).toEqual(["t-1", "t-2"]);
     expect(a1.signal.aborted && a2.signal.aborted).toBe(true);
     expect(b1.signal.aborted).toBe(false);
-    expect(r.get("t-1")).toMatchObject({ stopCause: "kill_switch", stoppedAt: new Date("2026-10-14T00:00:00.000Z"), kind: "rehearsal_run" });
+    expect(r.get("t-1")).toMatchObject({ stopCause: "kill_switch", stoppedAt: new Date("2026-10-14T00:00:00.000Z"), kind: "ask_generate" });
     // 中断しても登録は残る（消すのは走らせた側）。2回目は返さない
     expect(r.size).toBe(3);
     expect(r.abortWorkspace(WS_A, "kill_switch")).toEqual([]);

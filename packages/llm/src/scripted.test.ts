@@ -57,7 +57,7 @@ describe("ScriptedLlmClient（試験・CI・オフラインのデモ用の決定
     const client = new ScriptedLlmClient([
       async () => ({ parts: [{ type: "text", text: "非同期" }] }),
       () => {
-        throw new LlmError("模擬の 503", 503, true);
+        throw new LlmError("試験の 503", 503, true);
       },
     ]);
     expect((await client.generate(request())).parts).toEqual([{ type: "text", text: "非同期" }]);

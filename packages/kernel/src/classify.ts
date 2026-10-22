@@ -1,20 +1,18 @@
 // classify()（FR-036。KC §3.8）：エージェントの定義の変更を narrow / neutral / widen に分け、widen の項目の一覧を返す（ADR-027）。
 // before・after を同じ ctx（同じワークスペースのポリシー・Hard Ceiling）で compose() し、実効の値どうしを項目ごとに比べる（governance.md:110）。
 // 「許す範囲」が同じ → 項目なし、後 ⊂ 前 → narrow、一部でも広がる・比べられない → widen。全体は最も広い分類（項目がなければ neutral）。
-// 締める提案（FR-045）の検証 checkTighteningProposal もここに置く。純粋関数（I/O・時刻・乱数を使わない）
+// 純粋関数（I/O・時刻・乱数を使わない）
 
 import { argRoleAt, valuesEqualForMatch } from "./args.ts";
 import { canonicalJson } from "./canonical.ts";
-import { composeAll, withCandidateRules } from "./compose.ts";
-import type { AgentBoundary, CandidateRule, ComposeAllResult, PolicyViolation } from "./compose.ts";
-import { recheckIntent } from "./decide.ts";
+import { composeAll } from "./compose.ts";
+import type { AgentBoundary, ComposeAllResult, PolicyViolation } from "./compose.ts";
 import {
   AUTONOMY_STRICTNESS,
   normalizeAgentDefinition,
   parseCronSchedule,
   parseMcpAction,
   parseWatchIntervalMinutes,
-  validateAgentDefinition,
 } from "./policy.ts";
 import type {
   AgentDefinition,
@@ -22,7 +20,6 @@ import type {
   AgentJob,
   Ceilings,
   ConnectorCatalog,
-  DefinitionIssue,
   JobDeliver,
   TemplateName,
   TemplateSpec,
@@ -30,7 +27,7 @@ import type {
 } from "./policy.ts";
 import { findMatchingRule, ruleValidity } from "./rules.ts";
 import { OPERATION_TYPES } from "./types.ts";
-import type { CatalogToolName, EffectivePolicy, EffectiveRule, Hex64, Json, JsonObject, MergedGuard, Subject, ToolInfo } from "./types.ts";
+import type { CatalogToolName, EffectivePolicy, EffectiveRule, Json, JsonObject, MergedGuard, ToolInfo } from "./types.ts";
 
 export const CHANGE_CLASSES = ["narrow", "neutral", "widen"] as const;
 export type ChangeClass = (typeof CHANGE_CLASSES)[number];
@@ -95,7 +92,7 @@ export interface ChangeItem {
    * 'jobs[reorder].guards[mcp.supplier.place_order|items[].quantity]'
    */
   path: string;
-  /** 仕事の項目だけ。合格証を切る範囲に使う（jobId がなければエージェントの全仕事：KC §8 #36） */
+  /** 仕事の項目だけ（jobId がなければエージェントの全仕事：KC §8 #36） */
   jobId?: string;
   before?: Json;
   after?: Json;
@@ -307,7 +304,7 @@ function sortedUnion<T>(a: Map<string, T>, b: Map<string, T>): string[] {
 /**
  * 変更の分類（FR-036）。before・after は保存されている形のままでよい（入口で正規化する）。
  * 呼び出し側：narrow・neutral はすぐ反映、widen は確認カード。violations が空でなければ反映しない。
- * 反映した変更が widen なら合格証を切る（BR-81）。外部の内容に影響されたタスクからの変更案は分類に関係なく確認カード（BR-51：classify の外）
+ * 外部の内容に影響されたタスクからの変更案は分類に関係なく確認カード（BR-51：classify の外）
  */
 export function classify(input: ClassifyInput): ClassifyResult {
   const { ctx } = input;
@@ -613,110 +610,4 @@ export function classify(input: ClassifyInput): ClassifyResult {
     runsWarning,
     violations: A.violations,
   };
-}
-
-// ---- 締める提案（FR-045）の検証（SW §4.4.6 手順3。KC §6.9） ----
-
-/** すり抜けた書き込み（記録済みの Intent から作った判定の対象） */
-export interface SlippedWrite {
-  jobId: string;
-  /** kind: 'tool_call'・actionType: 'mcp_call'・tool つき（M-14） */
-  subject: Subject;
-  /** 同じ走行の unknown_outcome の destinationKey（なければ []） */
-  unknownOutcomeKeys?: readonly Hex64[];
-}
-
-export interface TighteningCheckInput {
-  /** いまの定義 */
-  before: AgentDefinitionInput;
-  /** 案（JSON Patch）を当てた定義。スキーマから確かめる */
-  after: unknown;
-  ctx: ClassifyContext;
-  /** 案を当てた実効ポリシーで判定し直す書き込み。1つでも allow のままなら塞がらない案 */
-  slipped?: readonly SlippedWrite[];
-  /** リハーサルで試した候補のルール（G-03）。判定し直すときに実効ポリシーへ足す */
-  candidateRules?: readonly CandidateRule[];
-}
-
-export type TighteningRejectReason = "schema_invalid" | "exceeds_policy" | "adds_rule" | "changes_rule_record" | "not_narrow" | "not_blocking";
-
-export type TighteningCheck =
-  | { ok: true; result: ClassifyResult; definition: AgentDefinition }
-  | { ok: false; reason: "schema_invalid"; issues: DefinitionIssue[] }
-  | { ok: false; reason: "exceeds_policy" | "adds_rule" | "not_narrow"; result: ClassifyResult }
-  | { ok: false; reason: "changes_rule_record"; result: ClassifyResult; changes: RuleRecordChange[] }
-  | { ok: false; reason: "not_blocking"; result: ClassifyResult; stillAllowed: number[] };
-
-/** 判定に効くルールの項目（実効ポリシーに入るもの）。これ以外はすべて記録（SG-09） */
-const RULE_EFFECTIVE_KEYS: ReadonlySet<string> = new Set(["id", "action", "match", "free", "tool_hash"]);
-
-/** 既存のルールの記録の項目の違い（SG-09）。field は記録の項目の名前（added_by・added_at・source_intent_id・created_while_tainted・labels など） */
-export interface RuleRecordChange {
-  ruleId: string;
-  field: string;
-}
-
-/**
- * 同じ id のルールについて、記録の項目（判定に効く action・match・free・tool_hash 以外のすべて）が before と after で違うものを返す（SG-09）。
- * 不変条件：ルールの記録は作るとき（承認カードの [以後も許可]：BR-57）以外は変えられない。記録は classify に出ない（実効ポリシーに入らない）ので、
- * 定義の変更を受ける経路はこれで別に止める。ルールを丸ごと消す・新しく足すのは対象外（取り消しは narrow、追加は classify の rule_added）。
- * 項目の有無も違いとして扱う（消す・足すのも書き換え）
- */
-export function ruleRecordChanges(before: AgentDefinitionInput, after: AgentDefinitionInput): RuleRecordChange[] {
-  const recordOf = (r: object): Record<string, unknown> => Object.fromEntries(Object.entries(r).filter(([k, v]) => !RULE_EFFECTIVE_KEYS.has(k) && v !== undefined));
-  const beforeRules = new Map(normalizeAgentDefinition(before).rules.map((r) => [r.id, recordOf(r)] as const));
-  const out: RuleRecordChange[] = [];
-  for (const r of normalizeAgentDefinition(after).rules) {
-    const b = beforeRules.get(r.id);
-    if (b === undefined) continue; // 新しいルール（追加は classify の rule_added で扱う）
-    const a = recordOf(r);
-    const fields = [...new Set([...Object.keys(b), ...Object.keys(a)])].sort(compareText);
-    for (const f of fields) {
-      const x = Object.hasOwn(b, f) ? canonicalJson(b[f] as Json) : null;
-      const y = Object.hasOwn(a, f) ? canonicalJson(a[f] as Json) : null;
-      if (x !== y) out.push({ ruleId: r.id, field: f });
-    }
-  }
-  return out;
-}
-
-/**
- * 締める提案を残してよいか（SW §4.4.6 手順3、15:124）：
- * ① 定義のスキーマ（FR-022）を通る ② compose の違反がない ③ ルールの追加ではない（BR-57）
- * ③' 既存のルールの記録（added_by・added_at・source_intent_id・created_while_tainted・labels など）を変えない（SG-09：ruleRecordChanges）④ classify が narrow
- * ⑤ すり抜けた書き込みを、案を当てた実効ポリシー（＋候補のルール）で判定し直し、すべて allow 以外になる。
- * ⑤は手順4〜11だけを見る recheckIntent で、合格証は有効として扱う（リハーサルの判定と同じ：cross-check §1.7）。
- * 予算・Breaker は締める提案の種類（ガード・ルール・自律度）に関係しないので見ない。
- * ok の案を [適用] したら、設定変更は origin = 'rehearsal_tighten'・classification = 'narrow' で保存する（M-35）
- */
-export function checkTighteningProposal(input: TighteningCheckInput): TighteningCheck {
-  const v = validateAgentDefinition(input.after, { tools: input.ctx.tools });
-  if (!v.ok) return { ok: false, reason: "schema_invalid", issues: v.issues };
-  const result = classify({ before: input.before, after: v.definition, ctx: input.ctx });
-  if (result.violations.length > 0) return { ok: false, reason: "exceeds_policy", result };
-  if (result.items.some((i) => i.kind === "rule_added")) return { ok: false, reason: "adds_rule", result };
-  // 記録だけの違いは classify では項目にならない（neutral）。締める変更に混ぜて記録を消す・偽るのをここで止める（SG-09）
-  const changes = ruleRecordChanges(input.before, v.definition);
-  if (changes.length > 0) return { ok: false, reason: "changes_rule_record", result, changes };
-  if (result.classification !== "narrow") return { ok: false, reason: "not_narrow", result };
-  const slipped = input.slipped ?? [];
-  if (slipped.length > 0) {
-    const composed = composeAll({
-      ceilings: input.ctx.ceilings,
-      workspacePolicy: input.ctx.workspacePolicy,
-      agent: v.definition,
-      ...(input.ctx.templates === undefined ? {} : { templates: input.ctx.templates }),
-    });
-    const stillAllowed: number[] = [];
-    slipped.forEach((s, i) => {
-      const job = own(composed.jobs, s.jobId);
-      if (job === undefined) return; // 仕事を消す案なら、その書き込みはもう起きない
-      const candidates = input.candidateRules ?? [];
-      const policy = candidates.length > 0 ? withCandidateRules(job.effective, candidates).effective : job.effective;
-      const d = recheckIntent(policy, s.subject, { unknownOutcomeKeys: s.unknownOutcomeKeys ?? [], certificateValid: true });
-      if (d.decision === "allow") stillAllowed.push(i);
-    });
-    if (stillAllowed.length > 0) return { ok: false, reason: "not_blocking", result, stillAllowed };
-  }
-  return { ok: true, result, definition: v.definition };
 }

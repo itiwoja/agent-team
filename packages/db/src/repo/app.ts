@@ -1,6 +1,6 @@
 // app の土台の問い合わせ（@open-team/db/app。持ち主は app-base。README §1 のリポジトリ層の約束に従う）
 // - 業務の関数は (q, ctx: WsCtx, …) で、SQL を必ず workspace_id で絞る（15:368）。見つからなければ null（API は 404）
-// - 書いて整合が要る関数は Tx を受ける。トランザクションの中で外部（Gemini・gateway・sim-world）を呼ばない（G-14）
+// - 書いて整合が要る関数は Tx を受ける。トランザクションの中で外部（Gemini・gateway）を呼ばない（G-14）
 // - ロックの順はワークスペース → タスク → 承認 → Intent（M-21・SO §3.14）
 // 中身：ワークスペースの表示（EP-03・26）・Kill Switch（EP-27・28）・SSE の事象（EP-45）・監査ログの一覧（EP-43）・
 //       冪等性のキー（EP-27 ほか）・オーナーの初期投入（G-08）に使う行の読み書き
@@ -102,15 +102,13 @@ export async function getWorkspaceDayCostUsd(q: Queryable, ctx: WsCtx, now: Date
 // Kill Switch（EP-27・28。SO §3.15、AS §3.9、FR-015）
 // =====================================================================
 
-/** Kill Switch で止めたタスク（BR-80・順番の進め方の入力。previousStatus は止める前の状態） */
+/** Kill Switch で止めたタスク（順番の進め方の入力。previousStatus は止める前の状態） */
 export interface HaltedTask {
   id: Uuid;
   jobId: Uuid;
   agentId: Uuid;
   askId: Uuid | null;
   askRunId: Uuid | null;
-  rehearsalRunId: Uuid | null;
-  shadow: boolean;
   previousStatus: TaskStatus;
 }
 
@@ -121,17 +119,15 @@ export interface KillSwitchEngageResult {
   haltedTasks: HaltedTask[];
   expiredApprovalIds: Uuid[];
   expiredIntentIds: Uuid[];
-  cancelledRehearsalRunIds: Uuid[];
 }
 
 /**
  * Kill Switch の発動の DB の部分（SO §3.15 の3〜7、AS §3.9 の3）。ロックはワークスペース → タスク → 承認 → Intent の順。
  * 1. ワークスペースの行を取り、発動中なら何もしない（冪等）
  * 2. kill_switch_engaged・_at・_by・_reason
- * 3. 終了状態でない全タスク（リハーサル・影も）を halted（kill_switch）、finished_at、タスクのトークンを失効
+ * 3. 終了状態でない全タスクを halted（kill_switch）、finished_at、タスクのトークンを失効
  * 4. pending の承認を expired、proposed・pending_approval・approved の Intent を expired（kill_switch）。executing は触らない（完了を待つ）
- * 5. 走っているリハーサル（queued・generating・running）を cancelled、その状況（queued・running・judging）を cancelled（abort_reason kill_switch）
- * 監査ログ・SSE の事象・NOTIFY・BR-80 は呼び出し側が同じトランザクションで足す。ワークスペースがなければ null
+ * 監査ログ・SSE の事象・NOTIFY は呼び出し側が同じトランザクションで足す。ワークスペースがなければ null
  */
 export async function engageKillSwitchTx(
   tx: Tx,
@@ -145,7 +141,7 @@ export async function engageKillSwitchTx(
     )
   ).rows[0];
   if (!ws) return null;
-  const empty = { haltedTasks: [], expiredApprovalIds: [], expiredIntentIds: [], cancelledRehearsalRunIds: [] };
+  const empty = { haltedTasks: [], expiredApprovalIds: [], expiredIntentIds: [] };
   if (ws.kill_switch_engaged) return { alreadyEngaged: true, engagedAt: ws.kill_switch_engaged_at ?? i.now, ...empty };
 
   await tx.query(
@@ -160,8 +156,6 @@ export async function engageKillSwitchTx(
     agent_id: Uuid;
     ask_id: Uuid | null;
     ask_run_id: Uuid | null;
-    rehearsal_run_id: Uuid | null;
-    shadow: boolean;
     previous_status: TaskStatus;
   }>(
     `WITH t AS (
@@ -174,7 +168,7 @@ export async function engageKillSwitchTx(
                       task_token_hash = NULL, task_token_expires_at = NULL
        FROM t
       WHERE tasks.id = t.id AND tasks.workspace_id = $1
-     RETURNING tasks.id, tasks.job_id, tasks.agent_id, tasks.ask_id, tasks.ask_run_id, tasks.rehearsal_run_id, tasks.shadow,
+     RETURNING tasks.id, tasks.job_id, tasks.agent_id, tasks.ask_id, tasks.ask_run_id,
                t.status AS previous_status`,
     [ctx.workspaceId, i.now, [...TASK_TERMINAL]],
   );
@@ -188,20 +182,6 @@ export async function engageKillSwitchTx(
      RETURNING id`,
     [ctx.workspaceId, i.now],
   );
-  const runs = await tx.query<{ id: Uuid }>(
-    `UPDATE rehearsal_runs SET status = 'cancelled', finished_at = $2
-      WHERE workspace_id = $1 AND status IN ('queued', 'generating', 'running')
-     RETURNING id`,
-    [ctx.workspaceId, i.now],
-  );
-  const runIds = runs.rows.map((r) => r.id).sort();
-  if (runIds.length > 0) {
-    await tx.query(
-      `UPDATE rehearsal_scenarios SET status = 'cancelled', abort_reason = 'kill_switch', finished_at = $2
-        WHERE workspace_id = $1 AND rehearsal_run_id = ANY($3::uuid[]) AND status IN ('queued', 'running', 'judging')`,
-      [ctx.workspaceId, i.now, runIds],
-    );
-  }
   const haltedTasks = tasks.rows
     .map(
       (t): HaltedTask => ({
@@ -210,8 +190,6 @@ export async function engageKillSwitchTx(
         agentId: t.agent_id,
         askId: t.ask_id,
         askRunId: t.ask_run_id,
-        rehearsalRunId: t.rehearsal_run_id,
-        shadow: t.shadow,
         previousStatus: t.previous_status,
       }),
     )
@@ -222,7 +200,6 @@ export async function engageKillSwitchTx(
     haltedTasks,
     expiredApprovalIds: approvals.rows.map((r) => r.id).sort(),
     expiredIntentIds: intents.rows.map((r) => r.id).sort(),
-    cancelledRehearsalRunIds: runIds,
   };
 }
 
@@ -273,7 +250,7 @@ export const WORKSPACE_EVENTS_CHANNEL = "ot_workspace_events";
 const EVENT_TYPE_RE = /^[a-z_]+(\.[a-z_]+)*$/;
 
 export interface WorkspaceEventInput {
-  /** AS §2.11 の WorkspaceEvent の type（'killswitch'・'check.upsert'・'rehearsal.scenario' など） */
+  /** AS §2.11 の WorkspaceEvent の type（'killswitch'・'check.upsert' など） */
   type: string;
   data: Json;
 }
@@ -332,8 +309,6 @@ export interface AuditListFilter {
   to?: Date;
   eventTypes?: readonly string[];
   taskId?: Uuid;
-  /** false なら影の走行の行（payload.enforced = false：BR-67③）を除く */
-  includeShadow: boolean;
 }
 
 /** seq の降順。hasMore は limit より多く残っているか */
@@ -349,7 +324,8 @@ export async function listAuditLogs(q: Queryable, ctx: WsCtx, f: AuditListFilter
   if (f.to) add((n) => `occurred_at <= $${n}`, f.to);
   if (f.eventTypes && f.eventTypes.length > 0) add((n) => `event_type = ANY($${n}::text[])`, [...f.eventTypes]);
   if (f.taskId) add((n) => `task_id = $${n}`, f.taskId);
-  if (!f.includeShadow) where.push("payload->>'enforced' IS DISTINCT FROM 'false'");
+  // 0024 より前の影の走行の行（payload.enforced = false）は出さない
+  where.push("payload->>'enforced' IS DISTINCT FROM 'false'");
   params.push(f.limit + 1);
   const r = await q.query<AuditLogRow>(
     `SELECT workspace_id, seq, occurred_at, event_type, actor_type, actor_id, task_id, payload, prev_hash, hash
@@ -418,49 +394,6 @@ export async function insertWorkspacePolicyIfMissing(
   const latest = await getLatestWorkspacePolicy(tx, ctx);
   if (!latest) throw new Error("ワークスペースのポリシーを読めなかった");
   return { row: latest, created: false };
-}
-
-export interface SimConnectorSeed {
-  slug: string;
-  displayName: string;
-  url: string;
-  auth: ConnectorAuth;
-}
-
-/**
- * sim-world のコネクタ（kind = 'sim'）を（なければ）作る。あれば URL・認証・表示名を揃える（SIM_WORLD_URL が変わったとき）。
- * 同じ slug の sim でないコネクタがあれば例外（投入が触ってよい行ではない）
- */
-export async function upsertSimConnector(
-  tx: Tx,
-  ctx: WsCtx,
-  c: SimConnectorSeed,
-  now: Date,
-): Promise<{ row: ConnectorRow; created: boolean; updated: boolean }> {
-  const cols = "id, workspace_id, slug, display_name, kind, url, auth, enabled, last_synced_at, created_at, updated_at";
-  const inserted = await tx.query<ConnectorRow>(
-    `INSERT INTO connectors (workspace_id, slug, display_name, kind, url, auth, enabled, created_at, updated_at)
-     VALUES ($1, $2, $3, 'sim', $4, $5, true, $6, $6)
-     ON CONFLICT (workspace_id, slug) DO NOTHING
-     RETURNING ${cols}`,
-    [ctx.workspaceId, c.slug, c.displayName, c.url, c.auth, now],
-  );
-  const created = inserted.rows[0];
-  if (created) return { row: created, created: true, updated: false };
-  const existing = (
-    await tx.query<ConnectorRow>(`SELECT ${cols} FROM connectors WHERE workspace_id = $1 AND slug = $2 FOR UPDATE`, [ctx.workspaceId, c.slug])
-  ).rows[0];
-  if (!existing) throw new Error(`コネクタを読めなかった：${c.slug}`);
-  if (existing.kind !== "sim") throw new Error(`同じ slug の sim でないコネクタがある：${c.slug}`);
-  const updated = await tx.query<ConnectorRow>(
-    `UPDATE connectors SET url = $3, auth = $4, display_name = $5, updated_at = $6
-      WHERE workspace_id = $1 AND id = $2
-        AND (url IS DISTINCT FROM $3 OR auth IS DISTINCT FROM $4::jsonb OR display_name IS DISTINCT FROM $5)
-     RETURNING ${cols}`,
-    [ctx.workspaceId, existing.id, c.url, c.auth, c.displayName, now],
-  );
-  const row = updated.rows[0];
-  return row ? { row, created: false, updated: true } : { row: existing, created: false, updated: false };
 }
 
 /** コネクタのツール（コネクタを渡せばそのコネクタの分だけ。名前の順） */

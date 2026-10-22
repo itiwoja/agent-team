@@ -10,10 +10,9 @@ import { insertSkillProposal, lastSkillProposalAt, listPendingSkillProposals, li
 import { callGemini } from "@open-team/edge";
 import { modelForPurpose, type LlmClient } from "@open-team/llm";
 import { knownSecretsFromEnv, maskSecrets } from "@open-team/platform";
-import { inputJsonSchema, structuredOutputSchema } from "@open-team/sim-core";
 import { z } from "zod";
 import type { AppDeps, TickStep } from "../deps.ts";
-import { parseModelJson, withoutMaxItems } from "../rehearsal/common.ts";
+import { inputJsonSchema, parseModelJson, structuredOutputSchema, withoutMaxItems } from "../llm-json.ts";
 import { DAY_MS, LEARN_SCAN_LIMIT, emitEvolutionEvent } from "./common.ts";
 
 export const LEARN_MIN_TASKS = 3;
@@ -69,7 +68,7 @@ function learnLlm(deps: Pick<AppDeps, "db" | "llm" | "clock" | "log">, ctx: WsCt
     async generate(req, opts = {}) {
       const { response } = await callGemini(
         { db: deps.db, llm: deps.llm, clock: deps.clock, log: deps.log },
-        { workspaceId: ctx.workspaceId, workspaceKind: ctx.kind, taskId: null, agentId, askId: null, rehearsalRunId: null, purpose: LEARN_PURPOSE, phase: LEARN_PHASE, ...(opts.signal === undefined ? {} : { signal: opts.signal }) },
+        { workspaceId: ctx.workspaceId, workspaceKind: ctx.kind, taskId: null, agentId, askId: null, purpose: LEARN_PURPOSE, phase: LEARN_PHASE, ...(opts.signal === undefined ? {} : { signal: opts.signal }) },
         req,
       );
       return response;

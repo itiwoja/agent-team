@@ -1,5 +1,5 @@
 // 試験用の TaskContext。用意した依頼（15:345-346、formation-runtime.md §2.10）と同じ形：受信箱係 → 仕入れ係の順番
-// 受信箱係は researcher・mail.list_inbox だけ。仕入れ係は assistant・store / supplier / bank（M-36）。ゲストなので Web の付与なし
+// 受信箱係は researcher・mail.list_inbox だけ。仕入れ係は assistant・store / supplier / bank（M-36）。Web の付与なし
 
 import type { McpToolSpec, TaskContext } from "../types.ts";
 import { selectTaskTools } from "../tools.ts";
@@ -68,7 +68,6 @@ export function inboxContext(): TaskContext {
       template: "researcher",
       mcpGrants: { mail: ["list_inbox"] },
       webAllowDomains: [],
-      guestWorkspace: true,
       formation: { shape: "chain", memberCount: 2, isAggregator: false },
       teamBoard: false,
       followup: false,
@@ -114,7 +113,6 @@ export function supplierContext(): TaskContext {
       template: "assistant",
       mcpGrants: { store: ["get_inventory"], supplier: ["list_products", "place_order"], bank: ["register_payee"] },
       webAllowDomains: [],
-      guestWorkspace: true,
       formation: { shape: "chain", memberCount: 2, isAggregator: false },
       teamBoard: false,
       followup: false,
