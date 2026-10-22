@@ -757,9 +757,9 @@ export async function auditEvents(db: Db, workspaceId: string): Promise<Array<{ 
   ).rows;
 }
 
-/** ワークスペース（既定はオーナー。監査ログの起点つき） */
-export function workspace(db: Db, kind: "owner" | "guest" = "owner"): Promise<FxWorkspace> {
-  return fxWorkspace(db, { kind, audit: true });
+/** ワークスペース（オーナー。監査ログの起点つき）。second: 分離の試験で2つ目を作るとき（本番では作れない） */
+export function workspace(db: Db, second = false): Promise<FxWorkspace> {
+  return fxWorkspace(db, { audit: true, second });
 }
 
 /** 豆 20kg（いつもの発注。単価 780） */

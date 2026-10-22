@@ -1,6 +1,6 @@
 // GitHub のコネクタの証明（18 §3.5、D-119、ADR-002）：GitHub App の JWT でインストールのトークンを作り、キャッシュする・
 // 保護したブランチへの許可は実行のときの行の値・アンインストール（404）は auth_required・同期では GitHub の頭を送らない・
-// ゲストでも本人の GitHub のコネクタは境界を通る
+// 本人の GitHub のコネクタの照合
 import { createPublicKey, createVerify, generateKeyPairSync } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import { LATEST_PROTOCOL_VERSION } from "@modelcontextprotocol/sdk/types.js";
@@ -16,7 +16,6 @@ import {
   type GithubToolName,
 } from "@open-team/github-core";
 import { toolHashOf, type ArgRoleMap, type Json } from "@open-team/kernel";
-import { connectorBoundary, isOwnConnector, isOwnGithubConnector } from "./boundary.ts";
 import { ConnectorAuthRequired, ConnectorAuthUnsupported, ConnectorTokenUnavailable, defaultConnectorAuth, githubAppJwt } from "./context.ts";
 import { normalizePrivateKey, type GithubConfig } from "./env.ts";
 import { NOW, gatewayEnv, insertIntent, intentRow, rpcResponse, startGateway, taskWithToken, workspace, type FetchHook } from "./test-helpers.ts";
@@ -122,7 +121,7 @@ describe("GitHub App の JWT と環境変数の鍵", () => {
 describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
   it("インストールのトークンを1回だけ作り、期限（expires_at−60秒）までキャッシュする", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws);
     const fake = okFake();
     let t = NOW.getTime();
@@ -145,7 +144,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
 
   it("保護したブランチへの許可は、呼ぶときの行の値（切り替えたらすぐ効く）", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn, credentialId } = await seedGithub(db, ws);
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(okFake()), clock: { now: () => NOW } });
     await db.transaction((tx) => setGithubProtectedWrite(tx, ws.ctx, credentialId!, true));
@@ -156,7 +155,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
 
   it("アンインストール（404）・一時停止（403）は ConnectorAuthRequired、5xx は ConnectorTokenUnavailable", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws);
     for (const [status, cls, reason] of [
       [404, ConnectorAuthRequired, "installation_gone"],
@@ -174,7 +173,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
 
   it("資格情報がない → ConnectorAuthRequired（no_credential）。トークンは作らない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws, false);
     const fake = okFake();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
@@ -184,7 +183,7 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
 
   it("同期（list）はトークンを作らず、URL が GITHUB_URL と違えば証明しない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const { conn } = await seedGithub(db, ws);
     const fake = okFake();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
@@ -198,22 +197,11 @@ describe("既定の証明（defaultConnectorAuth。18 §3.5）", () => {
   });
 });
 
-describe("境界（18 §3.5）", () => {
-  const conn = { url: GH_URL, auth: { type: "oauth", provider: "github" } as const };
-  it("本人の GitHub のコネクタはゲストでも通す", () => {
-    expect(isOwnGithubConnector(conn, GH_BASE)).toBe(true);
-    expect(isOwnGithubConnector({ ...conn, auth: { type: "oauth", provider: "google" } }, GH_BASE)).toBe(false);
-    expect(isOwnConnector({ gcalOrigin: null, githubOrigin: GH_BASE }, conn)).toBe(true);
-    expect(connectorBoundary({ workspaceKind: "guest", ownOAuthConnector: true })).toEqual({ ok: true });
-    expect(connectorBoundary({ workspaceKind: "owner", ownOAuthConnector: true })).toEqual({ ok: true });
-  });
-});
-
 describe("実行（executeIntent）", () => {
   /** インストールのトークンのキャッシュはプロセスの中で共有なので、試験ごとに別のインストールにする */
   async function setupFlow(installationId: number) {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const fake = okFake();
     const gw = startGateway(db, providerEnv(), { hook: githubHook(fake) });
     const { conn, credentialId } = await seedGithub(db, ws, true, installationId);

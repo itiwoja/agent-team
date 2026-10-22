@@ -1,5 +1,5 @@
 // EP-50 書き込みの実行（IA §3.12・§6.8 G-1〜G-18、AS §3.17 EP-50・T-158・T-159、MT §3.12.6・DR-02・DR-09・DR-12、
-// M-20・M-21・M-52、D-18・BR-59・BR-64）
+// M-20・M-21・M-52、D-18・BR-59）
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GatewayClientError } from "@open-team/gateway-client";
 import { fxConnector, useTestDb } from "@open-team/db/testing";
@@ -38,9 +38,9 @@ afterAll(async () => {
 });
 beforeEach(() => over.reset());
 
-async function setup(o: { kind?: "owner" | "guest"; hook?: FetchHook; deps?: Partial<GatewayDeps>; taskStatus?: "running" | "executing" | "awaiting_approval" } = {}) {
+async function setup(o: { hook?: FetchHook; deps?: Partial<GatewayDeps>; taskStatus?: "running" | "executing" | "awaiting_approval" } = {}) {
   const { db } = T();
-  const ws = await workspace(db, o.kind ?? "owner");
+  const ws = await workspace(db);
   // seed の同期（initialize・tools/list）には hook を効かせず、送信の記録からも外す（試験が見るのは実行の通信だけ）
   let armed = false;
   const hook: FetchHook | undefined = o.hook ? (req, real, init) => (armed ? o.hook!(req, real, init) : null) : undefined;
@@ -217,23 +217,6 @@ describe("実行しないもの（IA §3.12 の2、G-2〜G-5、T-158）", () => 
     const s = await setup();
     expect((await rejectionOf(s.gw.client.executeIntent("00000000-0000-4000-8000-000000000000"))).status).toBe(404);
     expect((await rejectionOf(s.gw.client.executeIntent("not-a-uuid"))).code).toBe("NOT_FOUND");
-  });
-});
-
-describe("境界（BR-64）", () => {
-  it("ゲストのワークスペースの Intent の接続先が本人の OAuth のコネクタでない → guest_workspace、実行しない", async () => {
-    // ゲストはこのコネクタを同期できない（EP-51 も guest_workspace）ので、行を直接入れる
-    const s = await setup();
-    const guest = await workspace(s.db, "guest");
-    const c = await fxConnector(s.db, guest);
-    const task = await taskWithToken(s.db, guest, { status: "executing" });
-    const tool = { name: "place_order", toolHash: c.tools.place_order!.toolHash, inputSchema: { type: "object" }, argRoles: {} };
-    const { intentId } = await insertIntent(s.db, guest, { taskId: task.taskId, jobId: task.agent.jobId, connector: { id: c.connectorId, slug: c.slug }, tool, args: BEANS_20 });
-    expect(await s.gw.client.executeIntent(intentId)).toEqual({ intentId, status: "failed", failReason: "precondition_failed", expiredReason: null });
-    expect((await intentRow(s.db, intentId)).result).toEqual({ reasonCode: "guest_workspace" });
-    expect(s.gw.sent).toHaveLength(0);
-    const d = (await s.db.query<Record<string, any>>("SELECT reason_code, matched_rule, enforced FROM policy_decisions WHERE intent_id = $1 ORDER BY created_at", [intentId])).rows;
-    expect(d.at(-1)).toMatchObject({ reason_code: "guest_workspace", matched_rule: "boundary.guest_workspace", enforced: true });
   });
 });
 
@@ -457,7 +440,7 @@ describe("送信後は再試行しない（BR-59、G-10〜G-12、T-159、M-52）
 describe("ワークスペースの分離（G-15、SO-TT-04）", () => {
   it("G-15 本文に別のワークスペースの workspace_id を載せても無視し、Intent の行のワークスペースで処理する", async () => {
     const s = await setup();
-    const other = await workspace(s.db, "guest");
+    const other = await workspace(s.db, true);
     const { intentId } = await s.placeOrder();
     const res = await s.gw.request(`/gw/v1/intents/${intentId}/execute`, {
       method: "POST",
@@ -465,7 +448,7 @@ describe("ワークスペースの分離（G-15、SO-TT-04）", () => {
       body: JSON.stringify({ workspaceId: other.workspaceId }),
     });
     expect(res.status).toBe(200);
-    // ゲストのワークスペースとして扱われていれば guest_workspace で止まる
+    // Intent の行のワークスペースで実行する
     expect(((await res.json()) as { status: string }).status).toBe("executed");
     expect(await s.orders()).toHaveLength(1);
   });

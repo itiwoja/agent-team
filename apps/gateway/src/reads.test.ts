@@ -1,4 +1,4 @@
-// EP-49 読み取り（MT §3.12.5・§6.9・§6.10、AS §3.17 EP-49・T-155〜157、SO §3.10・§7.6、BR-64・66、説明の変化）
+// EP-49 読み取り（MT §3.12.5・§6.9・§6.10、AS §3.17 EP-49・T-155〜157、SO §3.10・§7.6、BR-66、説明の変化）
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "vitest";
 import { GatewayClientError } from "@open-team/gateway-client";
 import { useTestDb } from "@open-team/db/testing";
@@ -29,9 +29,9 @@ afterAll(async () => {
 });
 beforeEach(() => over.reset());
 
-async function setup(kind: "owner" | "guest" = "owner") {
+async function setup() {
   const { db } = T();
-  const ws = await workspace(db, kind);
+  const ws = await workspace(db);
   const gw = startGateway(db, gatewayEnv(fake.url));
   const shop = await seedConnectors(db, gw.client, ws, fake.url);
   return { db, ws, gw, shop };
@@ -86,7 +86,7 @@ describe("トークンからタスクを引き直す（SO §3.10、SO-TT-01・02
 describe("ワークスペースの分離（15:520、T-155・BD-10・SO-TT-03）", () => {
   it("T-155 本文に別のワークスペースの workspaceId を載せても無視し、トークンのワークスペースとして扱う（拒否ではない）", async () => {
     const { db, ws, gw, shop } = await setup();
-    const other = await workspace(db, "guest");
+    const other = await workspace(db, true);
     const { token } = await taskWithToken(db, ws);
     const res = await gw.request("/gw/v1/tools/call", {
       method: "POST",
@@ -107,7 +107,7 @@ describe("ワークスペースの分離（15:520、T-155・BD-10・SO-TT-03）"
   });
   it("別のワークスペースのコネクタの ID → connector_not_found（そのコネクタは呼ばれない）", async () => {
     const { db, ws, gw } = await setup();
-    const other = await workspace(db, "guest");
+    const other = await workspace(db, true);
     const otherStore = (
       await db.query<{ id: string }>(
         "INSERT INTO connectors (workspace_id, slug, display_name, kind, url, auth) VALUES ($1, 'store', '在庫', 'mcp_remote', $2, $3) RETURNING id",
@@ -163,30 +163,6 @@ describe("ツールの確かめ（MT §3.12.5 の4・5、D-15）", () => {
       reasonCode: "connector_disabled",
     });
     expect(gw.sent.filter((s) => s.rpc === "tools/call")).toHaveLength(0);
-  });
-});
-
-describe("境界（BR-64、SO-BD-05）", () => {
-  it("SO-BD-05・T-157 の gateway の側：ゲストのタスクが本人の OAuth 以外のコネクタ → guest_workspace（送らない）", async () => {
-    const { db } = T();
-    const guest = await workspace(db, "guest");
-    const gw = startGateway(db, gatewayEnv(fake.url));
-    // 同期も境界で断る（422 CONNECTOR_NOT_ALLOWED）。ツールの行は直接入れる
-    await expect(seedConnectors(db, gw.client, guest, fake.url, { slugs: ["store"] })).rejects.toMatchObject({ code: "CONNECTOR_NOT_ALLOWED" });
-    const conn = (await db.query<{ id: string }>("SELECT id FROM connectors WHERE workspace_id = $1 AND slug = 'store'", [guest.workspaceId])).rows[0]!;
-    await db.query(
-      `INSERT INTO connector_tools (workspace_id, connector_id, name, description, input_schema, classification, tool_hash, status)
-       VALUES ($1, $2, 'get_inventory', 'x', '{}', 'read', $3, 'ok')`,
-      [guest.workspaceId, conn.id, `sha256:${"1".repeat(64)}`],
-    );
-    const before = gw.sent.length;
-    const { token } = await taskWithToken(db, guest);
-    expect(await gw.client.callReadTool(token, { connectorId: conn.id, tool: "get_inventory", arguments: {}, toolCallId: "c1" })).toEqual({
-      ok: false,
-      reasonCode: "guest_workspace",
-    });
-    expect(gw.sent.slice(before)).toHaveLength(0);
-    expect((await decisions(db, guest.workspaceId)).at(-1)).toMatchObject({ matched_rule: "boundary.guest_workspace" });
   });
 });
 

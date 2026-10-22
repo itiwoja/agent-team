@@ -1,6 +1,6 @@
 // EP-49 POST /gw/v1/tools/call（読み取り。mcp-taint.md §3.12.5、api-surface.md §3.17、SO §3.10）。
 // タスクは X-Task-Token から DB で引き直す（本文の workspaceId などは読まない：15:486・520、T-155）。
-// 境界（ゲスト）→ 分類が read でなければ拒否（書き込みは EP-50 の Intent の実行だけ：MT D-15）→
+// 分類が read でなければ拒否（書き込みは EP-50 の Intent の実行だけ：MT D-15）→
 // needs_review → tools/list を取り直して説明の変化（MT D-03）→ tools/call（60秒）→ 64KB で切ってマスク。
 // 拒否は 200 { ok: false, reasonCode }（edge が判定の記録に使う：AS §3.17 の7）。拒否の文はこちらが作る固定の値だけ（汚染しない：MT D-27）
 
@@ -11,10 +11,8 @@ import {
   getConnectorTool,
   recordGatewayDecision,
   resolveTaskByToken,
-  type GatewayTask,
 } from "@open-team/db/gateway";
 import { AppError } from "@open-team/platform";
-import { connectorBoundary, isOwnConnector, originOf } from "./boundary.ts";
 import { ConnectorAuthRequired, ConnectorAuthUnsupported, ConnectorTokenUnavailable, targetFor, type GatewayContext } from "./context.ts";
 import { describeFailure, openMcpSession, type McpFailure } from "./mcp.ts";
 import { maskAndLimit, toolResultText } from "./result-text.ts";
@@ -58,29 +56,6 @@ export async function callReadTool(
   const action = `mcp.${connector.slug}.${body.tool}`;
   const subject = { action, connectorId: connector.id, tool: body.tool, toolCallId: body.toolCallId };
 
-  const boundary = connectorBoundary({ workspaceKind: ctx.kind, ownOAuthConnector: isOwnConnector(g, connector) });
-  if (!boundary.ok) {
-    await g.db.transaction((tx) =>
-      recordGatewayDecision(
-        tx,
-        ctx,
-        {
-          taskId: task.taskId,
-          intentId: null,
-          subjectKind: "tool_call",
-          operation: "mcp_read",
-          subject,
-          inputs: boundaryInputsOf(task, connector.url),
-          reasonCode: boundary.reasonCode,
-          matchedRule: `boundary.${boundary.reasonCode}`,
-          enforced: true,
-        },
-        now,
-      ),
-    );
-    log.warn("gateway.connector_denied", "境界の外のコネクタを拒否した", { reasonCode: boundary.reasonCode, connectorId: connector.id });
-    return done(reject(boundary.reasonCode));
-  }
 
   if (!connector.enabled) return done(reject("connector_disabled"));
   const tool = await getConnectorTool(g.db, ctx, connector.id, body.tool);
@@ -144,9 +119,4 @@ export async function callReadTool(
   } finally {
     await session.close();
   }
-}
-
-/** 境界の判定の入力（policy_decisions.flags に残す。URL は origin だけ） */
-export function boundaryInputsOf(task: Pick<GatewayTask, "ctx">, connectorUrl: string): Record<string, string | null> {
-  return { workspaceKind: task.ctx.kind, connectorOrigin: originOf(connectorUrl) };
 }

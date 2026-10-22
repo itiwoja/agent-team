@@ -60,7 +60,7 @@ export function normalizePrivateKey(raw: string): string | null {
 export interface GatewayEnv {
   port: number;
   databaseUrl: string;
-  /** 正規化した ALLOWED_CONNECTOR_URLS（BR-66）。境界では使わない */
+  /** 正規化した ALLOWED_CONNECTOR_URLS（BR-66） */
   allowedConnectorUrls: readonly string[];
   /** 受ける側の呼び出し元の確認（sa-app だけ：15:483）。INTERNAL_SHARED_TOKEN */
   serviceAuth: ServiceAuthConfig;

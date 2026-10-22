@@ -1,5 +1,5 @@
 // EP-51 POST /gw/v1/connectors/{connectorId}/tools/sync（ツールの取得と変化の検出。mcp-taint.md §3.12.4、api-surface.md §3.17）。
-// 1 コネクタの行からワークスペースを引き直す（本文はない）→ 境界（外れたら 422 CONNECTOR_NOT_ALLOWED と監査ログ connector.rejected：MT §3.12.3）
+// 1 コネクタの行からワークスペースを引き直す（本文はない）
 // 2 initialize → tools/list（nextCursor を最後まで。リダイレクトは追わない）。名前の形が外れたツールは登録しない
 // 3 新しいツール → unclassified・ok・役割なし（tool_hash = toolHashOf(説明, 入力スキーマ, {})）。監査ログ connector.tool.added
 // 4 説明・入力スキーマが変わった → needs_review（確定の定義と tool_hash は書き換えず pending に）・失効。注釈だけなら needs_review にしない
@@ -19,7 +19,6 @@ import {
 } from "@open-team/db/gateway";
 import { canonicalJson, toolHashOf, type ToolHash } from "@open-team/kernel";
 import { AppError } from "@open-team/platform";
-import { connectorBoundary, isOwnConnector } from "./boundary.ts";
 import { ConnectorAuthRequired, ConnectorAuthUnsupported, ConnectorTokenUnavailable, targetFor, type GatewayContext } from "./context.ts";
 import { isUuid } from "./ids.ts";
 import { describeFailure, openMcpSession, type McpToolDef } from "./mcp.ts";
@@ -56,26 +55,6 @@ export async function syncConnectorTools(g: GatewayContext, connectorId: string)
   const log = g.log.child({ workspaceId: ctx.workspaceId });
   const connector = await getConnector(g.db, ctx, connectorId);
   if (!connector) throw new AppError("NOT_FOUND");
-
-  const boundary = connectorBoundary({ workspaceKind: ctx.kind, ownOAuthConnector: isOwnConnector(g, connector) });
-  if (!boundary.ok) {
-    const now = g.clock.now();
-    await g.db.transaction((tx) =>
-      appendAuditLog(
-        tx,
-        ctx.workspaceId,
-        {
-          eventType: "connector.rejected",
-          actorType: "system",
-          actorId: "gateway",
-          payload: { connectorId: connector.id, slug: connector.slug, reasonCode: boundary.reasonCode },
-        },
-        now,
-      ),
-    );
-    log.warn("gateway.connector_denied", "境界の外のコネクタの同期を断った", { connectorId: connector.id, reasonCode: boundary.reasonCode });
-    throw new AppError("CONNECTOR_NOT_ALLOWED", undefined, { details: [{ reasonCode: boundary.reasonCode }] });
-  }
 
   // tools/list
   let target;

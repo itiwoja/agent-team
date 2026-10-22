@@ -15,7 +15,7 @@ import {
   type Logger,
   type ServiceAuth,
 } from "@open-team/platform";
-import { originOf } from "./boundary.ts";
+import { originOf } from "./origin.ts";
 import type { GatewayEnv, GcalConfig, GithubConfig } from "./env.ts";
 import { MCP_CALL_TIMEOUT_MS, MCP_LIST_TIMEOUT_MS, type McpTarget } from "./mcp.ts";
 
@@ -342,10 +342,6 @@ export interface GatewayContext {
   presendBackoffMs: readonly number[];
   sleep: (ms: number, signal?: AbortSignal) => Promise<void>;
   knownSecrets: readonly string[];
-  /** GCAL_URL の origin（Google カレンダーのコネクタの判定。境界の ownOAuthConnector） */
-  gcalOrigin: string | null;
-  /** GITHUB_URL の origin（GitHub のコネクタの判定。境界の ownOAuthConnector） */
-  githubOrigin: string | null;
   /** 切断のときの後始末（Google は refresh token の取り消し。GitHub はトークンのキャッシュを捨てるだけ：18 §2-8） */
   revokeGoogleCredential(connectorId: string, workspaceId: string): Promise<void>;
 }
@@ -409,8 +405,6 @@ export function resolveContext(env: GatewayEnv, deps: GatewayDeps): GatewayConte
     presendBackoffMs: deps.presendBackoffMs ?? PRESEND_BACKOFF_MS,
     sleep: deps.sleep ?? (async (ms, signal) => void (await abortableSleep(ms, signal))),
     knownSecrets,
-    gcalOrigin: env.gcal?.origin ?? null,
-    githubOrigin: env.github?.origin ?? null,
     revokeGoogleCredential,
   };
 }

@@ -12,17 +12,7 @@ export {
   type GcalConfig,
   type AllowedConnectorInput,
 } from "./env.ts";
-export {
-  connectorBoundary,
-  isOwnOAuthConnector,
-  isOwnGithubConnector,
-  isOwnConnector,
-  originOf,
-  BOUNDARY_REASONS,
-  type BoundaryReason,
-  type BoundaryInput,
-  type BoundaryCheck,
-} from "./boundary.ts";
+export { originOf } from "./origin.ts";
 export {
   resolveContext,
   defaultConnectorAuth,

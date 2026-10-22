@@ -1,7 +1,7 @@
 // EP-50 POST /gw/v1/intents/{intentId}/execute（書き込みの実行。FR-012 の MCP 版：intents-approvals.md §3.12、mcp-taint.md §3.12.6、
 // api-surface.md §3.17、D-18・BR-59、M-20・M-21）。
 // 1 Intent の行からワークスペース・タスクを引き直す（タスクのトークン・本文は使わない：IA §8-23）
-// 2 ワークスペース → タスク → Intent の順にロックして前提を確かめる（状態が approved・Kill Switch・タスクの終了・境界・intentHash の再計算・
+// 2 ワークスペース → タスク → Intent の順にロックして前提を確かめる（状態が approved・Kill Switch・タスクの終了・intentHash の再計算・
 //   無効なコネクタ・needs_review・tool_hash の一致）。外れたら終わりの状態を書いて返す
 // 3 tools/list を取り直して説明の変化（トランザクションの外で）→ もう一度ロックして確かめ直し、executing をコミット
 // 4 tools/call（引数はそのまま、60秒）→ 結果の表（IA §3.12 の4）。送信前の失敗だけ approved に戻して最大3回（1・4・16秒の待ち。
@@ -30,7 +30,6 @@ import {
 } from "@open-team/db/gateway";
 import { computeMcpIntentHash, type JsonObject } from "@open-team/kernel";
 import { AppError } from "@open-team/platform";
-import { connectorBoundary, isOwnConnector, originOf } from "./boundary.ts";
 import { ConnectorAuthRequired, ConnectorAuthUnsupported, ConnectorTokenUnavailable, targetFor, type GatewayContext } from "./context.ts";
 import { isUuid } from "./ids.ts";
 import { describeFailure, openMcpSession, type CallOutcome, type McpFailure, type McpSession } from "./mcp.ts";
@@ -184,33 +183,6 @@ async function prepare(tx: Tx, e: ExecCtx, drift: DriftResult | null, now: Date)
 
   const connector = await getConnector(tx, ctx, intent.connector_id);
   if (!connector) return fail("connector_not_found");
-  // 2-4：境界（BR-64）
-  const boundary = connectorBoundary({ workspaceKind: ctx.kind, ownOAuthConnector: isOwnConnector(g, connector) });
-  if (!boundary.ok) {
-    await recordGatewayDecision(
-      tx,
-      ctx,
-      {
-        taskId: e.taskId,
-        intentId: e.intentId,
-        subjectKind: "intent",
-        operation: "mcp_write",
-        subject: { action: intent.action, connectorId: connector.id, tool: payloadOf(intent).tool },
-        inputs: { workspaceKind: ctx.kind, connectorOrigin: originOf(connector.url) },
-        reasonCode: boundary.reasonCode,
-        matchedRule: `boundary.${boundary.reasonCode}`,
-        enforced: true,
-      },
-      now,
-    );
-    g.log.warn("gateway.connector_denied", "境界の外のコネクタへの書き込みを止めた", {
-      workspaceId: ctx.workspaceId,
-      taskId: e.taskId,
-      intentId: e.intentId,
-      reasonCode: boundary.reasonCode,
-    });
-    return fail(boundary.reasonCode);
-  }
   // 保存した値から intentHash を計算し直す（ADR-005。外れたら failed(precondition_failed)：AS §3.17 EP-50 の4・T-158）
   if (!intentIntegrityOk(intent, connector)) return fail("intent_hash_mismatch");
   // SG-03：判定が実際に行われた証拠（Kernel の判定の行と監査ログ・人の承認・ルールの記録・実行の履歴）を照合する。decide は呼ばない（存在と一致だけ）
@@ -232,7 +204,7 @@ async function prepare(tx: Tx, e: ExecCtx, drift: DriftResult | null, now: Date)
       },
       now,
     );
-    // 証拠の欠け・食い違いは app（ot_app）の乗っ取りの兆候なので、境界の拒否（warn）より強い error で出す（tool-change.ts の権限の欠けと同じ段）
+    // 証拠の欠け・食い違いは app（ot_app）の乗っ取りの兆候なので、ふつうの拒否（warn）より強い error で出す（tool-change.ts の権限の欠けと同じ段）
     g.log.error("gateway.approval_provenance", "判定・承認の証拠が欠けた Intent の実行を止めた（app の乗っ取りの兆候）", {
       workspaceId: ctx.workspaceId,
       taskId: e.taskId,

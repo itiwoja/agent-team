@@ -144,7 +144,7 @@ async function seedWriteFlow(db: Db, ws: FxWorkspace, conn: ConnectorRow) {
 
 async function setupFlow(mode: Mode) {
   const { db } = T();
-  const ws = await workspace(db, "owner");
+  const ws = await workspace(db);
   const fake = okGoogle();
   const gw = startGateway(db, providerEnv(), { hook: gcalHook(fake) });
   const conn = await seedGoogle(db, ws, mode);
@@ -172,7 +172,7 @@ async function setupFlow(mode: Mode) {
 describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
   it("アクセストークンは1回だけ取り、キャッシュする。期限（expires_in−60秒）を過ぎたら取り直す。資格情報の値は頭の値に入るだけ", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const fake = okGoogle();
     let t = NOW.getTime();
@@ -224,7 +224,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 
   it("invalid_grant（同意の取り消し）→ ConnectorAuthRequired（invalid_grant）", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const fake: GoogleFake = { status: 400, body: { error: "invalid_grant", error_description: "Token has been expired or revoked." }, exchanges: [] };
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
@@ -235,7 +235,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
   for (const mode of ["none", "revoked"] as const) {
     it(`資格情報がない（${mode}）→ ConnectorAuthRequired（no_credential）。token は取りに行かない`, async () => {
       const { db } = T();
-      const ws = await workspace(db, "owner");
+      const ws = await workspace(db);
       const conn = await seedGoogle(db, ws, mode);
       const fake = okGoogle();
       const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
@@ -246,7 +246,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 
   it("AAD が違う（別のワークスペースの行に写した暗号文）→ 開かない（credential_unreadable）。token は取らない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "other_workspace");
     const fake = okGoogle();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
@@ -256,7 +256,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 
   it("token の交換が失敗（503）→ ConnectorTokenUnavailable。届いたのは送信前の扱い", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const fake: GoogleFake = { status: 503, body: { error: "backendError" }, exchanges: [] };
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
@@ -265,7 +265,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 
   it("同期（list）は資格情報を開かず、呼び出しの証明だけ返す", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "none");
     const fake = okGoogle();
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(fake), clock: { now: () => NOW } });
@@ -278,7 +278,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 
   it("URL の origin が GCAL_URL と違う Google のコネクタは証明しない（ConnectorAuthUnsupported）", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const conn = await seedGoogle(db, ws, "ok");
     const provider = defaultConnectorAuth(providerEnv(), { db, fetch: tokenFetch(okGoogle()), clock: { now: () => NOW } });
     await expect(provider({ connector: { ...conn, url: "https://other.example/mcp/gcal" }, intentId: null, purpose: "call" })).rejects.toBeInstanceOf(
@@ -290,7 +290,7 @@ describe("既定の証明（defaultConnectorAuth。16 §3.5）", () => {
 describe("gateway の流れ（gcal の MCP を差し込む）", () => {
   it("同期（tools/list）に Google の頭は付かず、token も取らない", async () => {
     const { db } = T();
-    const ws = await workspace(db, "owner");
+    const ws = await workspace(db);
     const fake = okGoogle();
     const gw = startGateway(db, providerEnv(), { hook: gcalHook(fake) });
     const conn = await seedGoogle(db, ws, "ok");
