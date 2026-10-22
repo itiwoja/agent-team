@@ -106,3 +106,23 @@ Postgres の書き方の置き換え：
 | 6 デプロイ | 本番の Worker・秘密・ドメイン | 公開の URL で使える |
 
 古い Node の版（apps/*・packages/db の Postgres）は、6 が済むまで残し、最後に消す。
+
+### 第4段の小段
+
+どの小段も試験が通れば main にマージできる大きさにする。試験の LLM は台本どおりに答える ScriptedLlm。
+
+| 小段 | やること | 動くもの |
+|---|---|---|
+| 4a 受け付け | POST /asks・answer、Idempotency-Key、Kill Switch の発動と解除 | 依頼が generating で作られ、一覧に出る |
+| 4b 編成 | LLM の呼び出し（DO の前の確かめ → fetch → DO の記録）、設定プランナーを Workflow に | 依頼すると担当が決まり、タスクが queued で並ぶ |
+| 4c 実行 | edge の DB の部分を DO の同期の関数に、担当の実行を TaskWorkflow に（書き込みなし） | 依頼から担当が報告し、回答が返る |
+| 4d 確認 | Intent の記録と判定、確認の一覧（GET /check） | 担当が書き込もうとすると確認が届く |
+| 4e gateway | gateway を同じ Worker の別の入口に、承認から実行まで（ExecuteIntentWorkflow） | 承認すると外へ書き込まれる |
+| 4f 道具 | web_search・web_fetch、ask_user・team_*（`waitForEvent`）、reply・resume | 残りの道具と API がそろう |
+| 4g・4h | gcal・github の Worker（ここで gateway を別の Worker に分け、秘密を閉じる） | カレンダーと GitHub につながる |
+
+決めたこと：
+- 実行の進め役は WorkspaceDO。タスクが終わると DO が次のタスクを選び、TaskWorkflow を起動する（依頼全体の Workflow は作らない）
+- TaskWorkflow は runner の `runTask` をそのまま回し、EdgePort の呼び出しを歩み（`step.do`）で包む。LLM の1回は1歩にまとめ、DO の記録は callId で冪等にする
+- Kill Switch は歩みのたびに DO で確かめ、発動したら動いている Workflow を止める（LLM に問い合わせている最中の1回は切れない）
+- 書き込みの RPC は AppError を値（`write.ts` の WriteResult）にして返し、Worker で投げ直す（RPC をまたぐと code・details が落ちるため）
