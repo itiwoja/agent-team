@@ -44,3 +44,13 @@ pnpm typecheck   # 型検査
 pnpm test        # 単体テスト（vitest。DB を使う試験は Docker が要る場合がある）
 pnpm lint:deps   # 依存の境界（runner から DB・Gemini・gateway に届かない）
 ```
+
+## Cloudflare の版（移行中）
+
+[cloudflare-design.md](cloudflare-design.md) の段階で、`apps/worker` に Workers の版を作っています。
+
+```bash
+pnpm --filter @open-team/worker dev     # wrangler dev（http://localhost:8787）
+pnpm --filter @open-team/worker test    # workerd の中で試験（@cloudflare/vitest-plugin）
+pnpm --filter @open-team/worker types   # wrangler.jsonc を変えたら型を作り直す
+```

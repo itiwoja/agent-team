@@ -1,0 +1,15 @@
+// Makase の Worker（docs/cloudflare-design.md）。API・画面の配信・ログインと、ワークスペースごとの Durable Object
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "makase",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-10-19",
+  "compatibility_flags": ["nodejs_compat"],
+  "observability": { "enabled": true },
+  "durable_objects": {
+    "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
+  },
+  "exports": {
+    "WorkspaceDO": { "type": "durable-object", "storage": "sqlite" }
+  }
+}
