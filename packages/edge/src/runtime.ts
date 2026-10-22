@@ -1,11 +1,10 @@
 // createEdge の依存と、各処理が共有する実行時の値（上限・時計・ログ・回数の数え・あとで呼ぶ処理）
 
 import { randomUUID } from "node:crypto";
-import type { IsoDateTime } from "@open-team/kernel";
 import type { GatewayClient } from "@open-team/gateway-client";
 import { DEFAULT_AGENT_MODEL, DEFAULT_PLANNER_MODEL, type LlmClient, type SleepFn } from "@open-team/llm";
 import { silentLogger, systemClock, type Clock, type Logger } from "@open-team/platform";
-import type { Db, IntentStatus, TaskRow, TaskStatus, Uuid, WsCtx } from "@open-team/db";
+import type { Db, IntentStatus, TaskStatus, Uuid, WsCtx } from "@open-team/db";
 import { closeSandboxSessionsOfTask } from "@open-team/db/sandbox";
 import { EDGE_LIMITS, SPEND_LIMITS, type EdgeLimits, type SpendLimits } from "./limits.ts";
 import { SlidingWindowLimiter } from "./rate-limit.ts";
@@ -19,10 +18,10 @@ import { errorMessage } from "./util.ts";
  */
 export interface EdgeHooks {
   /**
-   * MCP の書き込みを Intent にした（LLM Proxy のコミットのあと）。status が approved（ルールの allow・影）なら、
+   * MCP の書き込みを Intent にした（LLM Proxy のコミットのあと）。status が approved（ルールの allow）なら、
    * app の intents が gateway の実行（EP-50）を起こす。pending_approval なら確認の行（SSE）
    */
-  onIntentRecorded?(ctx: WsCtx, e: { taskId: Uuid; intentId: Uuid; status: IntentStatus; shadow: boolean }): Promise<void> | void;
+  onIntentRecorded?(ctx: WsCtx, e: { taskId: Uuid; intentId: Uuid; status: IntentStatus }): Promise<void> | void;
   /** submit_report を受け付けた（formation-runtime.md §3.12 の onReportSubmitted） */
   onReportSubmitted?(ctx: WsCtx, e: { taskId: Uuid; status: TaskStatus }): Promise<void> | void;
   /**
@@ -40,21 +39,12 @@ export interface EdgeHooks {
 }
 
 /**
- * リハーサルの Web の口（模擬の世界の Web。本物の Web には出ない）。web_fetch・web_search がリハーサルのタスクで使う。
- * 形は本番の取得・検索と同じ（fetch は転送の後の URL を finalUrl で返す。404 などは status で返す）
- */
-/**
  * 作業場（サンドボックス）を起こす口（D-116）。app が手元（Docker）・試験（同じプロセス）の実装を渡す。
  * start は作業場の実行役を起こすだけで、待たない。実行役は sandbox-edge にトークンで来て、コマンドを取りに来る
  */
 export interface SandboxProvider {
   readonly name: string;
   start(input: { ctx: WsCtx; sessionId: Uuid; taskId: Uuid; token: string }): Promise<{ ref: string }>;
-}
-
-export interface RehearsalWeb {
-  fetch(input: { url: string; signal?: AbortSignal }): Promise<{ status: number; title: string | null; body: string; finalUrl: string }>;
-  search(input: { query: string; maxResults?: number; signal?: AbortSignal }): Promise<Array<{ title: string; url: string; snippet: string }>>;
 }
 
 export interface EdgeDeps {
@@ -74,15 +64,11 @@ export interface EdgeDeps {
   knownSecrets?: readonly string[];
   /** ツール呼び出しの ID を作り直すとき（モデルの ID が空・重なった）。既定 crypto.randomUUID */
   newId?: () => string;
-  /** 「今」（仮想の時計の世界の時刻）。null・省略なら実時間の JST（デモ店舗は本番のタスクの開始時に今の時刻まで進める：G-07） */
-  virtualNow?: (ctx: WsCtx, task: TaskRow) => Promise<IsoDateTime | null>;
   /** タスクを止める合図（Kill Switch の RunningTaskRegistry：SO §3.15）。LLM の呼び出しを中断する */
   signalFor?: (taskId: Uuid) => AbortSignal | undefined;
   hooks?: EdgeHooks;
   /** web_fetch の取得（試験で差し替える。既定 fetchPage：付与したドメインだけ・内部のアドレスに繋がない） */
   fetchPage?: PageFetcher;
-  /** リハーサルのタスクの Web（模擬の世界）。省略なら リハーサルの Web は WEB_NOT_AVAILABLE */
-  rehearsalWeb?: RehearsalWeb;
   /** 作業場（D-116）。省略なら作業場の道具は渡さない */
   sandbox?: SandboxProvider;
   /**
@@ -104,12 +90,9 @@ export interface EdgeRuntime {
   spendLimits: SpendLimits;
   knownSecrets: readonly string[];
   newId: () => string;
-  virtualNow: EdgeDeps["virtualNow"];
   signalFor: EdgeDeps["signalFor"];
   hooks: EdgeHooks;
   fetchPage: PageFetcher;
-  /** リハーサルの Web（なければ null：リハーサルの Web は使えない） */
-  rehearsalWeb: RehearsalWeb | null;
   sandbox: SandboxProvider | null;
   trustedSkills: TrustedSkillDigests;
   llmLimiter: SlidingWindowLimiter;
@@ -130,11 +113,9 @@ export function createRuntime(deps: EdgeDeps): EdgeRuntime {
     spendLimits: { ...SPEND_LIMITS, ...deps.spendLimits },
     knownSecrets: deps.knownSecrets ?? [],
     newId: deps.newId ?? (() => randomUUID()),
-    virtualNow: deps.virtualNow,
     signalFor: deps.signalFor,
     hooks: deps.hooks ?? {},
     fetchPage: deps.fetchPage ?? fetchPage,
-    rehearsalWeb: deps.rehearsalWeb ?? null,
     sandbox: deps.sandbox ?? null,
     trustedSkills: deps.trustedSkills ?? NO_TRUSTED_SKILLS,
     llmLimiter: new SlidingWindowLimiter(limits.llmCallsPerMinute, 60_000),

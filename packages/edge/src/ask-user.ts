@@ -1,5 +1,5 @@
 // 利用者への質問（ask_user。10/14：答えを返すだけでなく、外すと困る選択は担当から聞けるようにする）
-// - 本番の依頼のタスクだけ（ツールを渡すのも context.ts の selectTaskTools でそこに絞る）。リハーサル・試し実行では質問を作らない
+// - 本番の依頼のタスクだけ（ツールを渡すのも context.ts の selectTaskTools でそこに絞る）。試し実行では質問を作らない
 // - 質問は agent_questions に残し（status = open）、決まった時間（limits.askUserWaitSec）だけ答えを見に行く。
 //   答えが来たらその文を返し、来なければ expired にして「返事がありません」を返す。担当はそのまま自分で決めて進める
 // - 外へは何も出さず、権限も変えない（Kernel の判定の外：decide 4-3）。利用者の答えは利用者の言葉なので汚染しない
@@ -19,7 +19,7 @@ import { charCount, isPlainObject } from "./util.ts";
 export const ASK_USER_NO_ANSWER_TEXT = "利用者から返事がありませんでした。外しても困らない形で自分で決めて進め、置いた前提を報告に書いてください。";
 /** 聞ける回数を使い切った */
 export const ASK_USER_LIMIT_TEXT = "このタスクで利用者に聞ける回数を使い切りました。自分で決めて進め、置いた前提を報告に書いてください。";
-/** 質問できないタスク（依頼のタスクでない・リハーサル） */
+/** 質問できないタスク（依頼のタスクでない・試し実行） */
 export const ASK_USER_UNAVAILABLE_TEXT = "このタスクでは利用者に質問できません。自分で決めて進めてください。";
 
 export interface AskUserArgs {
@@ -73,7 +73,7 @@ export async function askUser(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow, row: P
       const t = await lockTask(tx, ctx, task.id);
       if (t === null) throw new EdgeError("UNAUTHORIZED");
       if (t.status !== "running") throw new EdgeError("TASK_HALTED", haltedDetails(t));
-      if (t.ask_id === null || t.rehearsal_run_id !== null || t.shadow || t.is_dry_run) return { ok: false, text: ASK_USER_UNAVAILABLE_TEXT };
+      if (t.ask_id === null || t.is_dry_run) return { ok: false, text: ASK_USER_UNAVAILABLE_TEXT };
       const asked = await tx.query<{ n: number }>("SELECT count(*)::int AS n FROM agent_questions WHERE workspace_id = $1 AND task_id = $2", [ctx.workspaceId, t.id]);
       if ((asked.rows[0]?.n ?? 0) >= rt.limits.askUserPerTask) return { ok: false, text: ASK_USER_LIMIT_TEXT };
       const agent = await getAgentRow(tx, ctx, t.agent_id);

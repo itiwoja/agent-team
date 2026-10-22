@@ -1,7 +1,7 @@
 // recordMcpIntent（M-14）：判定済みの結果（LLM Proxy で kind: 'tool_call' として1回だけ decide したもの）から Intent と承認を保存する。
-// 中で decide を呼ばない。状態の決め方は IA §3.5 の表を上から（試し実行 → 影 → allow → approve → deny・halt・handoff）。
+// 中で decide を呼ばない。状態の決め方は IA §3.5 の表を上から（試し実行 → allow → approve → deny・halt・handoff）。
 // intentHash・destination_key・option_digest・taint_snapshot・期限（kernel の computeApprovalExpiry）・decision_detail を入れる。
-// 承認の行は本番のタスクだけ（リハーサル・影のタスクは承認の行を作らない：DB §4.6・IA §3.22）
+// 承認の行は本番のタスクだけ（試し実行のタスクは承認の行を作らない：DB §4.6）
 
 import {
   computeApprovalExpiry,
@@ -34,7 +34,7 @@ export interface RecordMcpIntentInput {
   /** 判定に使った引数（trimRoleStrings 済み）。Gateway はこのまま送る */
   args: JsonObject;
   origin: "agent" | "deliver";
-  /** 判定の結果（decide の戻り値そのもの。影でも記録は判定どおり） */
+  /** 判定の結果（decide の戻り値そのもの） */
   result: DecideResult;
   policy: EffectivePolicy;
   policyHash: Hex64;
@@ -48,7 +48,6 @@ export interface RecordedMcpIntent {
   status: IntentStatus;
   agentStatus: AgentIntentStatus;
   approvalId: Uuid | null;
-  enforced: boolean;
   intentHash: Hex64;
   destinationKey: Hex64;
   optionDigest: Hex64;
@@ -61,32 +60,16 @@ function agentStatusOf(decision: DecideResult["decision"]): AgentIntentStatus {
   return "denied";
 }
 
-/**
- * 影の走行で「記録だけ」にする判定か（SW §4.5-2、KD §8-40）：deny・approve・handoff と Breaker の halt。
- * Kill Switch・タスクの終了・予算の halt は影でも効かせる（費用と停止は守る）。allow はそもそも止めない
- */
-export function shadowIgnores(r: Pick<DecideResult, "decision"> & { reasonCode: string }): boolean {
-  if (r.decision === "allow") return false;
-  if (r.decision === "halt") return r.reasonCode === "breaker_tripped";
-  return true;
-}
-
 /** IA §3.5 の表（上から）。halt・handoff は denied（IA §8-9） */
 export function intentStatusFor(
-  task: Pick<TaskRow, "is_dry_run" | "rehearsal_run_id" | "shadow">,
-  r: Pick<DecideResult, "decision"> & { reasonCode: string },
-): { status: Extract<IntentStatus, "simulated" | "denied" | "pending_approval" | "approved">; agentStatus: AgentIntentStatus; enforced: boolean } {
-  // 試し実行（リハーサルでない）は判定にかかわらず simulated（BR-24）。戻り値は判定どおり
-  if (task.is_dry_run && task.rehearsal_run_id === null) return { status: "simulated", agentStatus: agentStatusOf(r.decision), enforced: true };
-  if (task.shadow) {
-    // 影でも Kill Switch・予算の halt は効かせる（タスクは止まる。Intent は実行しない）
-    if (r.decision === "halt" && !shadowIgnores(r)) return { status: "denied", agentStatus: "denied", enforced: true };
-    // 影の走行は記録だけ。gateway が auto として sim-world に書く（BR-67 ③、SW §4.5-3）
-    return { status: "approved", agentStatus: "accepted", enforced: false };
-  }
-  if (r.decision === "allow") return { status: "approved", agentStatus: "accepted", enforced: true };
-  if (r.decision === "approve") return { status: "pending_approval", agentStatus: "pending_approval", enforced: true };
-  return { status: "denied", agentStatus: "denied", enforced: true };
+  task: Pick<TaskRow, "is_dry_run">,
+  r: Pick<DecideResult, "decision">,
+): { status: Extract<IntentStatus, "simulated" | "denied" | "pending_approval" | "approved">; agentStatus: AgentIntentStatus } {
+  // 試し実行は判定にかかわらず simulated（BR-24）。戻り値は判定どおり
+  if (task.is_dry_run) return { status: "simulated", agentStatus: agentStatusOf(r.decision) };
+  if (r.decision === "allow") return { status: "approved", agentStatus: "accepted" };
+  if (r.decision === "approve") return { status: "pending_approval", agentStatus: "pending_approval" };
+  return { status: "denied", agentStatus: "denied" };
 }
 
 /**
@@ -95,7 +78,7 @@ export function intentStatusFor(
  */
 export async function recordMcpIntent(tx: Tx, ctx: WsCtx, input: RecordMcpIntentInput): Promise<RecordedMcpIntent> {
   const { task, mcp, args, result, now } = input;
-  const { status, agentStatus, enforced } = intentStatusFor(task, result);
+  const { status, agentStatus } = intentStatusFor(task, result);
   const dKey = destinationKey(mcp.action, args, mcp.info.argRoles);
   const oDigest = optionDigest(mcp.action, args, mcp.info.argRoles);
   const intentHash = computeMcpIntentHash({
@@ -134,7 +117,7 @@ export async function recordMcpIntent(tx: Tx, ctx: WsCtx, input: RecordMcpIntent
       reasonCode: result.reasonCode,
       matchedRule: result.matchedRule,
       decisionDetail: result.detail === undefined ? null : (structuredClone(result.detail) as unknown as JsonObject),
-      enforced,
+      enforced: true,
       policyHash: input.policyHash,
       intentHash,
       expiresAt: expiry?.expiresAt ?? null,
@@ -143,8 +126,7 @@ export async function recordMcpIntent(tx: Tx, ctx: WsCtx, input: RecordMcpIntent
   );
 
   let approvalId: Uuid | null = null;
-  const live = task.rehearsal_run_id === null && !task.shadow && !task.is_dry_run;
-  if (status === "pending_approval" && live && expiry !== null) {
+  if (status === "pending_approval" && !task.is_dry_run && expiry !== null) {
     const members = await listMembershipRoles(tx, ctx);
     const roles: Record<string, KernelMemberRole> = Object.fromEntries(members.map((m) => [m.user_id, m.role]));
     const approverIds = computeApproverIds({
@@ -202,7 +184,7 @@ export async function recordMcpIntent(tx: Tx, ctx: WsCtx, input: RecordMcpIntent
         destinationKey: dKey,
         optionDigest: oDigest,
         policyHash: input.policyHash,
-        enforced,
+        enforced: true,
         tainted: isTainted(input.taint),
       },
     },
@@ -228,7 +210,6 @@ export async function recordMcpIntent(tx: Tx, ctx: WsCtx, input: RecordMcpIntent
     status,
     agentStatus,
     approvalId,
-    enforced,
     intentHash,
     destinationKey: dKey,
     optionDigest: oDigest,

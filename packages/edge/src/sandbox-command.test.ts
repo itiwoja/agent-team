@@ -11,7 +11,7 @@ import { insertWorkspaceSnapshot, SANDBOX_COMMAND_REFUSED_OUTPUT } from "@open-t
 import type { ScriptedStep } from "@open-team/llm";
 import { createTarGz, readTarGz, runExecutor, type SandboxTransport } from "@open-team/sandbox";
 import { buildEdge, call, llmRequest, USAGE } from "./__fixtures__/env.ts";
-import { T0, fxWorkspace, seedAgent, seedChainAsk, seedTask, tokenFor } from "./__fixtures__/shop.ts";
+import { T0, fxWorkspace, seedAgent, seedChainAsk, seedTask, tokenFor } from "./__fixtures__/seed.ts";
 import { createRuntime, type SandboxProvider } from "./runtime.ts";
 import { RUN_SHELL_SHAPE_TEXT, RUN_SHELL_TAINTED_TEXT, commandDeniedNote, judgeCommand } from "./sandbox-command.ts";
 import { sandboxEdgeOf } from "./sandbox.ts";

@@ -1,12 +1,10 @@
-// 試験の世界：仕入れ係の世界（sim-world の shop）のコネクタ・ツールと、用意した依頼の2体（受信箱係 → 仕入れ係）を DB に入れる。
-// 値は sim-core の SHOP_CONNECTORS・SHOP_TOOL_INPUT_SCHEMAS・SHOP_DEMO_FORMATION と同じ（edge は sim-core に依存しないので写した）。
+// 試験の世界：例の MCP コネクタ（在庫・仕入れ先・メール・銀行）とツールと、用意した依頼の2体（受信箱係 → 仕入れ係）を DB に入れる。
 // 実効ポリシーは kernel の composeAll（本番のオーナーの初期投入 G-08 と同じ作り方）、tool_hash は toolHashOf
 
 import {
   DEFAULT_CEILINGS,
   composeAll,
   defaultWorkspacePolicy,
-  hashCanonical,
   sha256Hex,
   toolHashOf,
   type AgentDefinitionInput,
@@ -18,26 +16,26 @@ import {
   type ToolClassification,
   type ToolHash,
 } from "@open-team/kernel";
-import { appendAuditLog, withTransaction, type Db, type Queryable, type Tx, type Uuid, type WsCtx } from "@open-team/db";
-import { fxRehearsalCase, fxRehearsalRun, fxRehearsalScenario, fxSimExecution, fxWorkspace, type FxWorkspace } from "@open-team/db/testing";
+import { withTransaction, type Db, type Queryable, type Tx, type Uuid, type WsCtx } from "@open-team/db";
+import { fxWorkspace, type FxWorkspace } from "@open-team/db/testing";
 import { issueTaskToken } from "../tokens.ts";
 
 export const T0 = new Date("2026-10-12T09:00:00.000Z"); // 18:00 JST
 
-export interface ShopToolDef {
+export interface FxToolDef {
   name: string;
   classification: ToolClassification;
   argRoles: ArgRoleMap;
   description: string;
   inputSchema: JsonObject;
 }
-export interface ShopConnectorDef {
+export interface FxConnectorDef {
   slug: string;
   displayName: string;
-  tools: ShopToolDef[];
+  tools: FxToolDef[];
 }
 
-export const SHOP: readonly ShopConnectorDef[] = [
+export const FX_CONNECTORS: readonly FxConnectorDef[] = [
   {
     slug: "store",
     displayName: "店舗の在庫",
@@ -157,13 +155,13 @@ export interface SeededConnector {
 }
 
 /** コネクタとツールを入れる（manifest の分類・役割で確定した状態：MT §3.14 の 7） */
-export async function seedShopConnectors(q: Queryable, ws: FxWorkspace, opts: { disabled?: string[] } = {}): Promise<Record<string, SeededConnector>> {
+export async function seedConnectors(q: Queryable, ws: FxWorkspace, opts: { disabled?: string[] } = {}): Promise<Record<string, SeededConnector>> {
   const out: Record<string, SeededConnector> = {};
-  for (const c of SHOP) {
+  for (const c of FX_CONNECTORS) {
     const r = await q.query<{ id: Uuid }>(
       `INSERT INTO connectors (workspace_id, slug, display_name, kind, url, auth, enabled, created_at, updated_at)
-       VALUES ($1, $2, $3, 'sim', $4, $5, $6, $7, $7) RETURNING id`,
-      [ws.workspaceId, c.slug, c.displayName, `https://sim-world.test/mcp/shop/${c.slug}`, { type: "none" }, !(opts.disabled ?? []).includes(c.slug), T0],
+       VALUES ($1, $2, $3, 'mcp_remote', $4, $5, $6, $7, $7) RETURNING id`,
+      [ws.workspaceId, c.slug, c.displayName, `https://mcp.test/mcp/${c.slug}`, { type: "none" }, !(opts.disabled ?? []).includes(c.slug), T0],
     );
     const connectorId = r.rows[0]!.id;
     const tools: SeededConnector["tools"] = {};
@@ -251,7 +249,7 @@ export interface SeededAgent {
 
 /** エージェント・スナップショット（effective_policies は composeAll）・仕事 */
 export async function seedAgent(db: Db | Tx, ws: FxWorkspace, def: AgentDefinitionInput, opts: { status?: "active" | "idle" } = {}): Promise<SeededAgent> {
-  const composed = composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy(ws.kind), agent: def });
+  const composed = composeAll({ ceilings: DEFAULT_CEILINGS, workspacePolicy: defaultWorkspacePolicy(ws.kind, FX_CONNECTORS.map((c) => c.slug)), agent: def });
   if (composed.violations.length > 0) throw new Error(`定義がポリシーを超えている：${composed.violations.map((v) => v.path).join("・")}`);
   const effective = Object.fromEntries(Object.entries(composed.jobs).map(([slug, r]) => [slug, { policy: r.effective, hash: r.effectivePolicyHash }]));
   return withTransaction(db, async (tx) => {
@@ -334,21 +332,19 @@ export interface SeedTaskOptions {
   stepsUsed?: number;
   deniedCount?: number;
   startedAt?: Date;
-  rehearsal?: { runId: Uuid; scenarioId: Uuid; simExecutionId: Uuid; shadow: boolean };
   dryRun?: boolean;
 }
 
-/** タスク（既定は本番の queued）。リハーサルは rehearsal を渡す（dry_run・走行の ID つき） */
+/** タスク（既定は本番の queued）。試し実行は dryRun を渡す */
 export async function seedTask(q: Queryable, ws: FxWorkspace, agent: SeededAgent, jobSlug: string, o: SeedTaskOptions = {}): Promise<Uuid> {
   const status = o.status ?? "queued";
-  const reh = o.rehearsal ?? null;
-  const dryRun = reh !== null || o.dryRun === true;
+  const dryRun = o.dryRun === true;
   const taint = o.taint ?? { tainted: false, sources: [] };
   const r = await q.query<{ id: Uuid }>(
     `INSERT INTO tasks (workspace_id, requester_id, agent_id, agent_snapshot_id, job_id, ask_id, ask_run_id, ask_member_id, input_task_ids,
-                        trigger_type, is_dry_run, rehearsal_run_id, rehearsal_scenario_id, shadow, sim_execution_id, execution_variant,
-                        prompt, tainted, taint_sources, status, cost_usd, steps_used, denied_count, started_at, queued_at, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $25, $25)
+                        trigger_type, is_dry_run, prompt, tainted, taint_sources, status, cost_usd, steps_used, denied_count, started_at,
+                        queued_at, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::uuid[], $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $20, $20)
      RETURNING id`,
     [
       ws.workspaceId,
@@ -362,11 +358,6 @@ export async function seedTask(q: Queryable, ws: FxWorkspace, agent: SeededAgent
       o.inputTaskIds ?? [],
       dryRun ? "dry_run" : o.ask ? "ask" : "manual",
       dryRun,
-      reh?.runId ?? null,
-      reh?.scenarioId ?? null,
-      reh?.shadow ?? false,
-      reh?.simExecutionId ?? null,
-      reh === null ? null : reh.shadow ? "shadow" : "governed",
       o.prompt === undefined ? "仕入れ先のメールを読んで、在庫を見て、必要なら発注して" : o.prompt,
       taint.tainted,
       [...taint.sources],
@@ -381,44 +372,9 @@ export async function seedTask(q: Queryable, ws: FxWorkspace, agent: SeededAgent
   return r.rows[0]!.id;
 }
 
-/** リハーサルの走行・試験・状況・sim の走行（タスクの FK） */
-export async function seedRehearsal(db: Db, ws: FxWorkspace, jobId: Uuid, opts: { shadow?: boolean } = {}) {
-  const { runId } = await fxRehearsalRun(db, ws, { jobId, status: "running" });
-  const { caseId } = await fxRehearsalCase(db, ws, { jobId });
-  const { scenarioId } = await fxRehearsalScenario(db, ws, { runId, caseId });
-  const { executionId } = await fxSimExecution(db, ws, { rehearsalRunId: runId, variant: opts.shadow ? "shadow" : "governed" });
-  return { runId, scenarioId, simExecutionId: executionId, shadow: opts.shadow === true };
-}
-
 /** トークンを付ける（app の /internal/tasks/:id/run が runTask の前にすること） */
 export async function tokenFor(db: Db, ws: FxWorkspace, taskId: Uuid, now: Date = T0): Promise<string> {
   return db.transaction((tx) => issueTaskToken(tx, ws.ctx as WsCtx, taskId, now));
-}
-
-/** 有効な合格証（本番のルールの auto に要る：BR-81）。tool_hashes はその仕事に付与した全ツール（M-49） */
-export async function seedCertificate(
-  db: Db,
-  ws: FxWorkspace,
-  jobId: Uuid,
-  toolHashes: Array<{ action: string; toolHash: string }>,
-  modelId: string,
-): Promise<Uuid> {
-  const { runId } = await fxRehearsalRun(db, ws, { jobId, status: "done" });
-  return db.transaction(async (tx) => {
-    const audit = await appendAuditLog(
-      tx,
-      ws.workspaceId,
-      { eventType: "rehearsal.certificate_issued", actorType: "system", actorId: "app", payload: { jobId } },
-      T0,
-    );
-    const r = await tx.query<{ id: Uuid }>(
-      `INSERT INTO rehearsal_certificates (workspace_id, job_id, rehearsal_run_id, policy_hash, tool_hashes, model_id, case_set_hash, case_count,
-                                           summary, cost_usd, certificate_hash, audit_seq, issued_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, 12, '{}', 0.3, $8, $9, $10) RETURNING id`,
-      [ws.workspaceId, jobId, runId, hashCanonical({ p: 1 }), toolHashes, modelId, hashCanonical({ c: 1 }), hashCanonical({ cert: jobId }), audit.seq, T0],
-    );
-    return r.rows[0]!.id;
-  });
 }
 
 export { fxWorkspace };

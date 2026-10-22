@@ -16,12 +16,12 @@ import {
   inboxDefinition,
   seedAgent,
   seedChainAsk,
-  seedShopConnectors,
+  seedConnectors,
   seedTask,
   supplierDefinition,
   tokenFor,
   type SeededAsk,
-} from "./__fixtures__/shop.ts";
+} from "./__fixtures__/seed.ts";
 import { TEAM_NO_REPLY_TEXT, TEAM_POSTED_TEXT, TEAM_RECIPIENT_STOPPED_TEXT } from "./team.ts";
 
 const T = useTestDb();
@@ -39,7 +39,7 @@ interface Posted {
 /** 受信箱係（1段目・済み）→ 仕入れ係（2段目・窓口）。受信箱係のタスクは報告つきで終わっている */
 async function setup(db: Db, o: { inboxDone?: boolean } = {}) {
   const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-  await seedShopConnectors(db, ws);
+  await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());
   const ask = await seedChainAsk(db, ws, [

@@ -1,11 +1,11 @@
-// @open-team/platform：app・gateway・sim-world が共有する土台（cross-check §3.1。SO §3.1・3.9・3.17・2.11）
+// @open-team/platform：app・gateway が共有する土台（cross-check §3.1。SO §3.1・3.9・3.17・2.11）
 // 環境変数の読み方・エラーの形・構造化ログとマスク・サービス間の認証（共有トークン）・本当の時刻と費用の日の区切り
 // runner はこのパッケージを import しない（鍵・環境変数に届かない：15:487、.dependency-cruiser.cjs の runner-no-secrets）
 //
 // 使い方（gateway の例）：
 //   const r = new EnvReader(process.env);
 //   const authConfig = readServiceAuthEnv(r);
-//   const { missing } = r.done({});                       // 名前だけ（D-47）。gateway・sim-world は足りなければ起動しない
+//   const { missing } = r.done({});                       // 名前だけ（D-47）。gateway は足りなければ起動しない
 //   const log = createLogger({ service: "gateway", commit: r.string("COMMIT_SHA") });
 //   const auth = createServiceAuth(authConfig, { log });
 //   const app = new Hono<PlatformEnv>();

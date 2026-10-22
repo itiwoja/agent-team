@@ -1,5 +1,5 @@
 // タスクのトークン（SO §3.10、rt:98、si:35）：256ビットの乱数、DB には SHA-256 だけ、期限 max_minutes + 5分。
-// edge・gateway はトークンからワークスペース・タスク・kind・rehearsal_run_id・shadow を引き直す（runner の値を信じない：15:486）
+// edge・gateway はトークンからワークスペース・タスク・kind を引き直す（runner の値を信じない：15:486）
 
 import { EdgeError } from "@open-team/runner";
 import { hashTaskToken, newSecretToken, wsCtxOf, type Queryable, type TaskRow, type TaskStatus, type Tx, type WorkspaceRow, type WsCtx } from "@open-team/db";

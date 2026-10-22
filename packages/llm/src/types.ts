@@ -54,7 +54,7 @@ export interface LlmResponse {
 export interface LlmClient {
   /** 費用の記録に残すプロバイダー（未設定は Gemini 相当）。API キーは含めない */
   provider?: LlmProvider;
-  /** Stable policy/certificate identity, distinct from the model ID sent to an API. */
+  /** 提供元・接続先・能力まで含めたモデルの識別子（API に送るモデルの ID とは別。設定の変化を見分けるのに使う） */
   modelIdentity?(model: string): string;
   /** Provider-scoped pricing; no fallback to another provider's model names. */
   priceFor?(model: string): PriceEntry | null;

@@ -8,8 +8,7 @@ import { useTestDb } from "@open-team/db/testing";
 import { insertAskTask } from "@open-team/db/asks";
 import { addTaskWebUrls } from "@open-team/db/edge";
 import { buildEdge, call, llmRequest, mcp, USAGE, type TestEdge } from "./__fixtures__/env.ts";
-import { fxWorkspace, seedAgent, seedChainAsk, seedRehearsal, seedShopConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/shop.ts";
-import type { RehearsalWeb } from "./runtime.ts";
+import { fxWorkspace, seedAgent, seedChainAsk, seedConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/seed.ts";
 import type { FetchedPage, PageFetcher } from "./web-page.ts";
 import { seenUrlHash, SEEN_URLS_MAX_PER_TASK, userTextWebUrlHashes } from "./web-seen.ts";
 
@@ -22,18 +21,17 @@ interface W {
   tools: ReadonlyArray<{ name: string }>;
 }
 
-async function setup(db: Db, o: { script: readonly ScriptedStep[]; fetchPage?: PageFetcher; rehearsalWeb?: RehearsalWeb }): Promise<W> {
+async function setup(db: Db, o: { script: readonly ScriptedStep[]; fetchPage?: PageFetcher }): Promise<W> {
   const ws = await fxWorkspace(db, { kind: "owner" });
-  await seedShopConnectors(db, ws);
+  await seedConnectors(db, ws);
   const def = supplierDefinition();
   // オーナーの既定と同じく、すべてのドメインを付与した担当（policy.ts の allow_domains:["*"]）
   const agent = await seedAgent(db, ws, { ...def, grants: { ...def.grants, web: { allow_domains: ["*"] } } });
-  const reh = o.rehearsalWeb ? await seedRehearsal(db, ws, agent.jobs.reorder!.jobId) : null;
-  const taskId = await seedTask(db, ws, agent, "reorder", reh === null ? {} : { status: "running", rehearsal: reh });
+  const taskId = await seedTask(db, ws, agent, "reorder");
   const token = await tokenFor(db, ws, taskId);
   const env = buildEdge(db, {
     script: o.script,
-    extra: { ...(o.fetchPage ? { fetchPage: o.fetchPage } : {}), ...(o.rehearsalWeb ? { rehearsalWeb: o.rehearsalWeb } : {}) },
+    extra: o.fetchPage ? { fetchPage: o.fetchPage } : {},
   });
   const ctx = await env.edge.getTaskContext(token);
   await env.edge.llmMessages(token, llmRequest(ctx.tools));
@@ -218,30 +216,6 @@ describe("SG-04：汚染後の web_fetch", () => {
     expect(fetched).toEqual([start, "https://a.example/l1"]);
     expect(await seenCount(db, w.taskId)).toBe(SEEN_URLS_MAX_PER_TASK);
   });
-
-  it("リハーサルでも同じ：模擬の世界の検索結果の URL は辿れ、クエリを書き換えた URL は口を呼ばずに拒む", async () => {
-    const { db } = T();
-    const asked: string[] = [];
-    const w = await setup(db, {
-      rehearsalWeb: {
-        fetch: async ({ url }) => {
-          asked.push(url);
-          return { status: 200, title: "価格表", body: "豆の価格を改定しました", finalUrl: url };
-        },
-        search: async () => [{ title: "価格表", url: "https://news.example.jp/prices", snippet: "豆の価格" }],
-      },
-      script: [
-        {
-          parts: [searchCall("s1", "豆 価格"), fetchCall("f1", "https://news.example.jp/prices"), fetchCall("f2", "https://news.example.jp/prices?memo=予定の中身")],
-          usage: USAGE,
-        },
-      ],
-    });
-    await w.env.edge.callTool(w.token, "s1");
-    expect(textOf(await w.env.edge.callTool(w.token, "f1"))).toContain("URL：https://news.example.jp/prices");
-    expect(await w.env.edge.callTool(w.token, "f2")).toEqual(DENIED);
-    expect(asked).toEqual(["https://news.example.jp/prices"]);
-  });
 });
 
 describe("SG-04：汚染後の web_search の検索語", () => {
@@ -284,7 +258,7 @@ describe("SG-04：タスクを作るときに入れる URL（利用者の文・�
   /** 依頼のタスクを db の insertAskTask で作る（app の createMemberTask と同じく、利用者の文の URL の鍵を渡す） */
   async function askWorld(db: Db, kind: "owner" | "guest" = "owner") {
     const ws = await fxWorkspace(db, { kind });
-    await seedShopConnectors(db, ws);
+    await seedConnectors(db, ws);
     // 担当の指示（プランナーの LLM が書く instructions）にだけ URL がある
     const base = supplierDefinition({}, { instructions: `${PLANNER_URL} も見て、在庫を確認してください。` });
     const agent = await seedAgent(db, ws, { ...base, grants: { ...base.grants, web: { allow_domains: ["*"] } } });

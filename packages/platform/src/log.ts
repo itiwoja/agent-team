@@ -11,7 +11,7 @@ import { SESSION_COOKIE, knownSecretsFromEnv, redact } from "./mask.ts";
 export type LogSeverity = "DEBUG" | "INFO" | "NOTICE" | "WARNING" | "ERROR" | "CRITICAL" | "ALERT" | "EMERGENCY";
 
 /** ログを出すサービス（SO §2.1 の ServiceName） */
-export type ServiceName = "app" | "gateway" | "sim-world" | "gcal" | "github";
+export type ServiceName = "app" | "gateway" | "gcal" | "github";
 
 /** 呼び出し側が渡す1件。event は機械で数える名前（例 internal_auth.denied） */
 export interface LogInput {
@@ -23,7 +23,6 @@ export interface LogInput {
   taskId?: string | null;
   /** 15:459「タスク ID・Intent ID で横断検索」 */
   intentId?: string | null;
-  rehearsalRunId?: string | null;
   [k: string]: unknown;
 }
 
@@ -37,7 +36,6 @@ export interface LogRecord {
   workspaceId: string | null;
   taskId: string | null;
   intentId?: string | null;
-  rehearsalRunId?: string | null;
   commit?: string;
   [k: string]: unknown;
 }
@@ -48,7 +46,6 @@ export interface LogContext {
   workspaceId?: string | null;
   taskId?: string | null;
   intentId?: string | null;
-  rehearsalRunId?: string | null;
 }
 
 export interface Logger {
@@ -73,7 +70,7 @@ export interface LoggerOptions {
   write?: (line: string) => void;
 }
 
-const STANDARD_KEYS = new Set(["severity", "message", "service", "event", "requestId", "workspaceId", "taskId", "intentId", "rehearsalRunId", "commit"]);
+const STANDARD_KEYS = new Set(["severity", "message", "service", "event", "requestId", "workspaceId", "taskId", "intentId", "commit"]);
 
 const SEVERITIES: ReadonlySet<string> = new Set<LogSeverity>(["DEBUG", "INFO", "NOTICE", "WARNING", "ERROR", "CRITICAL", "ALERT", "EMERGENCY"]);
 
@@ -93,8 +90,6 @@ function buildRecord(service: ServiceName, commit: string | undefined, ctx: LogC
   };
   const intentId = pick("intentId");
   if (intentId !== undefined) record.intentId = intentId;
-  const rehearsalRunId = pick("rehearsalRunId");
-  if (rehearsalRunId !== undefined) record.rehearsalRunId = rehearsalRunId;
   if (commit) record.commit = commit;
   for (const [k, v] of Object.entries(entry)) {
     if (!STANDARD_KEYS.has(k) && v !== undefined) record[k] = v;
@@ -221,7 +216,7 @@ export function requestSecretsOf(headers: Headers): string[] {
 export interface RequestContextOptions {
   logger: Logger;
   /**
-   * 来た X-Request-Id を使う（形が合うときだけ）。内部のサービス（gateway・sim-world）で呼び出し元とログをつなぐとき。
+   * 来た X-Request-Id を使う（形が合うときだけ）。内部のサービス（gateway）で呼び出し元とログをつなぐとき。
    * 既定は false：毎回サーバーで作る（app の公開の入口：SO §3.3 の 2）
    */
   acceptIncoming?: boolean;

@@ -2,7 +2,7 @@
 // ログに出す前・保存する前に [REDACTED] に置き換える。既知の値（環境変数の秘密・リクエストのトークン）と、決まった形のパターンの2段。
 // 11 は secretlint をライブラリとして使うとするが、依存を足さない決まりなので、NFR-057 の形（ghs_・sk-・AKIA・秘密鍵のヘッダー）と
 // SO §3.17 の形（Authorization・Cookie・JWT・ya29.・URL のパスワード）を正規表現で持つ【決定：platform】。
-// sim-world のカナリア（'OT-CANARY-…'。U-08）はわざと当てない（ツールの結果に使っても、漏えいの試験を壊さない）
+// カナリア（'OT-CANARY-…'。U-08）はわざと当てない（ツールの結果に使っても、漏えいの試験を壊さない）
 
 export const REDACTED = "[REDACTED]";
 
@@ -18,7 +18,6 @@ export const SECRET_ENV_NAMES = [
   "GUEST_ENTRY_TOKEN",
   "SESSION_COOKIE_SECRET",
   "INTERNAL_SHARED_TOKEN",
-  "SIM_WORLD_SHARED_TOKEN",
   "DATABASE_URL",
   "DATABASE_URL_MAINT",
   "VAPID_PRIVATE_KEY",

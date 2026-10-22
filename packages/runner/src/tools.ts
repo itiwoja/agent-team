@@ -354,7 +354,7 @@ export interface TaskToolSelection {
   teamBoard: boolean;
   /** 追いのターン（FR-064） */
   followup: boolean;
-  /** 利用者に聞けるか（本番の依頼のタスクだけ。リハーサル・試し実行・追いのターン・まとめ役には渡さない） */
+  /** 利用者に聞けるか（本番の依頼のタスクだけ。試し実行・追いのターン・まとめ役には渡さない） */
   askUser?: boolean;
   /** 作業場（サンドボックス）が使えるか（本番のオーナーのワークスペースで、作業場のプロバイダーがあるときだけ：D-116） */
   sandbox?: boolean;
@@ -410,7 +410,7 @@ export function selectTaskToolNames(sel: TaskToolSelection): RuntimeToolName[] {
     for (const n of TEAM_TOOLS) names.add(n);
   }
 
-  // 8. 試し実行・リハーサルでも同じ（経路を変えない：ADR-015）ので、ここに分岐はない
+  // 8. 試し実行でも同じ（経路を変えない：ADR-015）ので、ここに分岐はない
   return sortByToolOrder(names);
 }
 

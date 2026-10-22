@@ -8,7 +8,7 @@ import type { Db, IntentStatus, TaskStatus, Uuid } from "@open-team/db";
 import { createEdge } from "../edge.ts";
 import type { EdgeDeps } from "../runtime.ts";
 import type { EdgeLimits, SpendLimits } from "../limits.ts";
-import { T0 } from "./shop.ts";
+import { T0 } from "./seed.ts";
 
 export type ReadHandler = (req: GwToolsCallRequest, token: string) => GwToolsCallResponse | Promise<GwToolsCallResponse>;
 

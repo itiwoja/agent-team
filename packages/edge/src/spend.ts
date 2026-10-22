@@ -1,14 +1,14 @@
-// 費用の守り（BR-62：全体1日 $15・ゲスト1日 $4・リハーサル1回 $3。15:228）。decide の外（M-19）
+// 費用の守り（BR-62：全体1日 $15・ゲスト1日 $4。15:228）。decide の外（M-19）
 // - checkSpend：Gemini を呼ぶたび、呼ぶ前に「使った額 ＋ 見積もり ＞ 上限」なら呼ばない（ちょうどは通す：decide の手順2と同じ）
-// - canStartWork：タスク・リハーサル・依頼を始める前に「使った額 ≥ 上限」なら始めない（見積もりなし：M-38）
-// 金額は整数のマイクロドルで比べる（cross-check §1.7）。順番は「全体 → ゲスト → リハーサル」（SO §3.12）
+// - canStartWork：タスク・依頼を始める前に「使った額 ≥ 上限」なら始めない（見積もりなし：M-38）
+// 金額は整数のマイクロドルで比べる（cross-check §1.7）。順番は「全体 → ゲスト」（SO §3.12）
 
 import { AppError, secondsUntilTokyoDayEnd } from "@open-team/platform";
 import { system, wsCtxOf, type Queryable, type Uuid, type WorkspaceKind, type WorkspaceRow } from "@open-team/db";
-import { countActiveLiveTasks, sumRehearsalRunCostUsd, sumWorkspaceDayCostUsd } from "@open-team/db/edge";
+import { countActiveLiveTasks, sumWorkspaceDayCostUsd } from "@open-team/db/edge";
 import { BUDGET_TIME_ZONE, SPEND_LIMITS, type SpendLimits } from "./limits.ts";
 
-export type SpendScope = "global" | "workspace" | "rehearsal_run";
+export type SpendScope = "global" | "workspace";
 
 export interface SpendDenied {
   ok: false;
@@ -23,21 +23,18 @@ export type SpendCheck = { ok: true } | SpendDenied;
 export interface SpendTarget {
   workspaceId: Uuid;
   workspaceKind: WorkspaceKind;
-  rehearsalRunId: Uuid | null;
 }
 
 interface Spent {
   global: number;
   workspace: number | null;
-  rehearsal: number | null;
 }
 
 async function spentOf(q: Queryable, target: SpendTarget, now: Date): Promise<Spent> {
   const ctx = { workspaceId: target.workspaceId, kind: target.workspaceKind, userId: null };
   const global = system.usdToMicro(await system.getPlatformDayCostUsd(q, now, BUDGET_TIME_ZONE));
   const workspace = target.workspaceKind === "guest" ? system.usdToMicro(await sumWorkspaceDayCostUsd(q, ctx, now, BUDGET_TIME_ZONE)) : null;
-  const rehearsal = target.rehearsalRunId === null ? null : system.usdToMicro(await sumRehearsalRunCostUsd(q, ctx, target.rehearsalRunId));
-  return { global, workspace, rehearsal };
+  return { global, workspace };
 }
 
 /**
@@ -59,44 +56,37 @@ export async function checkSpend(
       : null;
   return (
     over("global", spent.global, limits.platformDayMicroUsd) ??
-    over("workspace", spent.workspace, limits.guestDayMicroUsd) ??
-    over("rehearsal_run", spent.rehearsal, limits.rehearsalRunMicroUsd) ?? { ok: true }
+    over("workspace", spent.workspace, limits.guestDayMicroUsd) ?? { ok: true }
   );
 }
 
 export type StartDenyReason = "kill_switch" | "concurrency" | SpendScope;
 
 /**
- * 始める前の確かめ（SO §3.12 canStartWork。タスク・リハーサル・FR-065 の1件・再リハーサル・依頼）。
- * 1 Kill Switch → 始めない／2 そのワークスペースの provisioning・running の本番のタスクが max_concurrent_tasks 以上 → 待つ（BR-08。
- * リハーサルのタスクは別枠で数えない：M-48）／3 全体の今日の費用 ≥ $15／4 ゲストの今日の費用 ≥ $4／5 リハーサルの走行の費用 ≥ $3
+ * 始める前の確かめ（SO §3.12 canStartWork。タスク・FR-065 の1件・依頼）。
+ * 1 Kill Switch → 始めない／2 そのワークスペースの provisioning・running の本番のタスクが max_concurrent_tasks 以上 → 待つ（BR-08）／
+ * 3 全体の今日の費用 ≥ $15／4 ゲストの今日の費用 ≥ $4
  */
 export async function canStartWork(
   q: Queryable,
   ws: Pick<WorkspaceRow, "id" | "kind" | "kill_switch_engaged" | "max_concurrent_tasks">,
-  opts: { rehearsalRunId: Uuid | null },
   now: Date,
   limits: SpendLimits = SPEND_LIMITS,
 ): Promise<{ ok: true } | { ok: false; reason: StartDenyReason }> {
   if (ws.kill_switch_engaged) return { ok: false, reason: "kill_switch" };
-  if (opts.rehearsalRunId === null) {
-    const active = await countActiveLiveTasks(q, wsCtxOf(ws));
-    if (active >= ws.max_concurrent_tasks) return { ok: false, reason: "concurrency" };
-  }
-  const spent = await spentOf(q, { workspaceId: ws.id, workspaceKind: ws.kind, rehearsalRunId: opts.rehearsalRunId }, now);
+  const active = await countActiveLiveTasks(q, wsCtxOf(ws));
+  if (active >= ws.max_concurrent_tasks) return { ok: false, reason: "concurrency" };
+  const spent = await spentOf(q, { workspaceId: ws.id, workspaceKind: ws.kind }, now);
   if (spent.global >= limits.platformDayMicroUsd) return { ok: false, reason: "global" };
   if (spent.workspace !== null && spent.workspace >= limits.guestDayMicroUsd) return { ok: false, reason: "workspace" };
-  if (spent.rehearsal !== null && spent.rehearsal >= limits.rehearsalRunMicroUsd) return { ok: false, reason: "rehearsal_run" };
   return { ok: true };
 }
 
 /**
  * タスクの外の呼び出し（設定プランナー・状況の生成）で止めたときの API のエラー（M-38）：
- * 429 DAILY_BUDGET_EXCEEDED（details.scope：global / workspace。Retry-After は次の日の0時（Asia/Tokyo）まで）、
- * リハーサルは 429 REHEARSAL_BUDGET_EXCEEDED
+ * 429 DAILY_BUDGET_EXCEEDED（details.scope：global / workspace。Retry-After は次の日の0時（Asia/Tokyo）まで）
  */
 export function spendDeniedAppError(d: Pick<SpendDenied, "scope">, now: Date): AppError {
-  if (d.scope === "rehearsal_run") return new AppError("REHEARSAL_BUDGET_EXCEEDED");
   return new AppError("DAILY_BUDGET_EXCEEDED", undefined, {
     details: { scope: d.scope },
     headers: { "Retry-After": String(Math.max(1, secondsUntilTokyoDayEnd(now))) },

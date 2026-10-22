@@ -1,9 +1,9 @@
 // タスクの文脈（API-036 getTaskContext の中身。formation-runtime.md §2.6・§2.5・§3.9）。本番どおりの材料から組み立てる：
 // テンプレート（agent_jobs.template）・フェーズ（templatePhases）・ツール（selectTaskTools。§2.5 の手順）・付与された MCP のツール（connector_tools）・
-// 実効ポリシーの要約（固定の文）・受け渡し（BR-71）・編成（ask_members）・「今」（仮想の時計の世界では仮想の時刻）。
+// 実効ポリシーの要約（固定の文）・受け渡し（BR-71）・編成（ask_members）・「今」。
 // runner は信用しない前提（ADR-003）なので、ツールの宣言は LLM Proxy でもここで作ったものだけを使う
 
-import type { EffectivePolicy, Hex64, IsoDateTime } from "@open-team/kernel";
+import type { EffectivePolicy, Hex64 } from "@open-team/kernel";
 import {
   selectTaskTools,
   templatePhases,
@@ -54,14 +54,13 @@ export interface TaskSetup {
 
 /**
  * このタスクで作業場を使えるか（D-116）：作業場のプロバイダーがあり、オーナーのワークスペースの本番の依頼のタスク。
- * リハーサル・影・試し実行・ゲストでは使わない（費用と悪用の面。ゲストは BR-64 と同じ考え）
+ * 試し実行・ゲストでは使わない（費用と悪用の面。ゲストは BR-64 と同じ考え）
  */
-export function sandboxAllowed(task: Pick<TaskRow, "ask_id" | "rehearsal_run_id" | "shadow" | "is_dry_run" | "kind">, workspace: Pick<WorkspaceRow, "kind">, providerAvailable: boolean): boolean {
-  return providerAvailable && workspace.kind === "owner" && task.ask_id !== null && task.rehearsal_run_id === null && !task.shadow && !task.is_dry_run && task.kind === "normal";
+export function sandboxAllowed(task: Pick<TaskRow, "ask_id" | "is_dry_run" | "kind">, workspace: Pick<WorkspaceRow, "kind">, providerAvailable: boolean): boolean {
+  return providerAvailable && workspace.kind === "owner" && task.ask_id !== null && !task.is_dry_run && task.kind === "normal";
 }
 
-function runKindOf(task: Pick<TaskRow, "rehearsal_run_id" | "is_dry_run">): TaskRunKind {
-  if (task.rehearsal_run_id !== null) return "rehearsal";
+function runKindOf(task: Pick<TaskRow, "is_dry_run">): TaskRunKind {
   return task.is_dry_run ? "dry_run" : "live";
 }
 
@@ -144,7 +143,7 @@ export async function loadTaskSetup(
   }
 
   const sandbox = sandboxAllowed(task, workspace, opts.sandboxProvider === true);
-  // スキル（パックで入った手順書）。リハーサルのタスクにも渡す（読むだけで外へ出ない）。
+  // スキル（パックで入った手順書）。試し実行のタスクにも渡す（読むだけで外へ出ない）。
   // システムプロンプトの「# 使えるスキル」に出すのは、運営のパックと同じ中身（名前・説明・本文）のスキルだけ（SG-05）。
   // システムプロンプトは汚染を付ける前に組み立てるので、確かめられないスキルの名前・説明は出さない（load_skill で読めば包んで汚染する）
   const allSkills = await listAgentSkills(q, ctx, agent.id);
@@ -156,12 +155,11 @@ export async function loadTaskSetup(
     webAllowDomains: tp.policy.web.allow_domains,
     guestWorkspace: workspace.kind === "guest",
     formation: shape === null || member === null ? null : { shape, memberCount, isAggregator: member.is_aggregator },
-    // 連絡板（FR-064）：2体以上の編成の本番のタスクに team_post・team_wait を渡す（ひとりには作らない）。
-    // リハーサルのタスクには渡さない：依頼の連絡板（ask_messages）に試験の連絡を混ぜない（BR-67）
-    teamBoard: shape !== null && shape !== "single" && task.rehearsal_run_id === null,
+    // 連絡板（FR-064）：2体以上の編成のタスクに team_post・team_wait を渡す（ひとりには作らない）
+    teamBoard: shape !== null && shape !== "single",
     followup: task.kind === "followup",
-    // 利用者への質問：本番の依頼のタスクだけ（リハーサル・影・試し実行では聞かない）
-    askUser: task.ask_id !== null && task.rehearsal_run_id === null && !task.shadow && !task.is_dry_run && task.kind === "normal",
+    // 利用者への質問：本番の依頼のタスクだけ（試し実行では聞かない）
+    askUser: task.ask_id !== null && !task.is_dry_run && task.kind === "normal",
     sandbox,
     skills: allSkills.length > 0,
   });
@@ -193,7 +191,7 @@ function missingReportText(status: string): string {
 
 /**
  * TaskContext（API-036）を組み立てる。外から来た文字列（依頼の本文・仕事の指示・受け渡しの本文）は秘密情報をマスクして渡す（BR-32、BD-08）。
- * now は「今」の時刻（仮想の時計の世界では呼び出し側が仮想の時刻を渡す）
+ * now は「今」の時刻（実時間の JST で渡す）
  */
 export async function buildTaskContext(
   q: Queryable,
@@ -201,7 +199,6 @@ export async function buildTaskContext(
   setup: TaskSetup,
   opts: {
     now: Date;
-    virtualNow?: IsoDateTime | null;
     knownSecrets?: readonly string[];
     maxTokens?: number;
     /** 始まる前に届いていた連絡（deliverAtStart が渡し済みにしたもの。BR-75） */
@@ -259,7 +256,7 @@ export async function buildTaskContext(
       ...(followupQuestion === undefined ? {} : { followupQuestion }),
     },
     formation: setup.formation === null ? null : structuredClone(setup.formation),
-    now: opts.virtualNow ?? toJstIso(opts.now),
+    now: toJstIso(opts.now),
     limits: { maxTokens: opts.maxTokens ?? EDGE_LIMITS.maxTokensDefault },
   };
 }

@@ -13,7 +13,7 @@ import { getInitialSandboxSnapshot, getInitialSandboxSnapshotTaint, insertAgentS
 import type { ScriptedStep } from "@open-team/llm";
 import { createTarGz, readTarGz, runExecutor, type SandboxTransport } from "@open-team/sandbox";
 import { buildEdge, call, llmRequest, USAGE } from "./__fixtures__/env.ts";
-import { T0, fxWorkspace, seedAgent, seedChainAsk, seedTask, tokenFor } from "./__fixtures__/shop.ts";
+import { T0, fxWorkspace, seedAgent, seedChainAsk, seedTask, tokenFor } from "./__fixtures__/seed.ts";
 import { createRuntime, type SandboxProvider } from "./runtime.ts";
 import { sandboxEdgeOf } from "./sandbox.ts";
 import { skillDigest, trustedSkillDigestsOf } from "./skill-trust.ts";

@@ -858,17 +858,17 @@ describe("上限・停止・状態", () => {
     ];
     const tools = () => ({ c1: { kind: "text", text: "在庫" } as ToolCallResult, r: { kind: "report_accepted", taskId: "t" } as ToolCallResult });
     const live = new FakeEdge(supplierContext(), script(), tools());
-    const rehearsalCtx = supplierContext();
-    rehearsalCtx.isDryRun = true;
-    rehearsalCtx.runKind = "rehearsal";
-    const rehearsal = new FakeEdge(rehearsalCtx, script(), tools());
+    const dryRunCtx = supplierContext();
+    dryRunCtx.isDryRun = true;
+    dryRunCtx.runKind = "dry_run";
+    const dryRun = new FakeEdge(dryRunCtx, script(), tools());
 
     await runTask(live, TOKEN, opts());
-    await runTask(rehearsal, TOKEN, opts());
+    await runTask(dryRun, TOKEN, opts());
 
-    expect(rehearsal.log).toEqual(live.log);
-    expect(rehearsal.requests).toEqual(live.requests);
-    expect(rehearsal.events).toEqual(live.events);
+    expect(dryRun.log).toEqual(live.log);
+    expect(dryRun.requests).toEqual(live.requests);
+    expect(dryRun.events).toEqual(live.events);
   });
 
   it("BD-05 2つのタスクを同時に動かしても状態が混ざらない（タスクごとのトークン・会話）", async () => {

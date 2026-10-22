@@ -6,13 +6,13 @@ import { EdgeError, type ProgressEvent } from "@open-team/runner";
 import { useTestDb } from "@open-team/db/testing";
 import type { Db } from "@open-team/db";
 import { buildEdge, llmRequest, mcp, USAGE } from "./__fixtures__/env.ts";
-import { T0, fxWorkspace, seedAgent, seedShopConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/shop.ts";
+import { T0, fxWorkspace, seedAgent, seedConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/seed.ts";
 
 const T = useTestDb();
 
 async function running(db: Db, script: Parameters<typeof buildEdge>[1] = {}) {
   const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-  await seedShopConnectors(db, ws);
+  await seedConnectors(db, ws);
   const agent = await seedAgent(db, ws, supplierDefinition());
   const taskId = await seedTask(db, ws, agent, "reorder");
   const token = await tokenFor(db, ws, taskId);

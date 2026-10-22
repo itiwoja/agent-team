@@ -1,7 +1,7 @@
 // Gemini の呼び出し（SO §3.12 callGemini。Gemini を呼ぶのは edge のパッケージだけ：D-52、ADR-032:35、15:597）。
 // タスクの LLM Proxy も、設定プランナー・状況の生成（タスクの外）もここを通す。手順：
 // 1 中断・価格表にないモデル（呼ばない：決定 (d)）→ 2 見積もり（入力の上限＋maxTokens＋思考の上限）→
-// 3 1トランザクション：ワークスペースの行のロック → Kill Switch → checkSpend（全体・ゲスト・リハーサル。M-19）→ beforeCall（タスクの decide）→
+// 3 1トランザクション：ワークスペースの行のロック → Kill Switch → checkSpend（全体・ゲスト。M-19）→ beforeCall（タスクの decide）→
 // 4 呼ぶ（やり直しはここの1か所：429・5xx・ネットワークを 1・4・16秒で3回。送れたか・使った量が分からない失敗は見積もりを費用に数える：SO §3.12-6）→
 // 5 1トランザクション：usage_records（＋ afterCall でタスクの費用・ステップ）→ 6 構造化ログ llm.called（本文は出さない）。
 // トランザクションの中で Gemini を呼ばない（G-14）
@@ -40,7 +40,6 @@ export interface GeminiCallContext {
   taskId: Uuid | null;
   agentId: Uuid | null;
   askId: Uuid | null;
-  rehearsalRunId: Uuid | null;
   purpose: GeminiPurpose;
   /** usage_records.phase */
   phase: UsagePhase;
@@ -168,9 +167,9 @@ export async function callGemini(
   req: LlmRequest,
   hooks: CallGeminiHooks = {},
 ): Promise<{ response: LlmResponse; usage: GeminiUsage }> {
-  // usage_records の持ち主は task・agent・ask・rehearsal_run のどれか1つ以上（DB の CHECK。呼ぶ前に確かめる）
-  if (ctx.taskId === null && ctx.agentId === null && ctx.askId === null && ctx.rehearsalRunId === null) {
-    throw new TypeError("callGemini: 費用の持ち主（taskId・agentId・askId・rehearsalRunId）がない");
+  // usage_records の持ち主は task・agent・ask のどれか1つ以上（DB の CHECK。呼ぶ前に確かめる）
+  if (ctx.taskId === null && ctx.agentId === null && ctx.askId === null) {
+    throw new TypeError("callGemini: 費用の持ち主（taskId・agentId・askId）がない");
   }
   if (ctx.signal?.aborted) throw new GeminiCallError("aborted", "LLM の呼び出しを中断しました");
   const price = deps.llm.priceFor ? deps.llm.priceFor(req.model) : findPrice(req.model);
@@ -184,7 +183,7 @@ export async function callGemini(
   const budgetEstimate = deps.llm.estimateMicroUsd ? est * ((deps.retry?.delaysMs ?? LLM_RETRY_DELAYS_MS).length + 1) : est;
   if (!Number.isSafeInteger(budgetEstimate)) throw new GeminiCallError("incompatible_model", "再試行を含む料金見積もりが大きすぎます");
   const limits = deps.spendLimits ?? SPEND_LIMITS;
-  const target = { workspaceId: ctx.workspaceId, workspaceKind: ctx.workspaceKind, rehearsalRunId: ctx.rehearsalRunId };
+  const target = { workspaceId: ctx.workspaceId, workspaceKind: ctx.workspaceKind };
   const wsCtx = { workspaceId: ctx.workspaceId, kind: ctx.workspaceKind, userId: null };
 
   // 3. 呼ぶ前の確かめ（止めた記録はコミットしてから投げる）
@@ -236,7 +235,6 @@ export async function callGemini(
           deps.log.warn("llm.retry", "LLM の呼び出しをやり直します", {
             workspaceId: ctx.workspaceId,
             taskId: ctx.taskId,
-            rehearsalRunId: ctx.rehearsalRunId,
             purpose: ctx.purpose,
             model: req.model,
             retry: info.retry,
@@ -274,7 +272,6 @@ export async function callGemini(
     deps.log.warn("llm.failed", "LLM の呼び出しに失敗しました", {
       workspaceId: ctx.workspaceId,
       taskId: ctx.taskId,
-      rehearsalRunId: ctx.rehearsalRunId,
       model: req.model,
       attempts,
       status: llmError.status,
@@ -307,7 +304,6 @@ export async function callGemini(
   deps.log.info("llm.called", "LLM を呼びました", {
     workspaceId: ctx.workspaceId,
     taskId: ctx.taskId,
-    rehearsalRunId: ctx.rehearsalRunId,
     purpose: ctx.purpose,
     model: usage.model,
     inputTokens: usage.inputTokens,
@@ -330,7 +326,6 @@ function usageRow(ctx: GeminiCallContext, req: LlmRequest, usage: GeminiUsage, p
     taskId: ctx.taskId,
     agentId: ctx.agentId,
     askId: ctx.askId,
-    rehearsalRunId: ctx.rehearsalRunId,
     provider,
     model: usage.model,
     phase: ctx.phase,

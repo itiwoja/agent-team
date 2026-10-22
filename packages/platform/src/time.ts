@@ -1,5 +1,4 @@
 // 本当の時刻（実時間）の注入と、費用の「1日」の区切り（Asia/Tokyo の0時。M-59、SO §9 I-08）
-// 模擬の世界の時計（sim-core の VirtualClock）とは別物で、混ぜない（仮想の時刻で費用の日を数えない）。
 // JST は夏時間がないので、1日 = 24時間・時差は固定の +09:00 で計算する（Intl に頼らない。試験で Intl と突き合わせる）
 
 import { DAY_BOUNDARY_TIMEZONE } from "@open-team/kernel";

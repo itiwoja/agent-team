@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { useTestDb } from "@open-team/db/testing";
 import { HttpProviderClient, type LlmConfig } from "@open-team/llm";
 import { buildEdge, llmRequest } from "./__fixtures__/env.ts";
-import { fxWorkspace, seedAgent, seedShopConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/shop.ts";
+import { fxWorkspace, seedAgent, seedConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/seed.ts";
 
 const T = useTestDb();
 const model = "test-provider-model";
@@ -11,7 +11,7 @@ async function world(provider: "anthropic" | "deepseek" | "openrouter", options:
   const selectedModel = options.haiku55 ? "claude-haiku-5-5" : model;
   const { db } = T();
   const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-  await seedShopConnectors(db, ws);
+  await seedConnectors(db, ws);
   const agent = await seedAgent(db, ws, supplierDefinition());
   const taskId = await seedTask(db, ws, agent, "reorder", { ...(options.costUsd ? { costUsd: options.costUsd } : {}) });
   const token = await tokenFor(db, ws, taskId);

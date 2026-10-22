@@ -1,6 +1,5 @@
 // サービス間の認証（security-ops-deploy.md §2.5・§3.9・§3.11、G-11）
 // 共有トークン（INTERNAL_SHARED_TOKEN を Authorization: Bearer）＋呼び出し元の名前のヘッダー（x-ot-caller）。
-// apps/sim-world の auth.ts と同じ形。
 // 拒否は 403 FORBIDDEN（理由は返さず、ログ internal_auth.denied にだけ残す：SO §3.9、I-20）
 
 import { createHmac, timingSafeEqual } from "node:crypto";
@@ -10,11 +9,11 @@ import { MIN_SECRET_LENGTH, type EnvReader } from "./env.ts";
 import { errorResponse } from "./errors.ts";
 import { loggerOf, silentLogger, type Logger } from "./log.ts";
 
-/** サービス間の呼び出し元（sa-sim は誰も呼ばないので入れない） */
+/** サービス間の呼び出し元 */
 export const SERVICE_CALLERS = ["sa-app", "sa-gateway"] as const;
 export type ServiceCaller = (typeof SERVICE_CALLERS)[number];
 
-/** 呼び出し元の名前を載せるヘッダー（apps/sim-world の CALLER_HEADER と同じ） */
+/** 呼び出し元の名前を載せるヘッダー */
 export const CALLER_HEADER = "x-ot-caller";
 
 export interface ServiceAuthConfig {
@@ -51,7 +50,7 @@ export function bearerTokenOf(authorization: string | null | undefined): string 
 
 /**
  * 定数時間の比較。長さの違いも比較時間から漏らさないよう、両方を HMAC にしてから比べる
- * （apps/app の tokenMatches・apps/sim-world と同じ考え方）
+ * （apps/app の tokenMatches と同じ考え方）
  */
 export function safeEqual(input: string, expected: string): boolean {
   const a = createHmac("sha256", "open-team/platform").update(input).digest();

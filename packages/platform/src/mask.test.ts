@@ -53,7 +53,7 @@ describe("maskSecrets のパターン（NFR-057・NFR-032、SO §3.17 の 2・I-
       "BEAN-HOUSE を 20 個発注",
       "inputTokens=1200 outputTokens=300",
       "postgres://ot_app@localhost/open_team",
-      "https://sim-world-123.asia-northeast1.run.app/mcp/shop/supplier",
+      "https://gateway-123.asia-northeast1.run.app/mcp/supplier",
       "ghs_short",
       "AKIA の形の説明",
     ]) {

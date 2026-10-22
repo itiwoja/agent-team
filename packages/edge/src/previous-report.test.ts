@@ -4,13 +4,13 @@ import { describe, expect, it } from "vitest";
 import type { Db, Uuid } from "@open-team/db";
 import { useTestDb } from "@open-team/db/testing";
 import { buildEdge } from "./__fixtures__/env.ts";
-import { T0, fxWorkspace, inboxDefinition, seedAgent, seedChainAsk, seedShopConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/shop.ts";
+import { T0, fxWorkspace, inboxDefinition, seedAgent, seedChainAsk, seedConnectors, seedTask, supplierDefinition, tokenFor } from "./__fixtures__/seed.ts";
 
 const T = useTestDb();
 
 async function setup(db: Db, trigger: "schedule" | "manual") {
   const ws = await fxWorkspace(db, { kind: "owner", audit: true });
-  await seedShopConnectors(db, ws);
+  await seedConnectors(db, ws);
   const inbox = await seedAgent(db, ws, inboxDefinition());
   const supplier = await seedAgent(db, ws, supplierDefinition());
   const ask = await seedChainAsk(db, ws, [

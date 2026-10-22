@@ -1,5 +1,5 @@
 // エラー応答（09_api/common.md:57-81 の共通の形 { error: { code, message, details?, requestId } }。SO §2.11、AS §2.1・§4.1）
-// コードは cross-check §4.4 の表（使わない別名 WRONG_TOKEN・BAD_ORIGIN・BAD_CONTENT_TYPE・REHEARSAL_BUSY・CASE_ALREADY_REMOVED・
+// コードは cross-check §4.4 の表（使わない別名 WRONG_TOKEN・BAD_ORIGIN・BAD_CONTENT_TYPE・CASE_ALREADY_REMOVED・
 // GUEST_CAPACITY・GUEST_IP_LIMIT・USER_CASE_LIMIT・USER_BAD_DAY_LIMIT・422 の BUDGET_EXCEEDED は持たない）。
 // §4.4 は観点どうしで割れたものを1つにした表で、割れていない 500 INTERNAL_ERROR（09:123・AS §3.0 の 14）と、
 // AS §4.1 の ASK_ALREADY_FINISHED・CHECK_ITEM_NOT_CHECKABLE（AS T-59・UI が使う。§4.4 に別名として挙がっていない）は行がないので足した【決定：platform】
@@ -26,8 +26,6 @@ export const ERROR_STATUS = {
   ASK_NOT_WAITING: 409,
   ASK_ALREADY_FINISHED: 409,
   CHECK_ITEM_NOT_CHECKABLE: 409,
-  REHEARSAL_ALREADY_RUNNING: 409, // details { runId }
-  REHEARSAL_NOT_RUNNING: 409,
   PROPOSAL_NOT_PENDING: 409,
   CHANGE_NOT_PENDING: 409,
   TASK_NOT_RUNNABLE: 409, // details { requeued? }
@@ -47,12 +45,10 @@ export const ERROR_STATUS = {
   RATE_LIMITED: 429, // LLM Proxy の毎分60回だけ（§4.4）
   GUEST_LIMIT_REACHED: 429, // details { scope: "global" | "ip" }
   DAILY_BUDGET_EXCEEDED: 429, // details { scope: "workspace" | "global" } ＋ Retry-After
-  REHEARSAL_BUDGET_EXCEEDED: 429,
   USER_CASE_DAILY_LIMIT: 429, // details { limit: 5 }
   INTERNAL_ERROR: 500,
   LLM_UPSTREAM_ERROR: 502,
   SETUP_REQUIRED: 503, // details { missing: string[] }（名前だけ：D-47）
-  SIM_WORLD_UNAVAILABLE: 503,
 } as const;
 
 export type ApiErrorCode = keyof typeof ERROR_STATUS;
@@ -80,8 +76,6 @@ export const DEFAULT_ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   ASK_NOT_WAITING: "依頼は答えを待っていません",
   ASK_ALREADY_FINISHED: "依頼はすでに終わっています",
   CHECK_ITEM_NOT_CHECKABLE: "この行はチェックできません",
-  REHEARSAL_ALREADY_RUNNING: "同じ対象のリハーサルが走っています",
-  REHEARSAL_NOT_RUNNING: "リハーサルは走っていません",
   PROPOSAL_NOT_PENDING: "提案はすでに適用済みか、古くなっています",
   CHANGE_NOT_PENDING: "設定の変更は確認待ちではありません",
   TASK_NOT_RUNNABLE: "タスクを実行できる状態ではありません",
@@ -101,12 +95,10 @@ export const DEFAULT_ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   RATE_LIMITED: "回数の上限を超えました",
   GUEST_LIMIT_REACHED: "混み合っています",
   DAILY_BUDGET_EXCEEDED: "今日の予算を使い切りました",
-  REHEARSAL_BUDGET_EXCEEDED: "リハーサルの予算を超えます",
   USER_CASE_DAILY_LIMIT: "今日の追加の上限に達しました",
   INTERNAL_ERROR: "内部エラーが発生しました",
   LLM_UPSTREAM_ERROR: "LLM の呼び出しに失敗しました",
   SETUP_REQUIRED: "準備中です（必要な設定が足りません）",
-  SIM_WORLD_UNAVAILABLE: "模擬の世界に届きません",
 };
 
 /** 09 の共通の形 */
@@ -183,7 +175,7 @@ const pathText = (path: readonly PropertyKey[]): string => path.map((p) => (type
 
 /**
  * Zod の issue を VALIDATION_ERROR の details にする。field は「a.b.0」の形（根は ""）。
- * 知らないキー（z.strictObject。BR-67① の shadow など）はキーごとに1件。値（input）は入れない（秘密が混ざりうるため）
+ * 知らないキー（z.strictObject）はキーごとに1件。値（input）は入れない（秘密が混ざりうるため）
  */
 export function zodIssuesToDetails(issues: readonly z.core.$ZodIssue[]): ValidationIssue[] {
   const out: ValidationIssue[] = [];

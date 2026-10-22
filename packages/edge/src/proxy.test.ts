@@ -1,6 +1,6 @@
 // LLM Proxy（llmMessages）の試験：入力の検証・回数・予算（decide と checkSpend）・LLM の失敗・費用の加算・
-// 応答のツール呼び出しの判定（M-14・M-15・M-12）・Intent（recordMcpIntent）・Breaker・submit_report の後ろ（決定 (e)）・影とリハーサル
-// （formation-runtime.md §3.10・§6.6、kernel-decide.md §3.4、intents-approvals.md §3.5・§3.7、SO §3.12、SW §4.5）
+// 応答のツール呼び出しの判定（M-14・M-15・M-12）・Intent（recordMcpIntent）・Breaker・submit_report の後ろ（決定 (e)）
+// （formation-runtime.md §3.10・§6.6、kernel-decide.md §3.4、intents-approvals.md §3.5・§3.7、SO §3.12）
 import { describe, expect, it } from "vitest";
 import {
   INITIAL_AGENT_BOUNDARY,
@@ -9,7 +9,6 @@ import {
   destinationKey,
   optionDigest,
   toMicroUsd,
-  type EffectivePolicy,
   type JsonObject,
 } from "@open-team/kernel";
 import { DEFAULT_AGENT_MODEL, LlmError, type LlmRequest } from "@open-team/llm";
@@ -22,19 +21,16 @@ import {
   fxWorkspace,
   inboxDefinition,
   seedAgent,
-  seedCertificate,
   seedChainAsk,
-  seedRehearsal,
-  seedShopConnectors,
+  seedConnectors,
   seedTask,
   supplierDefinition,
   tokenFor,
   type SeededAgent,
   type SeededConnector,
   type SeedTaskOptions,
-} from "./__fixtures__/shop.ts";
+} from "./__fixtures__/seed.ts";
 import { estimateCallMicroUsd } from "./gemini.ts";
-import { grantedToolHashes } from "./inputs.ts";
 import { EDGE_LIMITS, SPEND_LIMITS } from "./limits.ts";
 
 const T = useTestDb();
@@ -60,16 +56,14 @@ async function world(
     defOverride?: Parameters<typeof supplierDefinition>;
     task?: SeedTaskOptions;
     env?: Parameters<typeof buildEdge>[1];
-    rehearsal?: { shadow: boolean };
   } = {},
 ): Promise<World> {
   const ws = await fxWorkspace(db, { kind: o.kind ?? "guest", audit: true });
-  const conns = await seedShopConnectors(db, ws);
+  const conns = await seedConnectors(db, ws);
   const def = o.def === "inbox" ? inboxDefinition() : supplierDefinition(...(o.defOverride ?? []));
   const agent = await seedAgent(db, ws, def);
   const jobSlug = o.def === "inbox" ? "read-supplier-mail" : "reorder";
-  const rehearsal = o.rehearsal ? await seedRehearsal(db, ws, agent.jobs[jobSlug]!.jobId, { shadow: o.rehearsal.shadow }) : undefined;
-  const taskId = await seedTask(db, ws, agent, jobSlug, { ...o.task, ...(rehearsal ? { rehearsal } : {}) });
+  const taskId = await seedTask(db, ws, agent, jobSlug, { ...o.task });
   const token = await tokenFor(db, ws, taskId);
   const env = buildEdge(db, o.env);
   const ctx = await env.edge.getTaskContext(token);
@@ -262,13 +256,11 @@ describe("予算（decide の手順2：llm_call。超える（>）で止める�
   });
 });
 
-describe("全体 $15・ゲスト $4・リハーサル $3（checkSpend：decide の外。M-19・D-106）", () => {
-  it("D-106：上限は全体 $15・ゲスト1日 $4・リハーサル1回 $3。ゲスト1日は Kernel のゲストのワークスペース・担当の1日（per_day_usd）と同じ値", () => {
-    expect(SPEND_LIMITS).toEqual({ platformDayMicroUsd: 15_000_000, guestDayMicroUsd: 4_000_000, rehearsalRunMicroUsd: 3_000_000 });
+describe("全体 $15・ゲスト $4（checkSpend：decide の外。M-19・D-106）", () => {
+  it("D-106：上限は全体 $15・ゲスト1日 $4。ゲスト1日は Kernel のゲストのワークスペース・担当の1日（per_day_usd）と同じ値", () => {
+    expect(SPEND_LIMITS).toEqual({ platformDayMicroUsd: 15_000_000, guestDayMicroUsd: 4_000_000 });
     expect(toMicroUsd(defaultWorkspacePolicy("guest").budget.per_day_usd)).toBe(SPEND_LIMITS.guestDayMicroUsd);
     expect(toMicroUsd(INITIAL_AGENT_BOUNDARY.guest_per_day_usd)).toBe(SPEND_LIMITS.guestDayMicroUsd);
-    // リハーサル1回はゲスト1日の中に収まる（1日に自分の依頼のリハーサル1回＋本番の実行）
-    expect(SPEND_LIMITS.rehearsalRunMicroUsd).toBeLessThan(SPEND_LIMITS.guestDayMicroUsd);
   });
 
   it("BR-62 全体の今日の費用＋見積もり > $15 → 呼ばずに halted(budget_exceeded)、監査ログに scope: global", async () => {
@@ -307,24 +299,6 @@ describe("全体 $15・ゲスト $4・リハーサル $3（checkSpend：decide �
     expect(e.details).toMatchObject({ scope: "workspace" });
   });
 
-  it("BR-62 リハーサル1回 $3：その走行の費用＋見積もり > $3 → scope: rehearsal_run", async () => {
-    const { db } = T();
-    const w = await world(db, { kind: "owner", rehearsal: { shadow: false }, task: { status: "running" } });
-    const runId = (await db.query<{ rehearsal_run_id: Uuid }>("SELECT rehearsal_run_id FROM tasks WHERE id = $1", [w.taskId])).rows[0]!.rehearsal_run_id;
-    const est = estimateCallMicroUsd(bareRequest(1000));
-    await fxUsage(db, w.ws, { rehearsalRunId: runId, costUsd: system.microToUsd(SPEND_LIMITS.rehearsalRunMicroUsd - est + 1), createdAt: T0 });
-    const e = await expectEdgeError(w.env.edge.llmMessages(w.token, llmRequest([], { system: "s", messages: [{ role: "user", content: "u" }], maxTokens: 1000 })), "TASK_HALTED");
-    expect(e.details).toMatchObject({ scope: "rehearsal_run" });
-  });
-
-  it("リハーサルのタスクの費用は usage_records.rehearsal_run_id にも付く（$3 を数えられる）", async () => {
-    const { db } = T();
-    const w = await world(db, { kind: "owner", rehearsal: { shadow: false }, env: { script: [{ parts: [text("ok")], usage: USAGE }] } });
-    await w.env.edge.llmMessages(w.token, llmRequest([]));
-    const u = (await db.query<{ rehearsal_run_id: Uuid | null }>("SELECT rehearsal_run_id FROM usage_records WHERE task_id = $1", [w.taskId])).rows;
-    expect(u).toHaveLength(1);
-    expect(u[0]!.rehearsal_run_id).not.toBeNull();
-  });
 });
 
 describe("Kill Switch・LLM の失敗（§3.10-1・7）", () => {
@@ -468,7 +442,7 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
   it("M-25 定期の依頼の承認の期限は「次の実行」が24時間より早ければそれ（expiry_cause: next_run）", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-    await seedShopConnectors(db, ws);
+    await seedConnectors(db, ws);
     const supplier = await seedAgent(db, ws, supplierDefinition());
     const ask = await seedChainAsk(db, ws, [{ agent: supplier, jobSlug: "reorder", position: 1, spokesperson: true }], {
       nextRunAt: new Date(T0.getTime() + 3600_000),
@@ -483,9 +457,9 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
     expect(a.expires_at.getTime()).toBe(T0.getTime() + 3600_000);
   });
 
-  it("HL-06 ルールに一致・合格証あり・ガード内 → allow（rule_matched）、Intent approved（accepted）。onIntentRecorded で実行を起こせる", async () => {
+  it("HL-06 ルールに一致・ガード内 → allow（rule_matched）、Intent approved（accepted）。onIntentRecorded で実行を起こせる", async () => {
     const { db } = T();
-    const w = await ruleWorld(db, { certificate: true, script: [mcp("c1", "supplier", "place_order", { ...ORDER, items: [{ sku: "BEAN-01", quantity: 10, unit_price: 1900 }] })] });
+    const w = await ruleWorld(db, { script: [mcp("c1", "supplier", "place_order", { ...ORDER, items: [{ sku: "BEAN-01", quantity: 10, unit_price: 1900 }] })] });
     const res = await respond(w);
     expect(res.governance[0]).toMatchObject({ decision: "allow", reasonCode: "rule_matched", matchedRule: "rules.items[0]", intent: { status: "accepted" } });
     const intent = (await db.query<{ status: string; enforced: boolean }>("SELECT status, enforced FROM action_intents WHERE task_id = $1", [w.taskId])).rows[0]!;
@@ -501,38 +475,22 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
           `SELECT d.matched_rule_id, max(d.created_at) AS last_matched_at
              FROM policy_decisions d JOIN tasks t ON t.workspace_id = d.workspace_id AND t.id = d.task_id
             WHERE d.workspace_id = $1 AND t.agent_id = (SELECT agent_id FROM tasks WHERE id = $2) AND d.matched_rule_id IS NOT NULL AND d.reason_code = 'rule_matched' AND d.enforced
-              AND t.is_dry_run = false AND t.rehearsal_run_id IS NULL AND NOT t.shadow
+              AND t.is_dry_run = false
             GROUP BY d.matched_rule_id`,
           [w.ws.workspaceId, w.taskId],
         )
       ).rows;
     expect(await lastMatched()).toEqual([{ matched_rule_id: "r-0001", last_matched_at: expect.any(Date) }]);
-    // 試し実行（リハーサル・影も同じ条件で除く）の一致は記録には残るが、「最後に使った時刻」には数えない
+    // 試し実行の一致は記録には残るが、「最後に使った時刻」には数えない
     await db.query("UPDATE tasks SET is_dry_run = true, trigger_type = 'dry_run' WHERE id = $1", [w.taskId]);
     expect(await lastMatched()).toEqual([]);
     expect((await db.query("SELECT 1 FROM policy_decisions WHERE task_id = $1 AND matched_rule_id = 'r-0001'", [w.taskId])).rowCount).toBe(1);
     expect(await auditEvents(db, w.ws, "decision.made")).toEqual([expect.objectContaining({ reasonCode: "rule_matched", matchedRule: "rules.items[0]", matchedRuleId: "r-0001" })]);
   });
 
-  it("BR-81 ルールに一致しても合格証がなければ approve（certificate_missing。M-18：一致したときだけ）", async () => {
-    const { db } = T();
-    const w = await ruleWorld(db, { certificate: false, script: [mcp("c1", "supplier", "place_order", ORDER)] });
-    const res = await respond(w);
-    expect(res.governance[0]).toMatchObject({ decision: "approve", reasonCode: "certificate_missing", matchedRule: "rules.items[0]", intent: { status: "pending_approval" } });
-    const pd = (await db.query<{ matched_rule_id: string | null }>("SELECT matched_rule_id FROM policy_decisions WHERE task_id = $1 AND subject_kind = 'tool_call'", [w.taskId])).rows;
-    expect(pd).toEqual([{ matched_rule_id: "r-0001" }]);
-  });
-
-  it("KD §8-39 合格証のモデル・ツールの tool_hash が今と違えば無効（certificate_missing）", async () => {
-    const { db } = T();
-    const w = await ruleWorld(db, { certificate: true, certificateModel: "gemini-old", script: [mcp("c1", "supplier", "place_order", ORDER)] });
-    const res = await respond(w);
-    expect(res.governance[0]).toMatchObject({ reasonCode: "certificate_missing" });
-  });
-
   it("BR-61 ガード（items[].quantity ≤ 20）を超える → approve（guard_exceeded）、decision_detail にガードと値", async () => {
     const { db } = T();
-    const w = await ruleWorld(db, { certificate: true, script: [mcp("c1", "supplier", "place_order", { ...ORDER, items: [{ sku: "BEAN-01", quantity: 21, unit_price: 1800 }] })] });
+    const w = await ruleWorld(db, { script: [mcp("c1", "supplier", "place_order", { ...ORDER, items: [{ sku: "BEAN-01", quantity: 21, unit_price: 1800 }] })] });
     const res = await respond(w);
     expect(res.governance[0]).toMatchObject({ decision: "approve", reasonCode: "guard_exceeded", matchedRule: "guards[0]" });
     const intent = (await db.query<{ decision_detail: JsonObject }>("SELECT decision_detail FROM action_intents WHERE task_id = $1", [w.taskId])).rows[0]!;
@@ -541,7 +499,7 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
 
   it("KD §8-16 destination・option の文字列の前後の空白を除いてから判定・保存する（ルールに一致し、送る値も同じ）", async () => {
     const { db } = T();
-    const w = await ruleWorld(db, { certificate: true, script: [mcp("c1", "supplier", "place_order", { supplier_id: " supplier-01 ", items: [{ sku: "BEAN-01 ", quantity: 5, unit_price: 1800 }], note: " 備考 " })] });
+    const w = await ruleWorld(db, { script: [mcp("c1", "supplier", "place_order", { supplier_id: " supplier-01 ", items: [{ sku: "BEAN-01 ", quantity: 5, unit_price: 1800 }], note: " 備考 " })] });
     const res = await respond(w);
     expect(res.governance[0]).toMatchObject({ decision: "allow" });
     const intent = (await db.query<{ payload: { arguments: JsonObject } }>("SELECT payload FROM action_intents WHERE task_id = $1", [w.taskId])).rows[0]!;
@@ -561,7 +519,7 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
   it("M-14 researcher に書き込みのツールを付与しても LLM は呼べない（not_granted：mcp.llmWrite）", async () => {
     const { db } = T();
     const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-    await seedShopConnectors(db, ws);
+    await seedConnectors(db, ws);
     const def = inboxDefinition();
     def.grants = { connectors: { mail: { grant: ["list_inbox", "send"] } } };
     const agent = await seedAgent(db, ws, def);
@@ -685,9 +643,9 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
     expect((await db.query("SELECT 1 FROM action_intents WHERE task_id = $1", [w.taskId])).rowCount).toBe(6);
   });
 
-  it("BR-68 同じ仕事・同じ宛先に unknown_outcome の書き込みがあれば approve（unknown_outcome_pending）。リハーサルの unknown_outcome は数えない", async () => {
+  it("BR-68 同じ仕事・同じ宛先に unknown_outcome の書き込みがあれば approve（unknown_outcome_pending）", async () => {
     const { db } = T();
-    const w = await ruleWorld(db, { certificate: true, script: [mcp("c1", "supplier", "place_order", ORDER), mcp("c2", "supplier", "place_order", { ...ORDER, items: [{ sku: "BEAN-01", quantity: 3, unit_price: 1800 }] })] });
+    const w = await ruleWorld(db, { script: [mcp("c1", "supplier", "place_order", ORDER), mcp("c2", "supplier", "place_order", { ...ORDER, items: [{ sku: "BEAN-01", quantity: 3, unit_price: 1800 }] })] });
     const argRoles = { supplier_id: "destination", "items[].sku": "option", "items[].quantity": "option", "items[].unit_price": "option", note: "content" } as const;
     const key = destinationKey("mcp.supplier.place_order", ORDER, argRoles);
     const prev = await seedTask(db, w.ws, w.agent, w.jobSlug, { status: "running" });
@@ -719,61 +677,14 @@ describe("応答のツール呼び出しの判定（M-14：tool_call で1回。�
   });
 });
 
-describe("影の走行・リハーサル（SW §4.5、IA §3.22、KD §8-1・§8-40）", () => {
-  it("影：approve の書き込みも Intent は approved・enforced=false、承認は作らない。エージェントには accepted。判定は記録どおり", async () => {
-    const { db } = T();
-    const w = await world(db, { kind: "owner", rehearsal: { shadow: true }, env: { script: [{ parts: [mcp("c1", "supplier", "place_order", ORDER)], usage: USAGE }] } });
-    const res = await respond(w);
-    expect(res.governance[0]).toMatchObject({ decision: "allow", reasonCode: "approval_required", intent: { status: "accepted" } });
-    const intent = (await db.query<{ status: string; enforced: boolean; decision: string }>("SELECT status, enforced, decision FROM action_intents WHERE task_id = $1", [w.taskId])).rows[0]!;
-    expect(intent).toEqual({ status: "approved", enforced: false, decision: "approve" });
-    expect((await db.query("SELECT 1 FROM approvals WHERE task_id = $1", [w.taskId])).rowCount).toBe(0);
-    const pd = (await db.query<{ decision: string; enforced: boolean }>("SELECT decision, enforced FROM policy_decisions WHERE task_id = $1 AND subject_kind = 'tool_call'", [w.taskId])).rows;
-    expect(pd).toEqual([{ decision: "approve", enforced: false }]);
-  });
-
-  it("FI-17 影：Breaker の halt は記録だけ（enforced=false）で続ける。O-04 の材料", async () => {
-    const { db } = T();
-    const parts = [1, 2, 3, 4, 5, 6].map((i) => mcp(`a${i}`, "store", "get_inventory", {}));
-    const w = await world(db, { kind: "owner", rehearsal: { shadow: true }, env: { script: [{ parts, usage: USAGE }] } });
-    const res = await respond(w);
-    expect(res.governance.map((g) => g.decision)).toEqual(Array(6).fill("allow"));
-    expect((await taskRow(db, w.taskId)).status).toBe("running");
-    const pd = (await db.query<{ decision: string; reason_code: string; enforced: boolean }>(
-      "SELECT decision, reason_code, enforced FROM policy_decisions WHERE task_id = $1 AND decision = 'halt'",
-      [w.taskId],
-    )).rows;
-    expect(pd.length).toBeGreaterThanOrEqual(1);
-    expect(pd.every((r) => r.reason_code === "breaker_tripped" && r.enforced === false)).toBe(true);
-  });
-
-  it("影でも予算の halt は効かせる（費用と停止は守る）", async () => {
-    const { db } = T();
-    const w = await world(db, { kind: "owner", rehearsal: { shadow: true }, task: { status: "running", costUsd: "0.199999" } });
-    const e = await expectEdgeError(w.env.edge.llmMessages(w.token, llmRequest([])), "TASK_HALTED");
-    expect(e.details).toMatchObject({ haltReason: "budget_exceeded" });
-  });
-
-  it("リハーサル（本番の経路）：承認待ちの Intent は pending_approval で承認の行を作らない。ルールは合格証なしで allow（certificateValid = true）", async () => {
-    const { db } = T();
-    const w = await ruleWorld(db, { certificate: false, rehearsal: true, script: [mcp("c1", "supplier", "place_order", ORDER), mcp("c2", "supplier", "place_order", { supplier_id: "supplier-99", items: [{ sku: "BEAN-01", quantity: 1, unit_price: 1 }] })] });
-    const res = await respond(w);
-    expect(res.governance.map((g) => g.reasonCode)).toEqual(["rule_matched", "approval_required"]);
-    expect((await db.query("SELECT 1 FROM approvals WHERE task_id = $1", [w.taskId])).rowCount).toBe(0);
-    const pending = (await db.query<{ status: string; expires_at: Date | null }>("SELECT status, expires_at FROM action_intents WHERE task_id = $1 AND status = 'pending_approval'", [w.taskId])).rows;
-    expect(pending).toHaveLength(1);
-    expect(pending[0]!.expires_at).not.toBeNull();
-  });
-});
-
 // ---- ルールのある仕入れ係（supplier-01 の BEAN-01 を固定、数量・単価は変わってよい、数量のガード 20） ----
 
 async function ruleWorld(
   db: Db,
-  o: { certificate: boolean; certificateModel?: string; rehearsal?: boolean; script: ReturnType<typeof call>[] },
+  o: { script: ReturnType<typeof call>[] },
 ): Promise<World> {
   const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-  const conns = await seedShopConnectors(db, ws);
+  const conns = await seedConnectors(db, ws);
   const placeHash = conns.supplier!.tools.place_order!.toolHash;
   const def = supplierDefinition(
     {
@@ -792,13 +703,7 @@ async function ruleWorld(
     { guards: [{ action: "mcp.supplier.place_order", arg: "items[].quantity", max: 20 }] },
   );
   const agent = await seedAgent(db, ws, def);
-  const job = agent.jobs.reorder!;
-  if (o.certificate) {
-    const hashes = await grantedToolHashes(db, ws.ctx, job.policy as EffectivePolicy);
-    await seedCertificate(db, ws, job.jobId, hashes ?? [], o.certificateModel ?? DEFAULT_AGENT_MODEL);
-  }
-  const rehearsal = o.rehearsal ? await seedRehearsal(db, ws, job.jobId) : undefined;
-  const taskId = await seedTask(db, ws, agent, "reorder", rehearsal ? { rehearsal } : {});
+  const taskId = await seedTask(db, ws, agent, "reorder");
   const token = await tokenFor(db, ws, taskId);
   const env = buildEdge(db, { script: [{ parts: o.script, usage: USAGE }] });
   const ctx = await env.edge.getTaskContext(token);

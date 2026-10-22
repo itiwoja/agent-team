@@ -1,5 +1,5 @@
 // 環境変数の読み方の共通（security-ops-deploy.md §2.2・§3.1）。足りない・不正な変数の「名前」だけを返し、値は出さない（D-47）
-// 各サービスの必須の組み合わせ（app の readAppEnv・gateway・sim-world）は apps が EnvReader で組む。
+// 各サービスの必須の組み合わせ（app の readAppEnv・gateway）は apps が EnvReader で組む。
 // 不正な値は undefined にして返す（使ってしまわないように、閉じた側に倒す）
 
 /** 秘密の値の最小の長さ（SO §2.1 の secretMinLen。apps/app/src/env.ts の MIN_SECRET_LENGTH と同じ） */

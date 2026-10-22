@@ -64,7 +64,7 @@ export function haltCauseOf(result: DecideResult): HaltCause | null {
   }
 }
 
-/** checkSpend の拒否から止めた理由へ（全体 $15・ゲスト $4・リハーサル $3：BR-62。SO §3.12-3） */
+/** checkSpend の拒否から止めた理由へ（全体 $15・ゲスト $4：BR-62。SO §3.12-3） */
 export function haltCauseOfSpend(d: SpendDenied): HaltCause {
   return {
     reason: "budget_exceeded",
@@ -149,7 +149,6 @@ export async function finalizeTaskAfterLoop(tx: Tx, ctx: WsCtx, task: TaskRow, n
     status: task.status,
     loopEnded: true,
     isDryRun: task.is_dry_run,
-    rehearsal: task.rehearsal_run_id !== null,
     intents,
   });
   if (next.ending !== null) {

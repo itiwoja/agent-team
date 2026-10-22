@@ -86,7 +86,7 @@ describe("selectTaskTools（§2.5）", () => {
     ]);
   });
 
-  it("BR-64 ゲストは Web の付与があっても web_search を外す（web_fetch は sim-world の模擬の Web なので残す）", () => {
+  it("BR-64 ゲストは Web の付与があっても web_search を外す（web_fetch は付与したドメインだけなので残す）", () => {
     const names = selectTaskToolNames(sel({ guestWorkspace: true, webAllowDomains: ["*"] }));
     expect(names).not.toContain("web_search");
     expect(names).toContain("web_fetch");

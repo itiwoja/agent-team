@@ -49,10 +49,9 @@ async function getTaskContext(rt: EdgeRuntime, token: string): Promise<TaskConte
     await touchTaskHeartbeat(rt.db, ctx, task.id, now);
   }
   const setup = await loadTaskSetup(rt.db, ctx, task, workspace, undefined, { sandboxProvider: rt.sandbox !== null, trustedSkills: rt.trustedSkills });
-  const virtualNow = rt.virtualNow === undefined ? null : await rt.virtualNow(ctx, task);
   // 始まる前に届いていた連絡（連絡板。ひとりの編成・依頼でないタスクでは空）
   const teamMessages = setup.formation === null ? [] : await deliverAtStart(rt, ctx, task);
-  return buildTaskContext(rt.db, ctx, setup, { now, virtualNow, knownSecrets: rt.knownSecrets, maxTokens: rt.limits.maxTokensDefault, teamMessages });
+  return buildTaskContext(rt.db, ctx, setup, { now, knownSecrets: rt.knownSecrets, maxTokens: rt.limits.maxTokensDefault, teamMessages });
 }
 
 /** 本番の EdgePort（app が runner の runTask に渡す）。インスタンスごとに回数の数え（60回/分・10件/秒）を持つ */

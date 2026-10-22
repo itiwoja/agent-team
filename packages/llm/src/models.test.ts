@@ -77,15 +77,12 @@ describe("モデルの選び方（15_hackathon.md:587）", () => {
     for (const phase of phases) expect(modelForPhase(env, phase)).toBe("flash-x");
   });
 
-  it("設定プランナー・状況の生成・解釈・締める提案は上位、エージェント・要約は Flash 系", () => {
+  it("設定プランナーは上位、エージェント・要約は Flash 系", () => {
     expect(modelForPurpose(env, "planner")).toBe("pro-y");
-    expect(modelForPurpose(env, "rehearsal_generate")).toBe("pro-y");
-    expect(modelForPurpose(env, "rehearsal_interpret")).toBe("pro-y");
-    expect(modelForPurpose(env, "rehearsal_tighten")).toBe("pro-y");
     expect(modelForPurpose(env, "agent")).toBe("flash-x");
     expect(modelForPurpose(env, "summary")).toBe("flash-x");
     expect(Object.keys(MODEL_ROLE_BY_PURPOSE).sort()).toEqual(
-      ["agent", "planner", "rehearsal_generate", "rehearsal_interpret", "rehearsal_tighten", "summary"].sort(),
+      ["agent", "planner", "summary"].sort(),
     );
   });
 

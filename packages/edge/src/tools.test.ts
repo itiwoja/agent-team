@@ -14,12 +14,12 @@ import {
   inboxDefinition,
   seedAgent,
   seedChainAsk,
-  seedShopConnectors,
+  seedConnectors,
   seedTask,
   supplierDefinition,
   tokenFor,
   type SeededConnector,
-} from "./__fixtures__/shop.ts";
+} from "./__fixtures__/seed.ts";
 
 const T = useTestDb();
 
@@ -37,7 +37,7 @@ async function setup(
   o: { def?: "inbox" | "supplier"; script: readonly ScriptedStep[]; gateway?: FakeGateway; spokesperson?: boolean; knownSecrets?: string[] },
 ): Promise<W> {
   const ws = await fxWorkspace(db, { kind: "guest", audit: true });
-  const conns = await seedShopConnectors(db, ws);
+  const conns = await seedConnectors(db, ws);
   const isInbox = o.def === "inbox";
   const agent = await seedAgent(db, ws, isInbox ? inboxDefinition() : supplierDefinition());
   const jobSlug = isInbox ? "read-supplier-mail" : "reorder";

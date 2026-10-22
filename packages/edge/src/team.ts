@@ -102,9 +102,8 @@ function positionsOf(members: readonly MemberRow[]): Map<Uuid, number> {
 }
 
 /** 自分の担当（タスクの ask_member_id、なければ仕事で引く：ask_members_job_uq）。依頼のタスクでなければ null */
-export async function loadBoard(q: Queryable, ctx: WsCtx, task: Pick<TaskRow, "ask_id" | "ask_member_id" | "job_id" | "rehearsal_run_id">): Promise<Board | null> {
-  // リハーサルのタスクは依頼の連絡板に触れない（試験の連絡を混ぜない・本番の連絡を読ませない：BR-67）
-  if (task.ask_id === null || task.rehearsal_run_id !== null) return null;
+export async function loadBoard(q: Queryable, ctx: WsCtx, task: Pick<TaskRow, "ask_id" | "ask_member_id" | "job_id">): Promise<Board | null> {
+  if (task.ask_id === null) return null;
   const ask = await getAskRow(q, ctx, task.ask_id);
   if (ask === null) return null;
   const members = await listAskMembers(q, ctx, ask.id);
@@ -184,7 +183,7 @@ export async function deliverIncoming(rt: EdgeRuntime, ctx: WsCtx, taskId: Uuid)
 /** タスクの開始のとき、始まる前に届いていた連絡を渡す（TaskContext.input.teamMessages） */
 export async function deliverAtStart(rt: EdgeRuntime, ctx: WsCtx, task: TaskRow): Promise<TaskContext["input"]["teamMessages"]> {
   // 追いのターンは質問を followupQuestion で渡す。ほかの連絡は渡さない
-  if (task.ask_id === null || task.kind !== "normal" || task.rehearsal_run_id !== null) return [];
+  if (task.ask_id === null || task.kind !== "normal") return [];
   const { messages } = await deliverIncoming(rt, ctx, task.id);
   return messages.map((m) => ({
     messageId: m.id,
