@@ -19,6 +19,7 @@ import type {
   HaltReason,
   IntentExpireReason,
   IntentStatus,
+  LlmProvider,
   MemberRole,
   PolicyDecisionRow,
   RehearsalCertificateRow,
@@ -411,6 +412,7 @@ export interface UsageRecordInput {
   agentId: Uuid | null;
   askId: Uuid | null;
   rehearsalRunId: Uuid | null;
+  provider: LlmProvider;
   model: string;
   phase: UsagePhase;
   inputTokens: number;
@@ -426,13 +428,14 @@ export async function insertUsageRecord(q: Queryable, ctx: WsCtx, u: UsageRecord
   await q.query(
     `INSERT INTO usage_records (workspace_id, task_id, agent_id, ask_id, rehearsal_run_id, provider, model, phase, input_tokens,
                                 output_tokens, estimated_cost_usd, cost_usd, latency_ms, prompt_hash, created_at)
-     VALUES ($1, $2, $3, $4, $5, 'google', $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)`,
     [
       ctx.workspaceId,
       u.taskId,
       u.agentId,
       u.askId,
       u.rehearsalRunId,
+      u.provider,
       u.model,
       u.phase,
       u.inputTokens,

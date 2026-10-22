@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantPart, ChatMessage } from "@open-team/runner";
 import { GeminiClient } from "./gemini.ts";
 import { computeMicroUsd } from "./pricing.ts";
-import { compatibleBaseUrl, profilePrice, providerModelIdentity, PROVIDER_KEY_NAMES, ModelProfileSchema, LlmConfigurationError, type LlmConfig, type ModelProfile } from "./provider-config.ts";
+import { profilePrice, providerModelIdentity, PROVIDER_BASE_URLS, PROVIDER_KEY_NAMES, ModelProfileSchema, LlmConfigurationError, type LlmConfig, type LlmProvider, type ModelProfile } from "./provider-config.ts";
 import { SessionBudgetClient } from "./session-budget.ts";
 import { buildToolDeclarations, fromGeminiFunctionCall, toGeminiFunctionCall, type McpFunctionTable } from "./tools.ts";
 import { LlmError, type LlmClient, type LlmRequest, type LlmResponse, type LlmUsage } from "./types.ts";
@@ -24,13 +24,16 @@ export class HttpProviderClient implements LlmClient {
   private readonly config: LlmConfig;
   private readonly fetcher: typeof fetch;
   private readonly timeoutMs: number;
+  readonly provider: LlmProvider;
   constructor(config: LlmConfig, options: { fetch?: typeof fetch; timeoutMs?: number } = {}) {
     if (config.provider === "gemini") throw new Error("HttpProviderClient does not handle Gemini");
     if (!config.apiKey?.trim()) throw new Error(`${PROVIDER_KEY_NAMES[config.provider]} が設定されていません`);
     let profiles: Record<string, ModelProfile>;
     try { profiles = Object.fromEntries(Object.entries(config.profiles).map(([name, p]) => [name, ModelProfileSchema.parse(p)])); }
     catch { throw new LlmConfigurationError("モデルの正の料金・能力・上限設定を確認してください"); }
-    this.config = { ...config, profiles, ...(config.provider === "openai-compatible" ? { baseUrl: compatibleBaseUrl(config.baseUrl) } : {}) };
+    // 接続先は provider から決まる固定値（config.baseUrl は見ない）。readLlmEnv と同じ値にそろえる（認証の識別子に使う）
+    this.provider = config.provider;
+    this.config = { ...config, profiles, baseUrl: PROVIDER_BASE_URLS[config.provider] };
     this.fetcher = options.fetch ?? fetch;
     this.timeoutMs = options.timeoutMs ?? 120_000;
   }
@@ -87,7 +90,6 @@ export class HttpProviderClient implements LlmClient {
       return { body, table };
     }
     const body: Obj = { model: req.model, messages: [{ role: "system", content: req.system }, ...openAiMessages(req.messages, table)], [p.tokenLimitParameter]: req.maxTokens, stream: false };
-    if (this.config.provider === "openai") body.store = false;
     if (tools.length) body.tools = tools.map(t => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parametersJsonSchema ?? { type: "object", properties: {} }, strict: false } }));
     if (structuredTool) {
       body.tool_choice = { type: "function", function: { name: OUTPUT_TOOL } };
@@ -102,7 +104,7 @@ export class HttpProviderClient implements LlmClient {
     if (opts.signal?.aborted) fail("LLM の呼び出しを中断しました");
     const { body, table } = this.request(req);
     const anthropic = this.config.provider === "anthropic";
-    const endpoint = anthropic ? "https://api.anthropic.com/v1/messages" : `${this.config.baseUrl ?? "https://api.openai.com/v1"}/chat/completions`;
+    const endpoint = anthropic ? "https://api.anthropic.com/v1/messages" : `${this.config.baseUrl}/chat/completions`;
     const headers: Record<string, string> = { "content-type": "application/json" };
     if (anthropic) { headers["x-api-key"] = this.config.apiKey!; headers["anthropic-version"] = "2023-06-01"; }
     else headers.authorization = `Bearer ${this.config.apiKey}`;

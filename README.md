@@ -47,7 +47,7 @@ flowchart LR
 
 ## 技術
 
-LLMはGemini（既定）、Anthropic Claude、OpenAI、設定可能なOpenAI互換APIに対応します。担当編成・受け渡し・承認Kernelは共通です。必要なモデル能力と料金を明示し、未対応モデルや料金不明のままでは実行しません。設定方法と対応範囲は [LLMプロバイダーの設定](docs/llm-providers.md) を参照してください。実モデルごとの品質・API動作の確認は必要です。
+LLMはGemini（既定）、Claude、DeepSeek、OpenRouterに対応します。担当編成・受け渡し・承認Kernelは共通です。必要なモデル能力と料金を明示し、未対応モデルや料金不明のままでは実行しません。設定方法と対応範囲は [LLMプロバイダーの設定](docs/llm-providers.md) を参照してください。実モデルごとの品質・API動作の確認は必要です。
 
 TypeScript（pnpm のモノレポ）・Hono・React＋Vite（PWA）・PostgreSQL 16（Docker）・MCP・Gemini API。手元の PC だけで動き、クラウドの環境は要りません。
 

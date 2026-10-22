@@ -26,7 +26,7 @@ describe("plannerUsageOf", () => {
 
     const rec = (askId: string, phase: string, model: string, ms: number, cost: string, at: number) =>
       db.transaction((tx) =>
-        insertUsageRecord(tx, w.ws.ctx, { taskId: null, agentId: null, askId, rehearsalRunId: null, model, phase: phase as never, inputTokens: 1, outputTokens: 1, estimatedCostUsd: cost, costUsd: cost, latencyMs: ms, promptHash: "h" }, new Date(T0.getTime() + at)),
+        insertUsageRecord(tx, w.ws.ctx, { taskId: null, agentId: null, askId, rehearsalRunId: null, provider: "google", model, phase: phase as never, inputTokens: 1, outputTokens: 1, estimatedCostUsd: cost, costUsd: cost, latencyMs: ms, promptHash: "h" }, new Date(T0.getTime() + at)),
       );
     await rec(ask.id, "planner", "gemini-a", 4000, "0.001000", 0);
     await rec(ask.id, "planner", "gemini-b", 10000, "0.002000", 1000);

@@ -75,7 +75,7 @@ it("failed transport attempts consume their estimate and cannot loop around the 
   expect(generate).toHaveBeenCalledTimes(1);
 });
 it("binds certificates to provider, endpoint and capabilities, but never API keys", () => {
-  const cfg: LlmConfig = { provider: "openai-compatible", baseUrl: "https://one.test/v1", apiKey: "fake-key", agentModel: "m", plannerModel: "m", compareModels: [], profiles: { m: PROFILE } };
+  const cfg: LlmConfig = { provider: "openrouter", baseUrl: "https://one.test/v1", apiKey: "fake-key", agentModel: "m", plannerModel: "m", compareModels: [], profiles: { m: PROFILE } };
   const id = providerModelIdentity(cfg, "m");
   expect(providerModelIdentity({ ...cfg, apiKey: "different-secret" }, "m")).toBe(id);
   expect(providerModelIdentity({ ...cfg, baseUrl: "https://two.test/v1" }, "m")).not.toBe(id);

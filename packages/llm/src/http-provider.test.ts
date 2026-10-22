@@ -7,7 +7,7 @@ import { withRetry } from "./retry.ts";
 import { PROFILE } from "./__fixtures__/provider.ts";
 
 const req = (over: Partial<LlmRequest> = {}): LlmRequest => ({ model: "test-model", system: "System", messages: [{ role: "user", content: "Make a fictional page" }], tools: [], mcpTools: [], maxTokens: 1024, ...over });
-const config = (provider: LlmProvider = "openai"): LlmConfig => ({ provider, apiKey: "test-secret-never-real", agentModel: "test-model", plannerModel: "test-model", compareModels: [], profiles: { "test-model": { ...PROFILE } }, ...(provider === "openai-compatible" ? { baseUrl: "http://127.0.0.1:9876/v1" } : {}) });
+const config = (provider: LlmProvider = "deepseek"): LlmConfig => ({ provider, apiKey: "test-secret-never-real", agentModel: "test-model", plannerModel: "test-model", compareModels: [], profiles: { "test-model": { ...PROFILE } } });
 const openai = (message: unknown = { content: "done" }, reason = "stop") => ({ choices: [{ message, finish_reason: reason }], usage: { prompt_tokens: 100, completion_tokens: 30, completion_tokens_details: { reasoning_tokens: 10 } } });
 const claude = (content: unknown = [{ type: "text", text: "done" }], reason = "end_turn") => ({ content, stop_reason: reason, usage: { input_tokens: 100, output_tokens: 30 } });
 const transport = (body: unknown, status = 200) => vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify(body), { status }));
@@ -74,12 +74,18 @@ describe("provider contracts (no real API)", () => {
     const cfg = config(); cfg.profiles["test-model"]!.inputPerMTokMicroUsd = 0;
     expect(() => new HttpProviderClient(cfg)).toThrow(/料金/);
   });
-  it("supports the legacy token limit only when explicitly configured", async () => {
-    const cfg = config("openai-compatible"); cfg.profiles["test-model"]!.tokenLimitParameter = "max_tokens";
+  it("sends max_tokens only for the OpenAI-compatible providers; max_completion_tokens when explicitly configured", async () => {
+    // 未指定のプロファイル（既定値に任せる）。コンストラクターが ModelProfileSchema で既定値を入れる
+    const { tokenLimitParameter: _explicit, ...bare } = PROFILE;
+    const cfg = { ...config("openrouter"), profiles: { "test-model": bare } } as unknown as LlmConfig;
     const f = transport(openai());
     await new HttpProviderClient(cfg, { fetch: f }).generate(req());
     expect(sent(f).max_tokens).toBe(1024);
     expect(sent(f).max_completion_tokens).toBeUndefined();
+    cfg.profiles["test-model"]!.tokenLimitParameter = "max_completion_tokens";
+    f.mockResolvedValueOnce(new Response(JSON.stringify(openai())));
+    await new HttpProviderClient(cfg, { fetch: f }).generate(req());
+    expect(JSON.parse(f.mock.calls[1]![1]!.body as string).max_completion_tokens).toBe(1024);
   });
   it("rejects unexpected extended-thinking continuation instead of silently losing signatures", async () => {
     await expect(new HttpProviderClient(config("anthropic"), { fetch: transport(claude([{ type: "thinking", thinking: "private", signature: "opaque" }])) }).generate(req())).rejects.toThrow(/拡張思考/);
@@ -95,7 +101,7 @@ describe("provider contracts (no real API)", () => {
     await expect(pending).rejects.toMatchObject({ retryable: false, message: "LLM の呼び出しを中断しました" });
   });
   it("keeps Gemini as the default implementation", () => expect(createLlmClient(readLlmEnv({ GEMINI_API_KEY: "fake" }))).toBeInstanceOf(GeminiClient));
-  it.each(["openai", "openai-compatible", "anthropic"] as const)("%s uses the selected endpoint and headers; one attempt only", async provider => {
+  it.each(["deepseek", "openrouter", "anthropic"] as const)("%s uses the selected endpoint and headers; one attempt only", async provider => {
     const f = transport(provider === "anthropic" ? claude() : openai());
     const c = new HttpProviderClient(config(provider), { fetch: f });
     const result = await c.generate(req());
@@ -109,12 +115,12 @@ describe("provider contracts (no real API)", () => {
       expect(f.mock.calls[0]![1]!.headers).toMatchObject({ "x-api-key": "test-secret-never-real", "anthropic-version": "2023-06-01" });
       expect(sent(f).max_tokens).toBe(1024);
     } else {
-      expect(f.mock.calls[0]![0]).toBe(provider === "openai" ? "https://api.openai.com/v1/chat/completions" : "http://127.0.0.1:9876/v1/chat/completions");
+      expect(f.mock.calls[0]![0]).toBe(provider === "deepseek" ? "https://api.deepseek.com/chat/completions" : "https://openrouter.ai/api/v1/chat/completions");
       expect(sent(f).max_completion_tokens).toBe(1024);
     }
     expect(c.estimateMicroUsd(req())).toBeGreaterThan(result.usage.costMicroUsd);
   });
-  it.each(["openai", "anthropic"] as const)("%s expands MCP calls and roundtrips IDs/results without gaining permissions", async provider => {
+  it.each(["deepseek", "anthropic"] as const)("%s expands MCP calls and roundtrips IDs/results without gaining permissions", async provider => {
     const r = req({ tools: [{ name: "mcp_call", description: "MCP", inputSchema: {} }], mcpTools: [{ connector: "calendar", tool: "list", description: "List", classification: "read", inputSchema: { type: "object" } }] });
     const f = transport(provider === "anthropic" ? claude([{ type: "tool_use", id: "call_1", name: "mcp__calendar__list", input: { n: 1 } }], "tool_use") : openai({ tool_calls: [{ type: "function", id: "call_1", function: { name: "mcp__calendar__list", arguments: '{"n":1}' } }] }, "tool_calls"));
     const c = new HttpProviderClient(config(provider), { fetch: f });
@@ -128,7 +134,7 @@ describe("provider contracts (no real API)", () => {
     expect(JSON.stringify(body.messages)).toContain("untrusted result");
     expect(JSON.stringify(body.messages)).toContain("mcp__calendar__list");
   });
-  it.each(["openai", "anthropic"] as const)("%s groups parallel results correctly and preserves unknown tool names for Kernel denial", async provider => {
+  it.each(["deepseek", "anthropic"] as const)("%s groups parallel results correctly and preserves unknown tool names for Kernel denial", async provider => {
     const r = req({ messages: [{ role: "user", content: "Go" }, { role: "assistant", content: [ { type: "tool_call", id: "a", name: "list_files", arguments: {} }, { type: "tool_call", id: "b", name: "read_file", arguments: { path: "index.html" } }] }, { role: "tool", content: { toolCallId: "a", name: "list_files", result: "one" } }, { role: "tool", content: { toolCallId: "b", name: "read_file", result: "two" } }] });
     const raw = provider === "anthropic" ? claude([{ type: "tool_use", id: "a", name: "invented_action", input: {} }], "tool_use") : openai({ tool_calls: [{ type: "function", id: "a", function: { name: "invented_action", arguments: "{}" } }] }, "tool_calls");
     const f = transport(raw), c = new HttpProviderClient(config(provider), { fetch: f });
@@ -137,19 +143,19 @@ describe("provider contracts (no real API)", () => {
     expect((result.parts[0] as { id: string }).id).not.toBe("a");
     if (provider === "anthropic") expect(sent(f).messages.at(-1).content).toHaveLength(2);
   });
-  it.each(["openai", "anthropic"] as const)("%s converts forced structured tool into JSON text (never an executable tool)", async provider => {
+  it.each(["deepseek", "anthropic"] as const)("%s converts forced structured tool into JSON text (never an executable tool)", async provider => {
     const body = provider === "anthropic" ? claude([{ type: "tool_use", id: "x", name: "makase_structured_output", input: { title: "Demo" } }], "tool_use") : openai({ tool_calls: [{ type: "function", id: "x", function: { name: "makase_structured_output", arguments: '{"title":"Demo"}' } }] }, "tool_calls");
     const f = transport(body), c = new HttpProviderClient(config(provider), { fetch: f });
     expect(await c.generate(req({ responseJsonSchema: schema, thinkingLevel: "low" }))).toMatchObject({ parts: [{ type: "text", text: '{"title":"Demo"}' }], stopReason: "stop" });
     expect(sent(f).tool_choice).toBeDefined();
   });
-  it.each(["openai", "anthropic"] as const)("%s supports explicit native schema mode", async provider => {
+  it.each(["deepseek", "anthropic"] as const)("%s supports explicit native schema mode", async provider => {
     const cfg = config(provider); cfg.profiles["test-model"]!.structuredOutput = "json_schema";
     const f = transport(provider === "anthropic" ? claude([{ type: "text", text: '{"title":"Demo"}' }]) : openai({ content: '{"title":"Demo"}' }));
     await new HttpProviderClient(cfg, { fetch: f }).generate(req({ responseJsonSchema: schema }));
     expect(provider === "anthropic" ? sent(f).output_config.format.schema : sent(f).response_format.json_schema.schema).toEqual(schema);
   });
-  it.each(["openai", "anthropic"] as const)("%s discards executable calls and structured partial output on refusal/truncation", async provider => {
+  it.each(["deepseek", "anthropic"] as const)("%s discards executable calls and structured partial output on refusal/truncation", async provider => {
     for (const reason of provider === "anthropic" ? ["refusal", "max_tokens", "new_reason"] : ["content_filter", "length", "new_reason"]) {
       const f = transport(provider === "anthropic" ? claude([{ type: "text", text: '{"title":"partial"}' }, { type: "tool_use", id: "x", name: "run_command", input: {} }], reason) : openai({ content: '{"title":"partial"}', tool_calls: [{ type: "function", id: "x", function: { name: "run_command", arguments: "{" } }] }, reason));
       expect((await new HttpProviderClient(config(provider), { fetch: f }).generate(req({ responseJsonSchema: schema }))).parts).toEqual([]);

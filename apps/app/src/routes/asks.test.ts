@@ -243,7 +243,7 @@ describe("POST /asks（API-072）", () => {
 
     // 全体の1日の上限（$15）に達している
     await T().db.transaction((tx) =>
-      insertUsageRecord(tx, s.w.ws.ctx, { taskId: null, agentId: s.w.agent.agentId, askId: null, rehearsalRunId: null, model: "m", phase: "planner", inputTokens: 1, outputTokens: 1, estimatedCostUsd: "15.000000", costUsd: "15.000000", latencyMs: 1, promptHash: "h" }, T0),
+      insertUsageRecord(tx, s.w.ws.ctx, { taskId: null, agentId: s.w.agent.agentId, askId: null, rehearsalRunId: null, provider: "google", model: "m", phase: "planner", inputTokens: 1, outputTokens: 1, estimatedCostUsd: "15.000000", costUsd: "15.000000", latencyMs: 1, promptHash: "h" }, T0),
     );
     const over = await post(s, "/asks", { text: "お金がない" });
     expect(over.status).toBe(429);

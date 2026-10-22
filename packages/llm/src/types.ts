@@ -4,6 +4,7 @@
 
 import type { AssistantPart, ChatMessage, McpToolSpec, ToolSpec } from "@open-team/runner";
 import type { PriceEntry } from "./pricing.ts";
+import type { LlmProvider } from "./provider-config.ts";
 
 export interface LlmRequest {
   model: string;
@@ -51,6 +52,8 @@ export interface LlmResponse {
 }
 
 export interface LlmClient {
+  /** 費用の記録に残すプロバイダー（未設定は Gemini 相当）。API キーは含めない */
+  provider?: LlmProvider;
   /** Stable policy/certificate identity, distinct from the model ID sent to an API. */
   modelIdentity?(model: string): string;
   /** Provider-scoped pricing; no fallback to another provider's model names. */

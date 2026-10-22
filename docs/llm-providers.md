@@ -5,9 +5,11 @@ Makase の担当編成・受け渡し・ツールの権限・承認・予算判�
 | LLM_PROVIDER | API | キーの環境変数 |
 |---|---|---|
 | `gemini`（既定） | Gemini generateContent | `GEMINI_API_KEY` |
-| `anthropic` | Claude Messages | `ANTHROPIC_API_KEY` |
-| `openai` | OpenAI Chat Completions | `OPENAI_API_KEY` |
-| `openai-compatible` | 設定先のChat Completions互換API | `OPENAI_COMPATIBLE_API_KEY` |
+| `anthropic`（Claude） | Claude Messages（`https://api.anthropic.com/v1/messages` 固定） | `ANTHROPIC_API_KEY` |
+| `deepseek` | DeepSeek Chat Completions（`https://api.deepseek.com` 固定） | `DEEPSEEK_API_KEY` |
+| `openrouter` | OpenRouter Chat Completions（`https://openrouter.ai/api/v1` 固定） | `OPENROUTER_API_KEY` |
+
+接続先は固定です。利用者が変えられる接続先の設定はありません（キーの送り先を限るため）。`openai` と `openai-compatible` は廃止しました。
 
 既存のGemini設定は引き続き使えます。Gemini以外のキーを `GEMINI_API_KEY` に入れないでください。選択プロバイダーのキーだけを使用します。キーはブラウザや作業場に渡しません。ログは既知のキー・APIキーパターン・認証ヘッダーをマスクします。APIエラー本文はプロンプトやキーを含み得るため表示しません。
 
@@ -22,7 +24,7 @@ GEMINI_API_KEY=
 
 モデル省略時は従来の既定値です。既存の料金表にないGeminiモデルは拒否します。料金表の更新なしで未知モデルを無料扱いすることはありません。
 
-## Claude / OpenAI / 互換API
+## Claude / DeepSeek / OpenRouter
 
 `LLM_MODEL_AGENT` は必須。`LLM_MODEL_PLANNER` を省略すると同じモデルを使います。モデルIDはAPIが受け付ける正確なIDです。モデル名の前方一致や他社の価格表へのフォールバックはしません。比較用モデルは `LLM_MODELS_COMPARE` にカンマ区切りで指定できます。
 
@@ -36,16 +38,27 @@ LLM_MODEL_PLANNER=YOUR_MODEL_ID
 LLM_MODELS_JSON={"YOUR_MODEL_ID":{"inputPerMTokMicroUsd":2000000,"outputPerMTokMicroUsd":10000000,"tools":true,"structuredOutput":"tool","temperature":true,"reasoningEffort":false,"maxOutputTokens":8192,"contextWindow":200000}}
 ```
 
-OpenAIでは `LLM_PROVIDER=openai`、`OPENAI_API_KEY` と対応モデルID・プロファイルを設定します。互換APIでは以下も指定します。
+DeepSeek と OpenRouter は、キーと対応モデルID・プロファイルを設定します。どちらも OpenAI 互換の Chat Completions 形式で、上限は `max_tokens` で送ります（`tokenLimitParameter` の既定）。
 
 ```dotenv
-LLM_PROVIDER=openai-compatible
-OPENAI_COMPATIBLE_API_KEY=
-OPENAI_COMPATIBLE_BASE_URL=https://YOUR_ENDPOINT/v1
-# ローカル専用サーバーは http://127.0.0.1:PORT/v1 も可
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=
+LLM_MODEL_AGENT=YOUR_MODEL_ID
+LLM_MODEL_PLANNER=YOUR_MODEL_ID
+LLM_MODELS_JSON={"YOUR_MODEL_ID":{"inputPerMTokMicroUsd":1000000,"outputPerMTokMicroUsd":2000000,"tools":true,"structuredOutput":"tool","temperature":true,"reasoningEffort":false,"maxOutputTokens":8192,"contextWindow":128000}}
 ```
 
-`BASE_URL` に `/chat/completions` を付加して呼びます。任意のAPIが互換であるとは判断しません。管理者が信頼できる送信先を明示してください。URL内の認証情報・クエリ・フラグメントは不可。HTTPはループバックだけです。リダイレクトには追従しません。公式OpenAI/Anthropicの接続先は固定で、互換用キーを独立させています。
+```dotenv
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=
+LLM_MODEL_AGENT=vendor/YOUR_MODEL_ID
+LLM_MODEL_PLANNER=vendor/YOUR_MODEL_ID
+LLM_MODELS_JSON={"vendor/YOUR_MODEL_ID":{"inputPerMTokMicroUsd":2000000,"outputPerMTokMicroUsd":10000000,"tools":true,"structuredOutput":"tool","temperature":true,"reasoningEffort":false,"maxOutputTokens":8192,"contextWindow":200000}}
+```
+
+上の DeepSeek・OpenRouter の値も架空の例です。モデルIDは各サービスが受け付ける正確な文字列（OpenRouter は `ベンダー/モデル` 形式）にし、料金は公式の単価で置き換えてください。
+
+OpenAI互換の2社は、固定の接続先（`https://api.deepseek.com`、`https://openrouter.ai/api/v1`）の `/chat/completions` を呼びます。Claude は `https://api.anthropic.com/v1/messages` を呼びます。リダイレクトには追従しません。任意の接続先を設定する仕組みはありません（以前の `openai-compatible` と `OPENAI_COMPATIBLE_BASE_URL` は廃止）。
 
 ## モデルプロファイル
 
@@ -78,10 +91,10 @@ Haiku 5.5は2026-10-19確認の[公式モデル資料](https://platform.claude.c
 | `structuredOutput` | `tool`：出力専用の関数を強制し、引数をJSONテキストへ変換。`json_schema`：APIのネイティブJSON Schema出力。`none`：非対応 |
 | `temperature` | temperature指定に対応するか。要求されるのにfalseなら通信前に拒否 |
 | `anthropicMode` | 任意。`haiku55-no-thinking` はClaude APIのHaiku 5.5専用。アプリのtemperatureヒントを明示的に省略し、thinking disabled、effort low（lowヒント時）またはmediumで送信。high要求は拒否 |
-| `reasoningEffort` | OpenAI系で `reasoning_effort` のlow/high指定に対応するか。既定false |
+| `reasoningEffort` | OpenAI互換（DeepSeek・OpenRouter）で `reasoning_effort` のlow/high指定に対応するか。既定false |
 | `maxOutputTokens` | 対応する出力トークン上限 |
 | `contextWindow` | コンテキスト上限。要求本文のUTF-8バイト数＋4096の余裕＋出力上限で保守的にチェック |
-| `tokenLimitParameter` | OpenAI系の上限パラメーター。既定 `max_completion_tokens`。古い互換APIのみ `max_tokens` を明示 |
+| `tokenLimitParameter` | OpenAI互換の上限パラメーター。既定 `max_tokens`（DeepSeek・OpenRouter）。`max_completion_tokens` を使うモデルだけ明示 |
 
 料金はプロバイダー・モデル・利用するコンテキスト長における**上限単価**を設定します。段階料金がある場合は利用範囲の最大単価、思考の別料金がある場合は出力単価に最大値を設定してください。自動で最新料金を取得するものではありません。設定誤りによる過少見積もりを防ぐため、運用者が料金改定時に更新してください。ゼロ・負数・不足設定は拒否します。無料のローカルモデルでも正の保守的な予算単価を設定します。
 
@@ -99,7 +112,7 @@ Haiku 5.5は2026-10-19確認の[公式モデル資料](https://platform.claude.c
 - Haiku 5.5を使う通常の依頼では出力上限を8192にし、edgeの自動再試行を無効にします。長いHTML等の途中切れを抑えつつ、再試行予約によって少額のタスク予算を圧迫することを避けます。失敗時は利用者が結果と予算を確認して再実行します。
 - 単価・入力サイズによっては既存の少額タスク予算で開始できません。予算を自動で増額せず、上限の理由を示して停止します。必要なら利用者が通常の予算設定から見直してください。
 - 使用量の欠落・不正、応答JSONの破損は成功扱いしません。使用量不明として保守的に見積もりを計上し、無料扱いしません。
-- OpenAIのcompletion内のreasoning tokensは分離し、二重計上しません。Claudeの出力内のthinkingも重複計上しません。キャッシュは明示的に要求せず、返されたキャッシュ入力は割引を適用しません（作成分は入力単価の2倍で保守的に計算）。
+- OpenAI互換のcompletion内のreasoning tokensは分離し、二重計上しません。Claudeの出力内のthinkingも重複計上しません。キャッシュは明示的に要求せず、返されたキャッシュ入力は割引を適用しません（作成分は入力単価の2倍で保守的に計算）。
 - 拒否・トークン上限・未知の終了理由ではツールを実行しません。途中の構造化結果も利用しません。
 - Kill Switch/AbortSignal、120秒タイムアウト、エラー本文の非表示は共通です。
 

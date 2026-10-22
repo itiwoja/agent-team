@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { readGeminiEnv, type GeminiEnv } from "./models.ts";
 import type { PriceEntry } from "./pricing.ts";
 
-export type LlmProvider = "gemini" | "anthropic" | "openai" | "openai-compatible";
+export type LlmProvider = "gemini" | "anthropic" | "deepseek" | "openrouter";
 const positive = z.number().int().positive().max(1_000_000_000);
 /** Rates are administrator-supplied upper bounds in micro USD / million tokens. */
 export const ModelProfileSchema = z.object({
@@ -16,7 +16,8 @@ export const ModelProfileSchema = z.object({
   reasoningEffort: z.boolean().default(false),
   maxOutputTokens: positive,
   contextWindow: positive,
-  tokenLimitParameter: z.enum(["max_completion_tokens", "max_tokens"]).default("max_completion_tokens"),
+  // DeepSeek と OpenRouter（OpenAI 互換）はどちらも max_tokens を受ける
+  tokenLimitParameter: z.enum(["max_completion_tokens", "max_tokens"]).default("max_tokens"),
 }).strict();
 export type ModelProfile = z.infer<typeof ModelProfileSchema>;
 export interface LlmConfig extends GeminiEnv {
@@ -32,21 +33,18 @@ export class LlmConfigurationError extends Error {
 }
 const value = (s: string | undefined): string | undefined => s?.trim() || undefined;
 export const PROVIDER_KEY_NAMES: Record<LlmProvider, string> = {
-  gemini: "GEMINI_API_KEY", anthropic: "ANTHROPIC_API_KEY", openai: "OPENAI_API_KEY", "openai-compatible": "OPENAI_COMPATIBLE_API_KEY",
+  gemini: "GEMINI_API_KEY", anthropic: "ANTHROPIC_API_KEY", deepseek: "DEEPSEEK_API_KEY", openrouter: "OPENROUTER_API_KEY",
 };
 
-export function compatibleBaseUrl(raw: string | undefined): string {
-  try {
-    const u = new URL(raw ?? "");
-    const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(u.hostname);
-    if (u.username || u.password || u.search || u.hash || (u.protocol !== "https:" && !(loopback && u.protocol === "http:"))) throw new Error();
-    return u.href.replace(/\/+$/, "");
-  } catch { throw new LlmConfigurationError("OPENAI_COMPATIBLE_BASE_URL は認証情報・クエリなしのHTTPS URL（ループバックのみHTTP可）にしてください"); }
-}
+/** OpenAI 互換の接続先は固定（利用者は変えられない。鍵の送り先を限る）。Claude は HTTP アダプターの固定 URL を使う */
+export const PROVIDER_BASE_URLS: Partial<Record<LlmProvider, string>> = {
+  deepseek: "https://api.deepseek.com",
+  openrouter: "https://openrouter.ai/api/v1",
+};
 
 export function readLlmEnv(source: NodeJS.ProcessEnv = process.env): LlmConfig {
   const raw = value(source.LLM_PROVIDER) ?? "gemini";
-  if (!["gemini", "anthropic", "openai", "openai-compatible"].includes(raw)) throw new LlmConfigurationError("LLM_PROVIDER が未対応です");
+  if (!Object.hasOwn(PROVIDER_KEY_NAMES, raw)) throw new LlmConfigurationError("LLM_PROVIDER が未対応です");
   const provider = raw as LlmProvider;
   const budgetRaw = value(source.LLM_SESSION_BUDGET_MICRO_USD);
   const budget = budgetRaw === undefined ? undefined : Number(budgetRaw);
@@ -68,7 +66,7 @@ export function readLlmEnv(source: NodeJS.ProcessEnv = process.env): LlmConfig {
     if (!Object.hasOwn(profiles, model)) throw new LlmConfigurationError("選択モデルが LLM_MODELS_JSON に登録されていません");
   }
   return { provider, apiKey: value(source[PROVIDER_KEY_NAMES[provider]]), agentModel, plannerModel, compareModels, profiles, ...budgetConfig,
-    ...(provider === "openai-compatible" ? { baseUrl: compatibleBaseUrl(value(source.OPENAI_COMPATIBLE_BASE_URL)) } : {}),
+    baseUrl: PROVIDER_BASE_URLS[provider],
   };
 }
 

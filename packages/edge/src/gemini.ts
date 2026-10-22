@@ -27,7 +27,7 @@ import {
 } from "@open-team/llm";
 import { AppError, type Clock, type Logger } from "@open-team/platform";
 import { lockWorkspace, system, type Db, type Tx, type UsagePhase, type Uuid, type WorkspaceKind } from "@open-team/db";
-import { insertUsageRecord } from "@open-team/db/edge";
+import { insertUsageRecord, type UsageRecordInput } from "@open-team/db/edge";
 import { SPEND_LIMITS, type SpendLimits } from "./limits.ts";
 import { checkSpend, spendDeniedAppError, type SpendDenied } from "./spend.ts";
 import { errorMessage } from "./util.ts";
@@ -266,7 +266,7 @@ export async function callGemini(
       async (tx) => {
         const now = deps.clock.now();
         await lockWorkspace(tx, wsCtx);
-        if (chargedMicro > 0) await insertUsageRecord(tx, wsCtx, usageRow(ctx, req, usage), now);
+        if (chargedMicro > 0) await insertUsageRecord(tx, wsCtx, usageRow(ctx, req, usage, usageProviderOf(deps.llm)), now);
         await hooks.afterFailure?.(tx, error, usage, now);
       },
       { retryOnce: true },
@@ -298,7 +298,7 @@ export async function callGemini(
     async (tx) => {
       const now = deps.clock.now();
       await lockWorkspace(tx, wsCtx);
-      await insertUsageRecord(tx, wsCtx, usageRow(ctx, req, usage), now);
+      await insertUsageRecord(tx, wsCtx, usageRow(ctx, req, usage, usageProviderOf(deps.llm)), now);
       await hooks.afterCall?.(tx, usage, response, now);
     },
     { retryOnce: true },
@@ -320,12 +320,18 @@ export async function callGemini(
   return { response, usage };
 }
 
-function usageRow(ctx: GeminiCallContext, req: LlmRequest, usage: GeminiUsage) {
+/** usage_records.provider。llm の provider 未設定（Gemini）は google。それ以外は設定した提供元の名前 */
+function usageProviderOf(llm: LlmClient): UsageRecordInput["provider"] {
+  return llm.provider === undefined || llm.provider === "gemini" ? "google" : llm.provider;
+}
+
+function usageRow(ctx: GeminiCallContext, req: LlmRequest, usage: GeminiUsage, provider: UsageRecordInput["provider"]) {
   return {
     taskId: ctx.taskId,
     agentId: ctx.agentId,
     askId: ctx.askId,
     rehearsalRunId: ctx.rehearsalRunId,
+    provider,
     model: usage.model,
     phase: ctx.phase,
     inputTokens: usage.inputTokens,
