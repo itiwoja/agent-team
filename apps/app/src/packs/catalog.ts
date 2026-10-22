@@ -7,6 +7,8 @@ import { trustedSkillDigestsOf, type TrustedSkillDigests } from "@open-team/edge
 import { ACCOUNTING } from "./library/accounting.ts";
 import { DESIGNER } from "./library/designer.ts";
 import { ENGINEER } from "./library/engineer.ts";
+import { EXECUTIVE } from "./library/executive.ts";
+import { MARKETER } from "./library/marketer.ts";
 import { SALES } from "./library/sales.ts";
 import { SHOP } from "./library/shop.ts";
 import { STUDENT } from "./library/student.ts";
@@ -15,7 +17,7 @@ import type { PackDefinition } from "./types.ts";
 
 export { PACK_CATEGORIES, type PackAgent, type PackCategory, type PackDefinition, type PackFile, type PackSkill, type PackTemplate } from "./types.ts";
 
-export const PACKS: readonly PackDefinition[] = [TEACHER, DESIGNER, ENGINEER, SALES, ACCOUNTING, STUDENT, SHOP];
+export const PACKS: readonly PackDefinition[] = [TEACHER, DESIGNER, ENGINEER, SALES, ACCOUNTING, STUDENT, SHOP, EXECUTIVE, MARKETER];
 
 /**
  * 運営のパックのスキルの (パック, 名前) → 本文の SHA-256（SG-05）。createEdge の trustedSkills に渡す。

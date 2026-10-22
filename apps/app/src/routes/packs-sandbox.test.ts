@@ -103,7 +103,7 @@ describe("パック（GET /packs・POST /packs/{id}/install）", () => {
   it("棚にパックが並び、入れると担当・スキル・作業場の最初のファイルができる。2度目は 409、知らないパックは 404", async () => {
     const s = await setup();
     const list = ListPacksResponseSchema.parse(await (await get(s, "/packs")).json());
-    expect(list.packs.map((p) => p.id)).toEqual(["teacher", "designer", "engineer", "sales", "accounting", "student", "shop"]);
+    expect(list.packs.map((p) => p.id)).toEqual(["teacher", "designer", "engineer", "sales", "accounting", "student", "shop", "executive", "marketer"]);
     expect(list.categories).toEqual(["学び・教育", "つくる", "売る・お店", "お金・事務"]);
     expect(list.packs.every((p) => p.installedAt === null && p.sandboxAvailable)).toBe(true);
     expect(list.packs.every((p) => p.agents.every((a) => a.agentId === null))).toBe(true);
