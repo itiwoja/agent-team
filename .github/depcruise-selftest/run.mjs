@@ -24,10 +24,10 @@ const EXPECTED = [
   ["runner-no-secrets", "packages/runner/src/bad-secrets-platform.ts"],
   ["pure-no-io-builtins", "packages/runner/src/bad-io-net.ts"],
   ["pure-no-io-builtins", "packages/kernel/src/bad-io-fs.ts"],
-  ["pure-no-io-builtins", "packages/sim-core/src/bad-io-http.ts"],
-  ["pure-no-io-builtins", "packages/oracles/src/bad-io-child.ts"],
-  ["pure-no-network-packages", "packages/sim-core/src/bad-net-undici.ts"],
-  ["no-circular", "packages/oracles/src/bad-cycle-a.ts"],
+  ["pure-no-io-builtins", "packages/kernel/src/bad-io-http.ts"],
+  ["pure-no-io-builtins", "packages/kernel/src/bad-io-child.ts"],
+  ["pure-no-network-packages", "packages/kernel/src/bad-net-undici.ts"],
+  ["no-circular", "packages/kernel/src/bad-cycle-a.ts"],
   ["no-circular", "apps/web/src/bad-cycle-x.tsx"],
 ];
 // 型の除去と import の抜き出しが新しい構文でも効くこと（この依存が見えなければ .ts を読めていない）

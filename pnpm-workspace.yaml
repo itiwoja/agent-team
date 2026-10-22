@@ -1,7 +1,6 @@
 packages:
   - apps/*
   - packages/*
-  - scripts/*
 
 # 公開から3日たっていない版は入れない（15 §サプライチェーン、D-50）
 minimumReleaseAge: 4320

@@ -1,6 +1,6 @@
 // dependency-cruiser の設定。CI の `pnpm lint:deps` で回す（D-52）
 // - packages/runner は DB・Gemini・gateway のクライアントと鍵に届くものを import しない（D-52、15:446,487-488）
-// - 純粋なパッケージ（kernel・sim-core・oracles・rehearsal と runner のロジック）は node:crypto のほかに I/O の組み込みとネットワークのパッケージを使わない
+// - 純粋なパッケージ（kernel と runner のロジック）は node:crypto のほかに I/O の組み込みとネットワークのパッケージを使わない
 // - 循環・解決できない import・本番のコードからの devDependencies を禁止
 // 規則が本当に違反を見つけるかは .github/depcruise-selftest/run.mjs で確かめる（SO-RB-01）
 "use strict";
@@ -196,8 +196,8 @@ function workspace(...names) {
   return `^(packages/(${names.join("|")})/|@open-team/(${names.join("|")})(/|$))`;
 }
 
-// 純粋なパッケージ（kernel・sim-core・oracles・rehearsal）と runner のロジック
-const PURE = "^packages/(kernel|sim-core|oracles|rehearsal|runner)/";
+// 純粋なパッケージ（kernel）と runner のロジック
+const PURE = "^packages/(kernel|runner)/";
 // I/O を持たない組み込みだけ許す（node:crypto は Kernel のハッシュに使う：cross-check §3.1）。
 // fs・net・http(s)・http2・tls・dgram・dns・child_process・worker_threads・cluster・os・process・vm・sqlite・timers・perf_hooks などは不可
 const PURE_BUILTINS = "^(node:)?(crypto|util|util/types|assert|assert/strict|buffer|string_decoder|url|querystring|punycode|path|path/posix|path/win32|events)$";
@@ -263,7 +263,7 @@ module.exports = {
     },
     {
       name: "pure-no-io-builtins",
-      comment: "純粋なパッケージ（kernel・sim-core・oracles・rehearsal・runner のロジック）は node:crypto など I/O のない組み込みだけを使う。時刻・乱数・ID は引数で受け取る",
+      comment: "純粋なパッケージ（kernel・runner のロジック）は node:crypto など I/O のない組み込みだけを使う。時刻・乱数・ID は引数で受け取る",
       severity: "error",
       from: { path: PURE, pathNot: TEST_FILES },
       to: { dependencyTypes: ["core"], dependencyTypesNot: ["type-only"], pathNot: PURE_BUILTINS },
@@ -307,7 +307,7 @@ module.exports = {
   options: {
     doNotFollow: { path: ["(^|/)node_modules/"] },
     // 自分たちのビルド結果だけを除く（node_modules の中の dist/ まで除くと npm の依存が消え、規則が当たらなくなる）
-    exclude: { path: ["^(apps|packages|scripts)/[^/]+/(dist|coverage)/", "^scripts/measure/results/"] },
+    exclude: { path: ["^(apps|packages)/[^/]+/(dist|coverage)/"] },
     moduleSystems: ["es6", "cjs"],
     // 差し替えのときは型の情報がないので acorn で読む。typescript 5 系が見えるなら型だけの import も数える
     tsPreCompilationDeps: !useShim,

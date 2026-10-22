@@ -11,8 +11,7 @@
     "build": "pnpm -r run build",
     "typecheck": "pnpm -r run typecheck",
     "test": "pnpm -r run test",
-    "lint:deps": "depcruise --config .dependency-cruiser.cjs packages apps scripts",
-    "measure": "pnpm --filter @open-team/measure run measure"
+    "lint:deps": "depcruise --config .dependency-cruiser.cjs packages apps"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",
