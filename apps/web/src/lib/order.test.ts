@@ -3,7 +3,7 @@ import type { ApprovalItem, CheckItem, QuestionItem, ReportItem } from "../api";
 import { applyCheckEvent, sortCheckItems, withoutKeys } from "./order";
 
 const base = { subtitle: null, agent: null, askId: null, opened: false };
-const report = (key: string, at: string): ReportItem => ({ ...base, key, title: key, at, kind: "report", reportKind: "task", failed: false, dryRun: false, body: null, lines: [], link: { askId: null, rehearsalRunId: null } });
+const report = (key: string, at: string): ReportItem => ({ ...base, key, title: key, at, kind: "report", reportKind: "task", failed: false, dryRun: false, body: null, lines: [], link: { askId: null } });
 const question = (key: string, at: string): QuestionItem => ({ ...base, key, title: key, at, kind: "question", source: "ask_question", question: { text: key, choices: [], allowFreeText: true }, reason: "", intentId: null });
 const approval = (key: string, at: string, open = false): ApprovalItem => ({
   ...base,

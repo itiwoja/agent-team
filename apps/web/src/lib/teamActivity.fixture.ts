@@ -25,6 +25,6 @@ export function teamFixture(mode: FixtureMode): AskDetail {
     formation:{shape:"aggregate",shapeLine:null,notes:[],members:stages.map((s,i)=>({memberId:s.memberId,agentId:s.agentId,agentName:s.agentName,isNew:true,summary:s.summary,position:s.position,dependsOn:i===2?[1,2]:[],isAggregator:i===2,isSpokesperson:i===2}))},
     run:{runId:mode==="retry"?"run-2":"run-1",runNo:mode==="retry"?2:1,status:mode==="done"?"done":"running",triggerType:"ask",startedAt:new Date().toISOString(),finishedAt:null},
     stages, handoffs:mode==="done"?[0,1].map(i=>({fromPosition:i+1,toPosition:3,fromAgentName:stages[i]!.agentName,toAgentName:stages[2]!.agentName,label:i===0?"見出しと紹介文の案":"配色と配置の案",taintMark:null})):[],
-    answer:null,answerPending:null,pendingIntents:[],rehearsal:null,resume:null,messageCount:0,planner:null,
+    answer:null,answerPending:null,pendingIntents:[],resume:null,messageCount:0,planner:null,
   };
 }

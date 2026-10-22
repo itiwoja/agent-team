@@ -4,7 +4,6 @@ import { api, onUnauthorized, type Me, type SessionState } from "./api";
 import { AppHeader } from "./components/AppHeader";
 import { AskComposerSheet } from "./components/AskComposerSheet";
 import { Notices } from "./components/Notices";
-import { JUDGE_TOKEN_NOTE } from "./lib/format";
 import { installHistory, Link, navigate, takePendingScroll, useRoute, type Route } from "./lib/router";
 import { restoreWhenTall } from "./lib/scrollMemory";
 import { backOf, titleOf } from "./lib/screen";
@@ -103,7 +102,7 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
     setError(null);
     try {
       const res = await call();
-      // どちらのトークンでも入口（SCR-020）へ。審査用のトークンは `/?prepared=` 付きで、入口が「用意した依頼が待っています」を出す（D-118）
+      // 入口（SCR-020）へ
       if (res.next && res.next !== "/") navigate(res.next, { replace: true });
       await onSignedIn();
     } catch (err) {
@@ -141,10 +140,7 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
       )}
       <form onSubmit={submit} className="entry">
         <label htmlFor="token">入口のトークン</label>
-        <input id="token" type="password" autoComplete="current-password" value={token} onChange={(e) => setToken(e.target.value)} autoFocus aria-describedby="token-note" />
-        <p id="token-note" className="muted small">
-          {JUDGE_TOKEN_NOTE}
-        </p>
+        <input id="token" type="password" autoComplete="current-password" value={token} onChange={(e) => setToken(e.target.value)} autoFocus />
         <button type="submit" className="btn btn-primary" disabled={busy || token.trim().length === 0}>
           {busy ? "入っています…" : "入る"}
         </button>

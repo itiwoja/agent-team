@@ -1,6 +1,5 @@
 // 担当の段の進み具合（やったことの印・経過の1行）。文はここで決め、画面はそのまま出す
 import type { StageActivity, StageView } from "../api";
-import { durationText } from "./rehearsal";
 
 /** やったことの印（色だけに頼らず、記号と短い文も添える） */
 export function activityMark(outcome: StageActivity["outcome"]): { icon: string; text: string | null } {
@@ -24,4 +23,10 @@ export function stageClock(s: Pick<StageView, "state" | "startedAt" | "finishedA
   if (!Number.isFinite(sec) || sec < 0) return null;
   const tail = s.state === "done" ? "で済み" : s.state === "awaiting_approval" ? "で確認待ちに" : "";
   return `${durationText(sec)}${tail}`;
+}
+
+/** 秒を「38秒」「2分」「3分5秒」の文にする（2分未満は秒で出す） */
+export function durationText(sec: number): string {
+  const s = Math.max(0, Math.floor(sec));
+  return s < 120 ? `${s}秒` : `${Math.floor(s / 60)}分${s % 60 === 0 ? "" : `${s % 60}秒`}`;
 }

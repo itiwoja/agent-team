@@ -2,12 +2,11 @@
 import type { AskDetail, AskStatus, ReportItem } from "../api";
 
 /** 失敗の行でやり直すときに呼ぶ操作。null は「やり直すボタンを出さない」 */
-export type RetryPlan = "rehearsal" | "ask" | null;
+export type RetryPlan = "ask" | null;
 
-/** 失敗の行（failed）で、依頼（askId）があり、リハーサル・依頼・担当の仕事のどれかの失敗なら対応する操作を返す */
+/** 失敗の行（failed）で、依頼（askId）があり、依頼・担当の仕事のどちらかの失敗なら対応する操作を返す */
 export function retryPlanFor(item: Pick<ReportItem, "failed" | "reportKind" | "link">): RetryPlan {
   if (!item.failed || !item.link.askId) return null;
-  if (item.reportKind === "rehearsal") return "rehearsal";
   if (item.reportKind === "answer" || item.reportKind === "task") return "ask";
   return null;
 }

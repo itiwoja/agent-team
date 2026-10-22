@@ -12,14 +12,6 @@ export function readPrefill(search: string): string | null {
   return t.length > PREFILL_MAX ? t.slice(0, PREFILL_MAX) : t;
 }
 
-/** `?prepared=` の依頼の id（審査用のトークンで入った直後。D-118）。無い・空のときは null */
-export function readPrepared(search: string): string | null {
-  const raw = new URLSearchParams(search).get("prepared");
-  if (raw === null) return null;
-  const t = raw.trim();
-  return t === "" ? null : t;
-}
-
 /** 候補から重ならないように n 個を選ぶ（exclude に入っているものは外す）。候補が足りなければ有るだけ返す */
 export function pickExamples(pool: readonly string[], n: number, exclude: readonly string[] = [], rand: () => number = Math.random): string[] {
   const rest = pool.filter((s) => !exclude.includes(s));

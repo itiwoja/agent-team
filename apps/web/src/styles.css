@@ -389,8 +389,6 @@ h4,
 }
 .stage-chevron,
 .agent-chevron,
-.cert-chevron,
-.scenario-chevron,
 .done-chev {
   display: inline-flex;
   align-items: center;
@@ -421,7 +419,6 @@ h4,
 .agent-ask,
 .pack-tile,
 .done-card.is-link,
-.rehearsal-pill,
 .row-foot .clamp-toggle,
 .row-foot .row-link {
   transition:
@@ -456,7 +453,6 @@ h4,
   }
   .undo-btn:hover,
   .turn-folded:hover,
-  .rehearsal-pill:hover,
   .row-foot .clamp-toggle:hover,
   .row-foot .row-link:hover {
     background: var(--surface-2);
@@ -482,7 +478,6 @@ h4,
 .round-btn:not(:disabled):active,
 .undo-btn:active,
 .packs-cat:active,
-.rehearsal-pill:active,
 .row-foot .clamp-toggle:active,
 .row-foot .row-link:active {
   transform: scale(0.97);

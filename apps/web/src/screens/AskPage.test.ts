@@ -4,7 +4,7 @@ import { targetIdOf } from "./AskPage";
 describe("targetIdOf", () => {
   it("# の後ろの要素 ID を取り出す", () => {
     expect(targetIdOf("#approvals")).toBe("approvals");
-    expect(targetIdOf("#rehearsal")).toBe("rehearsal");
+    expect(targetIdOf("#team")).toBe("team");
   });
   it("空の # や無いハッシュは null", () => {
     expect(targetIdOf("")).toBeNull();

@@ -3,23 +3,23 @@ import { useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type R
 import { Egg, GenFormation } from "../components/GenStage";
 import { enterAskDelay, type GenState } from "../lib/generation";
 import { readDraft, writeDraft } from "../lib/draft";
-import { pickExamples, readPrefill, readPrepared } from "../lib/prefill";
-import { Link, navigate, replaceUrl } from "../lib/router";
+import { pickExamples, readPrefill } from "../lib/prefill";
+import { navigate, replaceUrl } from "../lib/router";
 import { ArrowUpIcon } from "../ui/icons";
 import { useAskGeneration } from "../lib/useAskGeneration";
 import { useWorkspace } from "../workspace";
 
 /** 入力欄の例文（A-96：固定の候補 10 個。毎回入れ替える） */
 const EXAMPLES = [
-  "在庫が減ったら発注して",
+  "明日の午後に30分の打ち合わせを入れて",
   "毎朝7時にニュースをまとめて",
-  "仕入れ先のメールを読んで、在庫を見て、必要なら発注して",
+  "このリポジトリの未解決の Issue を整理して",
   "来週の予定を確認して、重なっているものを教えて",
   "週に一度、依存関係の更新を調べて",
   "お客さんからの問い合わせメールを整理して",
   "今月の売上をまとめて、先月と比べて",
-  "毎日18時に、今日の発注を一覧にして",
-  "新しい注文が入ったら、店長に知らせて",
+  "毎週金曜に、今週の予定をふり返って",
+  "新しい技術の記事を3本調べて、要点をまとめて",
   "競合の値段を調べて、表にして",
 ];
 
@@ -37,8 +37,6 @@ export function Entrance() {
   const [paused, setPaused] = useState(false);
   // Google カレンダー・GitHub の接続の結果（/?connected=gcal|github・/?connect_error=…。読んだら URL を / に戻す）
   const [connectNote, setConnectNote] = useState<{ text: string; error: boolean } | null>(null);
-  // 審査用のトークンで入った直後（`/?prepared=askId`。D-118）：用意した依頼が待っていることを知らせる（開くか閉じるまで残す）
-  const [prepared, setPrepared] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
   // `/?text=…` で開かれたら、その文を入力欄に入れてフォーカスし、URL を `/` に戻す（送りはしない）
@@ -49,13 +47,6 @@ export function Entrance() {
     setText(pre);
     // 画面を移ったときの main へのフォーカス（親の effect は子より後に走る）に上書きされないよう、次のフレームで入れる
     requestAnimationFrame(() => inputRef.current?.focus());
-  }, []);
-
-  useEffect(() => {
-    const id = readPrepared(location.search);
-    if (id === null) return;
-    replaceUrl("/");
-    setPrepared(id);
   }, []);
 
   useEffect(() => {
@@ -117,19 +108,6 @@ export function Entrance() {
           <p className={`entrance-note connect-note${connectNote.error ? " error" : " muted"}`} role="status">
             {connectNote.text}
           </p>
-        )}
-        {prepared && idle && (
-          <div className="entrance-note prepared-note" role="status">
-            <p className="prepared-note-text">用意した依頼（受信箱係 → 仕入れ係）が待っています。送る前の確認が1件あります</p>
-            <div className="prepared-note-actions">
-              <Link to={`/asks/${encodeURIComponent(prepared)}`} className="btn btn-primary">
-                依頼のページを開く
-              </Link>
-              <button type="button" className="btn btn-ghost" onClick={() => setPrepared(null)}>
-                あとで
-              </button>
-            </div>
-          </div>
         )}
         {showExamples && (
           <Examples

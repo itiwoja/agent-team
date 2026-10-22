@@ -1,18 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { PREFILL_MAX, pickExamples, readPrefill, readPrepared } from "./prefill";
-
-describe("readPrepared（審査用のトークンで入った直後の、用意した依頼の id：D-118）", () => {
-  it("?prepared= の id を返す。無い・空のときは null", () => {
-    expect(readPrepared("?prepared=00000000-0000-4000-8000-000000000001")).toBe("00000000-0000-4000-8000-000000000001");
-    expect(readPrepared("?prepared=%20")).toBeNull();
-    expect(readPrepared("")).toBeNull();
-    expect(readPrepared("?text=abc")).toBeNull();
-  });
-});
+import { PREFILL_MAX, pickExamples, readPrefill } from "./prefill";
 
 describe("readPrefill（頼み直しの文）", () => {
   it("?text= の文を URL デコードして返す", () => {
-    expect(readPrefill(`?text=${encodeURIComponent("在庫を見て、発注して")}`)).toBe("在庫を見て、発注して");
+    expect(readPrefill(`?text=${encodeURIComponent("受信箱を見て、返事の下書きを作って")}`)).toBe("受信箱を見て、返事の下書きを作って");
   });
 
   it("前後の空白は落とす", () => {

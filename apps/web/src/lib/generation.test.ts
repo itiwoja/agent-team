@@ -19,11 +19,11 @@ const ask = (over: Partial<AskSummary> = {}): AskSummary => ({
 
 const formation: FormationView = {
   shape: "chain",
-  shapeLine: "受信箱係 → 仕入れ係 の順に進めて、仕入れ係が答えます",
+  shapeLine: "受信箱係 → 調べ係 の順に進めて、調べ係が答えます",
   notes: [],
   members: [
-    { memberId: "m2", agentId: "g2", agentName: "仕入れ係", isNew: true, summary: "在庫を見て発注する", position: 2, dependsOn: [1], isAggregator: false, isSpokesperson: true },
-    { memberId: "m1", agentId: "g1", agentName: "受信箱係", isNew: false, summary: "仕入れ先のメールを読む", position: 1, dependsOn: [], isAggregator: false, isSpokesperson: false },
+    { memberId: "m2", agentId: "g2", agentName: "調べ係", isNew: true, summary: "Web で調べてまとめる", position: 2, dependsOn: [1], isAggregator: false, isSpokesperson: true },
+    { memberId: "m1", agentId: "g1", agentName: "受信箱係", isNew: false, summary: "問い合わせのメールを読む", position: 1, dependsOn: [], isAggregator: false, isSpokesperson: false },
   ],
 };
 
@@ -34,7 +34,7 @@ describe("生成中の畳み込み", () => {
   it("送ると生成中になり、編成ができたら段の順に担当を出す", () => {
     const s = run([{ type: "submit", text: "メールを読んで" }, { type: "accepted", ask: ask() }, { type: "event", event: formed }]);
     expect(s.phase).toBe("shown");
-    expect(s.members.map((m) => m.agentName)).toEqual(["受信箱係", "仕入れ係"]);
+    expect(s.members.map((m) => m.agentName)).toEqual(["受信箱係", "調べ係"]);
     expect(s.members[0]?.isNew).toBe(false);
     expect(s.shapeLine).toContain("→");
   });
@@ -47,7 +47,7 @@ describe("生成中の畳み込み", () => {
     expect(s.phase).toBe("generating");
   });
   it("質問 → 答える → 生成中に戻る", () => {
-    const q = { text: "どちらの店舗？", choices: [{ id: "1", label: "本店" }], allowFreeText: false };
+    const q = { text: "どちらのカレンダー？", choices: [{ id: "1", label: "仕事用" }], allowFreeText: false };
     const s1 = run([{ type: "submit", text: "t" }, { type: "accepted", ask: ask() }, { type: "event", event: { type: "ask.question", askId: "a1", question: q } }]);
     expect(s1.phase).toBe("question");
     expect(reduce(s1, { type: "answered" }).phase).toBe("generating");

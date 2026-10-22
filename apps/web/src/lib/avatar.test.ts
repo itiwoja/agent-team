@@ -3,10 +3,10 @@ import { avatarTraits, moodOfStage, propOf } from "./avatar";
 
 describe("avatarTraits", () => {
   it("同じ名前ならいつも同じ見た目", () => {
-    expect(avatarTraits("仕入れ係")).toEqual(avatarTraits("仕入れ係"));
+    expect(avatarTraits("荷物係")).toEqual(avatarTraits("荷物係"));
   });
   it("名前が違えば、たいてい見た目も違う", () => {
-    const names = ["仕入れ係", "受信箱係", "在庫係", "まとめ係", "天気係", "予定係"];
+    const names = ["荷物係", "受信箱係", "調べ係", "まとめ係", "天気係", "予定係"];
     const keys = new Set(names.map((n) => JSON.stringify(avatarTraits(n))));
     expect(keys.size).toBe(names.length);
   });
@@ -15,7 +15,7 @@ describe("avatarTraits", () => {
 describe("propOf", () => {
   it("名前の語で持ち物を選ぶ", () => {
     expect(propOf("受信箱係")).toBe("envelope");
-    expect(propOf("仕入れ係")).toBe("box");
+    expect(propOf("荷物係")).toBe("box");
     expect(propOf("ニュースのまとめ係")).toBe("news");
     expect(propOf("ふしぎ係")).toBe("sprout");
   });

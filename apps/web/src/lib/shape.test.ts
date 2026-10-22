@@ -5,7 +5,7 @@ const m = (agentName: string, position: number | null = null, isAggregator = fal
 
 describe("shapeLineOf（形の1行）", () => {
   it("ひとりは出さない", () => {
-    expect(shapeLineOf("single", [m("仕入れ係")])).toBeNull();
+    expect(shapeLineOf("single", [m("調べ係")])).toBeNull();
     expect(shapeLineOf(null, [])).toBeNull();
   });
   it("並列", () => {
@@ -30,6 +30,6 @@ describe("shapeLineOf（形の1行）", () => {
     ]);
   });
   it("順番：段の順に並べ、最後が答える", () => {
-    expect(shapeLineOf("chain", [m("仕入れ係", 2), m("受信箱係", 1)])).toBe("受信箱係 → 仕入れ係 の順に進めて、仕入れ係が答えます");
+    expect(shapeLineOf("chain", [m("調べ係", 2), m("受信箱係", 1)])).toBe("受信箱係 → 調べ係 の順に進めて、調べ係が答えます");
   });
 });

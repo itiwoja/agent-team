@@ -2,16 +2,13 @@ import { describe, expect, it } from "vitest";
 import { askRetryAction, reaskKeyFor, retryPlanFor } from "./retry";
 
 describe("retryPlanFor（失敗の行でどの操作をやり直すか）", () => {
-  type Kind = "answer" | "rehearsal" | "incident_added" | "task";
+  type Kind = "answer" | "task" | "evolution";
   const row = (reportKind: Kind, askId: string | null = "a1", failed = true) => ({
     failed,
     reportKind,
-    link: { askId, rehearsalRunId: null },
+    link: { askId },
   });
 
-  it("リハーサルの失敗は走らせ直す", () => {
-    expect(retryPlanFor(row("rehearsal"))).toBe("rehearsal");
-  });
   it("依頼の実行・担当の仕事の失敗は依頼のやり直し", () => {
     expect(retryPlanFor(row("answer"))).toBe("ask");
     expect(retryPlanFor(row("task"))).toBe("ask");
@@ -19,7 +16,7 @@ describe("retryPlanFor（失敗の行でどの操作をやり直すか）", () =
   it("失敗していない行・askId が無い行・それ以外の種類はボタンを出さない", () => {
     expect(retryPlanFor(row("task", "a1", false))).toBeNull();
     expect(retryPlanFor(row("task", null))).toBeNull();
-    expect(retryPlanFor(row("incident_added"))).toBeNull();
+    expect(retryPlanFor(row("evolution"))).toBeNull();
   });
 });
 
