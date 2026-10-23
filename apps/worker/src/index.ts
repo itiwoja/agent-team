@@ -8,6 +8,7 @@ import { authRoutes, sessionMiddleware, type AppEnv, type AuthDeps } from "./aut
 import { v1Routes } from "./routes/index.ts";
 
 export { PlanAskWorkflow } from "./workflows/plan-ask.ts";
+export { TaskRunWorkflow } from "./workflows/task-run.ts";
 export { WorkspaceDO } from "./workspace-do.ts";
 
 export function createApp(deps: AuthDeps): Hono<AppEnv> {

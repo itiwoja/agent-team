@@ -1,6 +1,7 @@
 // 依頼の編成の Workflow（workflows/plan-ask.ts）：POST /asks → DO が PlanAskWorkflow を起動 → 設定プランナー（ScriptedLlmClient）→
-// 保存して最初の実行を始める（担当のタスクが queued で並ぶ）。質問・LLM の失敗・途中の Kill Switch も確かめる
-import { env, introspectWorkflow } from "cloudflare:test";
+// 保存して最初の実行を始める（担当のタスクができ、DO が TaskRunWorkflow を起動する）。質問・LLM の失敗・途中の Kill Switch も確かめる。
+// 担当の実行そのものは task-run.test.ts。ここでは台本が尽きて担当の LLM は失敗するが、試験の後に残らないよう、起動した担当の Workflow の終わりまで待つ
+import { env, introspectWorkflow, type WorkflowIntrospector } from "cloudflare:test";
 import { LlmError, ScriptedLlmClient, type ScriptedStep } from "@open-team/llm";
 import { afterEach, describe, expect, it } from "vitest";
 import { SESSION_COOKIE } from "../../src/auth/routes.ts";
@@ -53,23 +54,30 @@ const member = (over: Record<string, unknown> = {}) => ({
   ...over,
 });
 
-/** 依頼を送り、起動した編成の Workflow が終わるまで待って、その結果を返す */
+/** 担当の Workflow がすべて終わるまで待つ（LLM の差し替えはモジュールの変数なので、次の試験に残さない） */
+async function settleTaskRuns(runs: WorkflowIntrospector): Promise<void> {
+  for (const i of await runs.get()) await i.waitForStatus("complete").catch(() => i.waitForStatus("terminated"));
+}
+
+/** 依頼を送り、起動した編成の Workflow（と担当の Workflow）が終わるまで待って、編成の結果を返す */
 async function askAndPlan(who: Signed, text: string, script: readonly ScriptedStep[]) {
   setLlmForTest(new ScriptedLlmClient(script));
   await using flows = await introspectWorkflow(env.PLAN_ASK);
+  await using runs = await introspectWorkflow(env.TASK_RUN);
   const res = await post("/asks", who, { text });
   expect(res.status).toBe(201);
   const askId = AskAcceptedResponseSchema.parse(await res.json()).ask.id;
   const [instance] = await flows.get();
   expect(instance).toBeDefined();
   await instance!.waitForStatus("complete");
+  await settleTaskRuns(runs);
   return { askId, output: (await instance!.getOutput()) as { outcome: string; runId?: string | null; taskIds?: string[] } };
 }
 
 afterEach(() => setLlmForTest(null));
 
 describe("PlanAskWorkflow", () => {
-  it("ひとり：新しい担当を作り、依頼は running、担当のタスクが queued で並ぶ。費用は planner で残る", async () => {
+  it("ひとり：新しい担当を作り、担当のタスクができる。費用は planner で残る", async () => {
     const who = await signIn("plan-single");
     const { askId, output } = await askAndPlan(who, "在庫の少ないものを教えて", [
       jsonReply({ formation: { shape: "single", members: [member({ newName: "在庫の守護神", role: "watch" })] } }),
@@ -78,12 +86,12 @@ describe("PlanAskWorkflow", () => {
     expect(output.taskIds).toHaveLength(1);
 
     const view = await detail(who, askId);
-    expect(view.ask).toMatchObject({ status: "running", shape: "single" });
+    expect(view.ask.shape).toBe("single");
     // ひとりは形の1行を出さない（kernel の shapeLine）。編成は formation に並ぶ
     expect(view.formation?.members.map((m) => m.agentName)).toEqual(["在庫の守護神"]);
 
     await inNamedWorkspace(who.ws, (db) => {
-      expect(all<{ status: string }>(db, {}, "SELECT status FROM tasks WHERE ask_id = ?", askId)).toEqual([{ status: "queued" }]);
+      expect(count(db, "SELECT count(*) FROM tasks WHERE ask_id = ?", askId)).toBe(1);
       expect(all<{ name: string }>(db, {}, "SELECT name FROM agents")).toEqual([{ name: "在庫の守護神" }]);
       expect(count(db, "SELECT count(*) FROM usage_records WHERE ask_id = ? AND phase = 'planner'", askId)).toBe(1);
       expect(all<{ planner_attempts: number }>(db, {}, "SELECT planner_attempts FROM asks WHERE id = ?", askId)[0]?.planner_attempts).toBe(1);
@@ -116,11 +124,13 @@ describe("PlanAskWorkflow", () => {
 
     setLlmForTest(new ScriptedLlmClient([jsonReply({ formation: { shape: "single", members: [member({ newName: "駅前の棚番" })] } })]));
     await using flows = await introspectWorkflow(env.PLAN_ASK);
+    await using runs = await introspectWorkflow(env.TASK_RUN);
     expect((await post(`/asks/${first.askId}/answer`, who, { choiceId: "c2" })).status).toBe(200);
     const [instance] = await flows.get();
     await instance!.waitForStatus("complete");
+    await settleTaskRuns(runs);
     expect(await instance!.getOutput()).toMatchObject({ outcome: "formed" });
-    expect((await detail(who, first.askId)).ask.status).toBe("running");
+    expect((await detail(who, first.askId)).formation?.members.map((m) => m.agentName)).toEqual(["駅前の棚番"]);
   });
 
   it("LLM が失敗したら failed（planner_error）。送れたか分からない失敗も見積もりを費用に数える", async () => {

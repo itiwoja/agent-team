@@ -140,7 +140,7 @@ function errorMessage(e: unknown): string {
 }
 
 /** usage_records.provider。llm の provider 未設定（Gemini）は google */
-function usageProviderOf(llm: LlmClient): UsageRecordInput["provider"] {
+export function usageProviderOf(llm: LlmClient): UsageRecordInput["provider"] {
   return llm.provider === undefined || llm.provider === "gemini" ? "google" : llm.provider;
 }
 
@@ -162,9 +162,106 @@ function usageRow(target: LlmCallTarget, req: LlmRequest, usage: LlmCallUsage, p
   };
 }
 
+/** 呼ぶ前の準備（価格表・能力の確かめと見積もり）。呼べなければ LlmCallError（unpriced_model・incompatible_model・aborted） */
+export interface PreparedLlmCall {
+  /** 1回分の見積もり（送れたか分からない失敗はこれを費用に数える） */
+  estimateMicroUsd: number;
+  /** 予算の確かめに使う見積もり（HTTP のアダプターはやり直しの分も含める） */
+  budgetEstimateMicroUsd: number;
+  delaysMs: readonly number[];
+}
+
+export function prepareLlmCall(llm: LlmClient, req: LlmRequest, o: { delaysMs?: readonly number[]; signal?: AbortSignal } = {}): PreparedLlmCall {
+  if (o.signal?.aborted) throw new LlmCallError("aborted", "LLM の呼び出しを中断しました");
+  const price = llm.priceFor ? llm.priceFor(req.model) : findPrice(req.model);
+  if (price === null) throw new LlmCallError("unpriced_model", "価格表にないモデルは呼びません");
+  try {
+    llm.preflight?.(req);
+  } catch (e) {
+    throw new LlmCallError("incompatible_model", e instanceof LlmError ? e.message : "モデルの能力・設定を確認してください");
+  }
+  const est = llm.estimateMicroUsd ? llm.estimateMicroUsd(req) : estimateCallMicroUsd(req);
+  const delaysMs = o.delaysMs ?? LLM_RETRY_DELAYS_MS;
+  // HTTP のアダプターは使った量が分からなくても送っていることがある。やり直しの分も先に見積もる（実際の回数で数える）
+  const budgetEstimate = llm.estimateMicroUsd ? est * (delaysMs.length + 1) : est;
+  if (!Number.isSafeInteger(budgetEstimate)) throw new LlmCallError("incompatible_model", "再試行を含む料金見積もりが大きすぎます");
+  return { estimateMicroUsd: est, budgetEstimateMicroUsd: budgetEstimate, delaysMs };
+}
+
+/** 呼んでも失敗した（usage は数えた費用。0 なら null） */
+export class LlmGenerateFailure extends Error {
+  readonly error: LlmCallError;
+  readonly usage: LlmCallUsage | null;
+  constructor(error: LlmCallError, usage: LlmCallUsage | null) {
+    super(error.message);
+    this.name = "LlmGenerateFailure";
+    this.error = error;
+    this.usage = usage;
+  }
+}
+
+/** 4. 呼ぶ（やり直しはここの1か所）。失敗は LlmGenerateFailure（送れたか分からない回の見積もりを費用として持つ） */
+export async function generateWithRetry(
+  llm: LlmClient,
+  req: LlmRequest,
+  prepared: PreparedLlmCall,
+  o: { sleep?: SleepFn; signal?: AbortSignal } = {},
+): Promise<{ response: LlmResponse; usage: LlmCallUsage }> {
+  const est = prepared.estimateMicroUsd;
+  let chargedMicro = 0;
+  let attempts = 0;
+  const started = Date.now();
+  let response: LlmResponse;
+  try {
+    response = await withRetry(
+      async () => {
+        attempts += 1;
+        try {
+          return await llm.generate(req, o.signal ? { signal: o.signal } : {});
+        } catch (e) {
+          // LlmError 以外の失敗も「送れたか分からない」としてやり直さない LlmError にそろえる
+          throw e instanceof LlmError ? e : new LlmError(`LLM の呼び出しに失敗しました：${errorMessage(e)}`, null, false);
+        }
+      },
+      {
+        delaysMs: prepared.delaysMs,
+        ...(o.sleep ? { sleep: o.sleep } : {}),
+        ...(o.signal ? { signal: o.signal } : {}),
+        onRetry: (info) => {
+          if (usageUnknown(info.error)) chargedMicro += est;
+        },
+      },
+    );
+  } catch (e) {
+    if (usageUnknown(e)) chargedMicro += est;
+    const llmError = e instanceof LlmError ? e : new LlmError(errorMessage(e), null, false);
+    const aborted = o.signal?.aborted === true;
+    const error = new LlmCallError(aborted ? "aborted" : "llm", aborted ? "LLM の呼び出しを中断しました" : llmError.message, { llmError });
+    const usage: LlmCallUsage | null =
+      chargedMicro > 0
+        ? { model: req.model, inputTokens: 0, outputTokens: 0, thinkingTokens: 0, costMicroUsd: chargedMicro, estimatedMicroUsd: est, latencyMs: Math.max(0, Date.now() - started), attempts }
+        : null;
+    throw new LlmGenerateFailure(error, usage);
+  }
+  return {
+    response,
+    usage: {
+      model: response.model,
+      inputTokens: response.usage.inputTokens,
+      outputTokens: response.usage.outputTokens,
+      thinkingTokens: response.usage.thinkingTokens,
+      costMicroUsd: response.usage.costMicroUsd + chargedMicro,
+      estimatedMicroUsd: est,
+      latencyMs: Math.max(0, Date.now() - started),
+      attempts,
+    },
+  };
+}
+
 /**
- * LLM を呼ぶ（SO §3.12 callGemini）。止めたときは LlmCallError（kind で見分ける）。
- * 失敗した回の見積もりの費用も usage_records に残す（数え漏れで上限を超えない）
+ * タスクの外の LLM の呼び出し（設定プランナーなど。SO §3.12 callGemini）。止めたときは LlmCallError（kind で見分ける）。
+ * 失敗した回の見積もりの費用も usage_records に残す（数え漏れで上限を超えない）。
+ * タスクの中の呼び出しは workflows/task-run.ts（同じ prepareLlmCall・generateWithRetry に、タスクの判定を挟む）
  */
 export async function callLlm(
   deps: LlmCallDeps,
@@ -175,84 +272,24 @@ export async function callLlm(
   if (target.taskId === null && target.agentId === null && target.askId === null) {
     throw new TypeError("callLlm: 費用の持ち主（taskId・agentId・askId）がない");
   }
-  if (signal?.aborted) throw new LlmCallError("aborted", "LLM の呼び出しを中断しました");
-  const price = deps.llm.priceFor ? deps.llm.priceFor(req.model) : findPrice(req.model);
-  if (price === null) throw new LlmCallError("unpriced_model", "価格表にないモデルは呼びません");
-  try {
-    deps.llm.preflight?.(req);
-  } catch (e) {
-    throw new LlmCallError("incompatible_model", e instanceof LlmError ? e.message : "モデルの能力・設定を確認してください");
-  }
-  const est = deps.llm.estimateMicroUsd ? deps.llm.estimateMicroUsd(req) : estimateCallMicroUsd(req);
-  const delaysMs = deps.retry?.delaysMs ?? LLM_RETRY_DELAYS_MS;
-  // HTTP のアダプターは使った量が分からなくても送っていることがある。やり直しの分も先に見積もる（実際の回数で数える）
-  const budgetEstimate = deps.llm.estimateMicroUsd ? est * (delaysMs.length + 1) : est;
-  if (!Number.isSafeInteger(budgetEstimate)) throw new LlmCallError("incompatible_model", "再試行を含む料金見積もりが大きすぎます");
+  const prepared = prepareLlmCall(deps.llm, req, { ...(deps.retry?.delaysMs ? { delaysMs: deps.retry.delaysMs } : {}), ...(signal ? { signal } : {}) });
 
   // 3. 呼ぶ前の確かめ（DO）
-  const gate = await deps.ledger.llmGate(budgetEstimate, deps.now());
+  const gate = await deps.ledger.llmGate(prepared.budgetEstimateMicroUsd, deps.now());
   if (!gate.ok) {
     if (gate.kind === "kill_switch") throw new LlmCallError("kill_switch", "Kill Switch が発動中です");
     throw new LlmCallError("budget", `費用の上限を超えます（${gate.spend.scope}）`, { spend: gate.spend });
   }
 
-  // 4. 呼ぶ
-  let chargedMicro = 0;
-  let attempts = 0;
-  const started = Date.now();
+  // 4. 呼ぶ → 5. 費用の記録（DO）
   const provider = usageProviderOf(deps.llm);
-  let response: LlmResponse;
   try {
-    response = await withRetry(
-      async () => {
-        attempts += 1;
-        try {
-          return await deps.llm.generate(req, signal ? { signal } : {});
-        } catch (e) {
-          // LlmError 以外の失敗も「送れたか分からない」としてやり直さない LlmError にそろえる
-          throw e instanceof LlmError ? e : new LlmError(`LLM の呼び出しに失敗しました：${errorMessage(e)}`, null, false);
-        }
-      },
-      {
-        delaysMs,
-        ...(deps.retry?.sleep ? { sleep: deps.retry.sleep } : {}),
-        ...(signal ? { signal } : {}),
-        onRetry: (info) => {
-          if (usageUnknown(info.error)) chargedMicro += est;
-        },
-      },
-    );
+    const called = await generateWithRetry(deps.llm, req, prepared, { ...(deps.retry?.sleep ? { sleep: deps.retry.sleep } : {}), ...(signal ? { signal } : {}) });
+    await deps.ledger.llmRecord(usageRow(target, req, called.usage, provider), deps.now());
+    return called;
   } catch (e) {
-    if (usageUnknown(e)) chargedMicro += est;
-    const llmError = e instanceof LlmError ? e : new LlmError(errorMessage(e), null, false);
-    const aborted = signal?.aborted === true;
-    if (chargedMicro > 0) {
-      const usage: LlmCallUsage = {
-        model: req.model,
-        inputTokens: 0,
-        outputTokens: 0,
-        thinkingTokens: 0,
-        costMicroUsd: chargedMicro,
-        estimatedMicroUsd: est,
-        latencyMs: Math.max(0, Date.now() - started),
-        attempts,
-      };
-      await deps.ledger.llmRecord(usageRow(target, req, usage, provider), deps.now());
-    }
-    throw new LlmCallError(aborted ? "aborted" : "llm", aborted ? "LLM の呼び出しを中断しました" : llmError.message, { llmError });
+    if (!(e instanceof LlmGenerateFailure)) throw e;
+    if (e.usage !== null) await deps.ledger.llmRecord(usageRow(target, req, e.usage, provider), deps.now());
+    throw e.error;
   }
-
-  // 5. 費用の記録
-  const usage: LlmCallUsage = {
-    model: response.model,
-    inputTokens: response.usage.inputTokens,
-    outputTokens: response.usage.outputTokens,
-    thinkingTokens: response.usage.thinkingTokens,
-    costMicroUsd: response.usage.costMicroUsd + chargedMicro,
-    estimatedMicroUsd: est,
-    latencyMs: Math.max(0, Date.now() - started),
-    attempts,
-  };
-  await deps.ledger.llmRecord(usageRow(target, req, usage, provider), deps.now());
-  return { response, usage };
 }

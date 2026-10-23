@@ -2,9 +2,10 @@
 // 発動：1つのトランザクションで全タスクを halted(kill_switch)・トークンを失効、承認待ちと未実行の Intent を expired、監査ログ killswitch.engaged、SSE の事象 killswitch。
 // 解除：理由は1〜500文字。止めたタスクは再開しない（BR-17）。監査ログ killswitch.released、SSE の事象 killswitch。
 // どちらも冪等（発動中の発動・解除中の解除は何もせず今の状態を返し、監査ログも増やさない：09_api/policies.md:75）。
-// 止めたタスクの依頼の進め方（hooks.tasksTerminated）と、動いている Workflow の停止は、実行を移す 4c で足す
+// 止めたタスクの実行と依頼は cancelled にする（Node 版の hooks.tasksTerminated）。動いている TaskWorkflow を止めるのは呼ぶ側（WorkspaceDO）
 
 import { AppError } from "@open-team/platform";
+import { cancelRunsOfHaltedTasks } from "./asks/drive.ts";
 import { appendAuditLog } from "./db/audit.ts";
 import { appendWorkspaceEvent, engageKillSwitchTx, releaseKillSwitchTx } from "./db/repo/app.ts";
 import type { WsDb } from "./db/sqlite.ts";
@@ -30,6 +31,7 @@ export function engageKillSwitch(db: WsDb, i: { userId: Uuid; reason: string | n
   const affectedTaskIds = res.haltedTasks.map((t) => t.id);
   const body: KillSwitchEngageResponse = { engaged: true, engagedAt: res.engagedAt.toISOString(), affectedTaskIds };
   if (res.alreadyEngaged) return body;
+  if (res.haltedTasks.length > 0) cancelRunsOfHaltedTasks(db, res.haltedTasks, i.now);
   appendAuditLog(
     db,
     {

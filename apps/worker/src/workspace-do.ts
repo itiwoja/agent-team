@@ -6,18 +6,36 @@
 import { defaultWorkspacePolicy, hashCanonical, type JsonObject } from "@open-team/kernel";
 import { knownSecretsFromEnv } from "@open-team/platform";
 import { DurableObject } from "cloudflare:workers";
+import type { LlmRequest } from "@open-team/llm";
+import type { LlmMessagesResponse, LlmPhase, RunTaskEnd, TaskContext, ToolCallResult } from "@open-team/runner";
 import { acceptAsk, answerAskQuestion } from "./asks/accept.ts";
+import { takeStartableTasks } from "./asks/drive.ts";
+import { advanceTx } from "./asks/run.ts";
 import { loadPlannerMaterials } from "./asks/generate.ts";
 import { savePlanResult, type PlanSaveOutcome, type PlanStepResult } from "./asks/plan-steps.ts";
 import type { PlannerInput } from "./asks/planner.ts";
 import { appendAuditLog } from "./db/audit.ts";
 import { insertWorkspacePolicyIfMissing } from "./db/repo/app.ts";
-import { bumpPlannerAttempts } from "./db/repo/asks.ts";
+import { bumpPlannerAttempts, getAsk, getAskRun } from "./db/repo/asks.ts";
 import type { UsageRecordInput } from "./db/repo/edge.ts";
 import { MIGRATIONS } from "./db/schema.ts";
-import { wsDbOf, type WsDb } from "./db/sqlite.ts";
+import { all, wsDbOf, type WsDb } from "./db/sqlite.ts";
 import { getWorkspace, initWorkspace } from "./db/workspace.ts";
+import { captureEdge, type EdgeOutcome } from "./edge/fault.ts";
 import { llmGate, llmRecord, type LlmGate } from "./edge/llm-call.ts";
+import {
+  createTaskEdgeRuntime,
+  edgeCallTool,
+  edgeLlmBegin,
+  edgeLlmFail,
+  edgeLlmPrepare,
+  edgeLlmSettle,
+  edgePostEvents,
+  edgeTaskContext,
+  finishTaskRun,
+  type TaskEdgeRuntime,
+} from "./edge/task-edge.ts";
+import { llmOf } from "./llm.ts";
 import { runIdempotent, type IdemRequest } from "./idempotency.ts";
 import { engageKillSwitch, releaseKillSwitch, type KillSwitchEngageResponse, type KillSwitchReleaseResponse } from "./kill-switch.ts";
 import type { AgentLibraryResponse } from "./views/agents/contract.ts";
@@ -158,8 +176,92 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** 計画の結果を保存して、最初の実行を始める */
-  planSave(i: { askId: string; requesterId: string; result: PlanStepResult }): PlanSaveOutcome {
-    return savePlanResult(this.db, { ...i, now: new Date(), secrets: this.secrets() });
+  async planSave(i: { askId: string; requesterId: string; result: PlanStepResult }): Promise<PlanSaveOutcome> {
+    const saved = savePlanResult(this.db, { ...i, now: new Date(), secrets: this.secrets() });
+    if (saved.outcome === "formed") await this.startTasks();
+    return saved;
+  }
+
+  // ---- 実行の進め役（asks/drive.ts）。担当のタスクは TaskWorkflow（workflows/task-run.ts）で動かす ----
+
+  /**
+   * 始められる queued のタスクを取り、TaskWorkflow を起動する。始める前に止めたタスクの実行は1歩進める（止まった段で失敗として閉じる）。
+   * 起動できなかったタスクは、終わったものとして後始末する
+   */
+  private async startTasks(): Promise<void> {
+    const workspaceId = getWorkspace(this.db)?.workspace_id;
+    if (workspaceId === undefined) return;
+    for (let round = 0; round < 10; round += 1) {
+      const now = new Date();
+      const r = takeStartableTasks(this.db, now);
+      for (const runId of r.haltedRunIds) this.advanceRun(runId, now);
+      for (const t of r.started) {
+        try {
+          await this.env.TASK_RUN.create({ id: `task-${t.id}`, params: { workspaceId, taskId: t.id } });
+        } catch (e) {
+          console.error("task.start_failed", { taskId: t.id, error: e instanceof Error ? e.message : String(e) });
+          const after = finishTaskRun(this.db, t.id, "error", new Date());
+          if (after?.ask_run_id) this.advanceRun(after.ask_run_id, new Date());
+        }
+      }
+      if (r.haltedRunIds.length === 0) return;
+    }
+  }
+
+  /** 実行を1歩進める（頼んだ人は依頼の作り手。返事の実行は窓口だけで、最初の歩みで作り終えている） */
+  private advanceRun(runId: string, now: Date): void {
+    const run = getAskRun(this.db, runId);
+    const ask = run === null ? null : getAsk(this.db, run.ask_id);
+    if (ask === null) return;
+    advanceTx(this.db, runId, { requesterId: ask.created_by, now });
+  }
+
+  /** TaskWorkflow の終わり：後始末 → 1歩進める → 次のタスクを起動 */
+  async taskFinished(taskId: string, ended: RunTaskEnd | "error"): Promise<void> {
+    const now = new Date();
+    const after = finishTaskRun(this.db, taskId, ended, now);
+    if (after?.ask_run_id) this.advanceRun(after.ask_run_id, now);
+    await this.startTasks();
+  }
+
+  // ---- 担当のタスクの edge（runner の EdgePort。workflows/task-run.ts が歩みの中で呼ぶ）。EdgeError は値で返す ----
+
+  private taskEdge: TaskEdgeRuntime | null = null;
+
+  private edgeRuntime(): TaskEdgeRuntime {
+    this.taskEdge ??= createTaskEdgeRuntime({ models: llmOf(this.env).config, knownSecrets: this.secrets() });
+    return this.taskEdge;
+  }
+
+  edgeTaskContext(taskId: string): EdgeOutcome<TaskContext> {
+    return captureEdge(() => edgeTaskContext(this.db, this.edgeRuntime(), taskId, new Date()));
+  }
+
+  edgeLlmPrepare(taskId: string, rawReq: unknown): EdgeOutcome<{ llmReq: LlmRequest; phase: LlmPhase }> {
+    return captureEdge(() => edgeLlmPrepare(this.db, this.edgeRuntime(), taskId, rawReq, new Date()));
+  }
+
+  edgeLlmBegin(taskId: string, a: { budgetEstimateMicroUsd: number; model: string; phase: LlmPhase }): EdgeOutcome<null> {
+    return captureEdge(() => {
+      edgeLlmBegin(this.db, this.edgeRuntime(), taskId, a, new Date());
+      return null;
+    });
+  }
+
+  edgeLlmSettle(taskId: string, a: Parameters<typeof edgeLlmSettle>[3]): EdgeOutcome<LlmMessagesResponse> {
+    return captureEdge(() => edgeLlmSettle(this.db, this.edgeRuntime(), taskId, a, new Date()));
+  }
+
+  edgeLlmFail(taskId: string, a: Parameters<typeof edgeLlmFail>[3]): EdgeOutcome<LlmMessagesResponse> {
+    return captureEdge(() => edgeLlmFail(this.db, this.edgeRuntime(), taskId, a, new Date()));
+  }
+
+  edgePostEvents(taskId: string, events: unknown): EdgeOutcome<{ accepted: number; dropped: number }> {
+    return captureEdge(() => edgePostEvents(this.db, this.edgeRuntime(), taskId, events, new Date()));
+  }
+
+  edgeCallTool(taskId: string, toolCallId: string): EdgeOutcome<ToolCallResult> {
+    return captureEdge(() => edgeCallTool(this.db, this.edgeRuntime(), taskId, toolCallId, new Date()));
   }
 
   // ---- LLM の呼び出しの記録（edge/llm-call.ts の callLlm の ledger） ----
@@ -175,8 +277,21 @@ export class WorkspaceDO extends DurableObject<Env> {
   }
 
   /** EP-27：Kill Switch の発動 */
-  engageKillSwitch(i: { userId: string; reason: string | null; idem: IdemRequest | null; now: Date }): WriteResult<KillSwitchEngageResponse> {
-    return runIdempotent(this.db, i.idem, 200, i.now, () => engageKillSwitch(this.db, i));
+  async engageKillSwitch(i: { userId: string; reason: string | null; idem: IdemRequest | null; now: Date }): Promise<WriteResult<KillSwitchEngageResponse>> {
+    // 動いている TaskWorkflow（provisioning・running のタスク）は、発動のあと止める（次の歩みを待たない）
+    const running = all<{ id: string }>(this.db, {}, "SELECT id FROM tasks WHERE status IN ('provisioning', 'running') AND ask_run_id IS NOT NULL");
+    const r = runIdempotent(this.db, i.idem, 200, i.now, () => engageKillSwitch(this.db, i));
+    if (r.ok && r.replayed !== true) {
+      for (const t of running) {
+        try {
+          await (await this.env.TASK_RUN.get(`task-${t.id}`)).terminate();
+        } catch (e) {
+          // もう終わっていれば止められない（タスクは halted にしてあるので、次の歩みの DO の確かめでも止まる）
+          console.warn("task.terminate_failed", { taskId: t.id, error: e instanceof Error ? e.message : String(e) });
+        }
+      }
+    }
+    return r;
   }
 
   /** EP-28：Kill Switch の解除 */
