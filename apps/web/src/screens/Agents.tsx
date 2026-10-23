@@ -69,7 +69,7 @@ export function Agents() {
   if (error && !data)
     return (
       <div className="agents-page">
-        <h1 className="ask-head">担当</h1>
+        <h1 className="ask-head">エージェント</h1>
         <LoadError message={error} onRetry={load} />
       </div>
     );
@@ -78,7 +78,7 @@ export function Agents() {
   return (
     <div className="agents-page">
       <h1 className="ask-head">
-        担当
+        エージェント
         {data.count > 0 && (
           <span className="ask-count" aria-label={`${data.count}体`}>
             {data.count}
@@ -86,7 +86,7 @@ export function Agents() {
         )}
       </h1>
       <p className="muted agents-lead">
-        頼むと生まれた担当です。似た依頼は同じ担当が引き受け、許可したルールを引き継ぎます。<Link to="/packs">パック</Link>からまとめて入れることもできます。
+        頼むと生まれたエージェントです。似た依頼は同じエージェントが引き受け、許可したルールを引き継ぎます。<Link to="/packs">パック</Link>からまとめて入れることもできます。
       </p>
       {error && (
         <p className="error small" role="status">
@@ -95,19 +95,19 @@ export function Agents() {
       )}
       {data.items.length === 0 ? (
         <div className="done-empty">
-          <p className="muted">まだ担当はいません。入口で頼むと生まれます</p>
+          <p className="muted">まだエージェントはいません。入口で頼むと生まれます</p>
           <Link to="/" className="btn">
             入口へ
           </Link>
         </div>
       ) : (
-        <ul className="rows agents-list" aria-label="担当">
+        <ul className="rows agents-list" aria-label="エージェント">
           {data.items.map((a) => (
             <AgentCard key={a.id} agent={a} onChanged={load} />
           ))}
         </ul>
       )}
-      {data.count >= data.limit && <p className="muted small agents-limit">担当は {data.limit} 人までです。これ以上は新しく作れません</p>}
+      {data.count >= data.limit && <p className="muted small agents-limit">エージェントは {data.limit} 人までです。これ以上は新しく作れません</p>}
     </div>
   );
 }
@@ -187,7 +187,7 @@ function AgentCard({ agent: a, onChanged }: { agent: AgentLibraryItem; onChanged
           <AgentSkills agent={a} onChanged={onChanged} />
           {usesWorkspace(a) && <WorkspaceReset agent={a} />}
           <p className="muted small">
-            {a.nameSource === "suggested" ? "名前は担当を作るときに付けました" : "名前は自分で付けました"} · 作成 {formatTime(a.createdAt)}
+            {a.nameSource === "suggested" ? "名前はエージェントを作るときに付けました" : "名前は自分で付けました"} · 作成 {formatTime(a.createdAt)}
           </p>
         </div>
       )}
@@ -233,7 +233,7 @@ function WorkspaceReset({ agent: a }: { agent: AgentLibraryItem }) {
         <div className="inline-form">
           <p className="row-title">作業場を最初に戻しますか？</p>
           <p className="muted small">
-            この担当が作業場に残したファイルは、次の仕事から使われなくなります（パックから入れた担当はパックのファイル、それ以外は空から始めます）。
+            このエージェントが作業場に残したファイルは、次の仕事から使われなくなります（パックから入れたエージェントはパックのファイル、それ以外は空から始めます）。
           </p>
           <div className="inline-actions">
             <button type="button" className="btn btn-primary" disabled={busy} onClick={reset}>

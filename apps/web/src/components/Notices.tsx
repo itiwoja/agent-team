@@ -96,7 +96,7 @@ export function Notices() {
           runId,
           askId,
           key: `answer:${runId}`,
-          agentName: answer.spokesperson?.agentName ?? d?.stages.find((s) => s.isAggregator)?.agentName ?? d?.stages[0]?.agentName ?? "担当",
+          agentName: answer.spokesperson?.agentName ?? d?.stages.find((s) => s.isAggregator)?.agentName ?? d?.stages[0]?.agentName ?? "エージェント",
           headline: noticeHeadline({ askText: request, answer, stages: d?.stages }),
           lead: noticeLead(answer.conclusion),
           request,

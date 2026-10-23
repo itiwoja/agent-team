@@ -56,7 +56,7 @@ export function describeError(e: unknown): string {
     case "NOT_FOUND":
       return "見つかりませんでした";
     case "WORKSPACE_IN_USE":
-      return "この担当はいま作業場で動いています。終わってからもう一度試してください";
+      return "このエージェントはいま作業場で動いています。終わってからもう一度試してください";
     default:
       if (e.status === 404) return "見つかりませんでした";
       return e.status >= 500 ? "サーバーでうまくいきませんでした。時間をおいて試してください" : "うまくいきませんでした。もう一度試してください";

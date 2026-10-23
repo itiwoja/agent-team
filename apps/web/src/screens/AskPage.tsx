@@ -262,7 +262,7 @@ function Conversation({ detail, approvals, onReply, blocked, stopped }: { detail
   const spokesperson = detail.stages.find(s => s.agentName === detail.answerPending?.spokespersonName && isWorking(s))?.agentName ?? null;
   // 回答の主（窓口。並列・Kernel が書いた回答はまとめ役か最初の担当）
   const reporterOf = (a: AskAnswerView | null): string =>
-    a?.spokesperson?.agentName ?? detail.stages.find((st) => st.isAggregator)?.agentName ?? detail.stages[0]?.agentName ?? "担当";
+    a?.spokesperson?.agentName ?? detail.stages.find((st) => st.isAggregator)?.agentName ?? detail.stages[0]?.agentName ?? "エージェント";
   // 返事欄は会話の下に常に出す（並列・生成中・止まったときを除く）。動いている間に送ると順番待ちになる
   const reply = replyAvailability(detail);
   const canReply = reply.show;
@@ -357,7 +357,7 @@ function PendingCard({ name, status }: { name: string | null; status: AskTurnVie
       ) : (
         <p className="muted answer-pending">
           {name && <Avatar name={name} mood="running" size={32} />}
-          <span>{name ? `${name}がまとめています` : "担当の作業・報告を待っています"}</span>
+          <span>{name ? `${name}がまとめています` : "エージェントの作業・報告を待っています"}</span>
         </p>
       )}
     </section>
@@ -426,7 +426,7 @@ function AnswerCard({
         </p>
       )}
       {answer.needsYou.declinedLine && <p className="declined">{answer.needsYou.declinedLine}</p>}
-      {answer.needsYou.stoppedMembers.length > 0 && <p className="failed">止まった担当：{answer.needsYou.stoppedMembers.join("、")}</p>}
+      {answer.needsYou.stoppedMembers.length > 0 && <p className="failed">止まったエージェント：{answer.needsYou.stoppedMembers.join("、")}</p>}
       {answer.taintNote && <p className="muted">{answer.taintNote}</p>}
       {(onFold || copyable) && (
         <div className="report-foot">
@@ -625,11 +625,11 @@ export function Stages({ detail, messages, stale = false }: { detail: AskDetail;
   if (stages.length === 0) return null;
   const counts = teamCounts(stages);
   const working = counts.working > 0 && !stale;
-  const line = stale ? "最後に取得した状態" : counts.working > 1 ? `${counts.working}人が同時に作業中` : counts.working === 1 ? "1人が作業中" : counts.stopped > 0 ? "止まった担当がいます" : counts.done === stages.length ? `${stages.length}人 · 完了` : `${stages.length}人`;
+  const line = stale ? "最後に取得した状態" : counts.working > 1 ? `${counts.working}人が同時に作業中` : counts.working === 1 ? "1人が作業中" : counts.stopped > 0 ? "止まったエージェントがいます" : counts.done === stages.length ? `${stages.length}人 · 完了` : `${stages.length}人`;
   return (
     <details className="fold team-fold" open={working || stale} key={detail.run?.runId ?? "pending"}>
       <summary className="fold-summary">
-        <h2 className="fold-title">担当</h2>
+        <h2 className="fold-title">エージェント</h2>
         <span className="fold-note" aria-live="polite">{line}</span>
         <span className="fold-faces" aria-hidden="true">
           {stages.slice(0, 5).map((s) => (
@@ -651,13 +651,13 @@ export function Stages({ detail, messages, stale = false }: { detail: AskDetail;
       <details className="team-extra" key={detail.run?.runId ?? "pending"}>
         <summary>受け渡し・実行の詳細</summary>
         <p className="team-run">{detail.run ? `実行 ${detail.run.runNo}` : "実行前"}</p>
-        {detail.run?.triggerType === "manual" && <p className="muted">追加の依頼は窓口の担当がひとりで受けます。</p>}
+        {detail.run?.triggerType === "manual" && <p className="muted">追加の依頼は窓口のエージェントがひとりで受けます。</p>}
         <div className="team-transfers">
           <h3>受け渡しの記録 <span>{detail.handoffs.length}件</span></h3>
           {detail.handoffs.length === 0 ? <p className="muted">この実行には受け渡しの記録がありません。</p> : <ul className="plain">{detail.handoffs.map((h,i)=><li key={i}><strong>{h.fromAgentName} → {h.toAgentName}</strong><span>受領済み · {h.label}{h.taintMark ? ` · ${h.taintMark}` : ""}</span></li>)}</ul>}
         </div>
         {shape === "aggregate" && <p className="team-boundary">まとめ役は読み取り専用です。次のチームに制作を任せる場合は、結果を渡して新しく依頼してください。</p>}
-        {messages.length > 0 && <div className="team-transfers"><h3>担当間のやり取り</h3><ul className="plain exchange">{threadMessages(messages).map(({message:m,replies})=><li key={m.id}><p>{m.fromAgentName}「{m.body}」{m.tainted && "（外部の内容を含む）"}</p>{replies.map(r=><p key={r.id}>{r.fromAgentName}「{r.body}」</p>)}</li>)}</ul></div>}
+        {messages.length > 0 && <div className="team-transfers"><h3>エージェント間のやり取り</h3><ul className="plain exchange">{threadMessages(messages).map(({message:m,replies})=><li key={m.id}><p>{m.fromAgentName}「{m.body}」{m.tainted && "（外部の内容を含む）"}</p>{replies.map(r=><p key={r.id}>{r.fromAgentName}「{r.body}」</p>)}</li>)}</ul></div>}
       </details>
     </section>
     </details>
@@ -704,7 +704,7 @@ function MobileTeam({ detail, stages, stale }: { detail: AskDetail; stages: Stag
     else dialog.current?.close();
   }, [selectedStage]);
   return <div className="team-mobile">
-    <ul className="plain team-orbit" aria-label="担当一覧">
+    <ul className="plain team-orbit" aria-label="エージェント一覧">
       {stages.map(s => { const state = s.state === "running" && !isWorking(s) ? "waiting" : s.state; return <li key={s.memberId}>
         <button type="button" className={`team-person${isWorking(s) && !stale ? " is-working" : ""}`} aria-label={`${s.agentName}、${stageLabel(s)}${s.files?.count ? `、成果物${s.files.count}件` : ""}。詳細を開く`} aria-haspopup="dialog" onClick={() => choose(s.memberId)}>
           <Avatar name={s.agentName} mood={moodOfStage(state)} size={48} />
@@ -714,10 +714,10 @@ function MobileTeam({ detail, stages, stale }: { detail: AskDetail; stages: Stag
         </button>
       </li>})}
     </ul>
-    <dialog ref={dialog} className="team-mobile-sheet" aria-label="担当の詳細" onCancel={e => { e.preventDefault(); close(); }} onClick={e => { if (e.target === e.currentTarget) { const r=e.currentTarget.getBoundingClientRect(); if(e.clientY<r.top || e.clientX<r.left || e.clientX>r.right) close(); } }}>
-      <div className="team-sheet-header"><span>担当の詳細</span><button type="button" className="btn btn-ghost" autoFocus onClick={close}>閉じる</button></div>
+    <dialog ref={dialog} className="team-mobile-sheet" aria-label="エージェントの詳細" onCancel={e => { e.preventDefault(); close(); }} onClick={e => { if (e.target === e.currentTarget) { const r=e.currentTarget.getBoundingClientRect(); if(e.clientY<r.top || e.clientX<r.left || e.clientX>r.right) close(); } }}>
+      <div className="team-sheet-header"><span>エージェントの詳細</span><button type="button" className="btn btn-ghost" autoFocus onClick={close}>閉じる</button></div>
       {selectedStage && <>
-        <label className="sr-only" htmlFor="team-select-member">担当を切り替える</label>
+        <label className="sr-only" htmlFor="team-select-member">エージェントを切り替える</label>
         <select id="team-select-member" value={selected ?? ""} onChange={e => choose(e.target.value)}>{stages.map(s=><option value={s.memberId} key={s.memberId}>{s.agentName}</option>)}</select>
         {stale && <p className="team-reason">最後に取得した状態です。</p>}
         <Stage key={`${selectedStage.memberId}:${selectedStage.taskId}`} s={selectedStage} needs={dependencies(detail, selectedStage)} />

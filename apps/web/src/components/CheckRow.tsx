@@ -274,7 +274,7 @@ function ReportRow({
   const hasBody = Boolean(body) || item.lines.length > 0;
   const agentLink = item.link.agentId ? (
     <Link to={`/agents#${item.link.agentId}`} className="row-link">
-      この担当を開く
+      このエージェントを開く
       <Chevron dir="right" size={14} />
     </Link>
   ) : null;

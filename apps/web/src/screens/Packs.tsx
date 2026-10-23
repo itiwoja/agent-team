@@ -81,7 +81,7 @@ export function Packs({ q: initialQ = "", category: initialCategory = null }: { 
   return (
     <div className="packs-page">
       <h1 className="ask-head">パック</h1>
-      <p className="muted packs-lead">担当・手順書・スクリプトの詰め合わせです。入れると、そのまま頼めます。</p>
+      <p className="muted packs-lead">エージェント・手順書・スクリプトの詰め合わせです。入れると、そのまま頼めます。</p>
       <div className="packs-filter">
         <input type="search" value={q} onChange={(e) => setQ(e.target.value)} placeholder="さがす（例：採点・請求・SNS）" aria-label="パックをさがす" enterKeyHint="search" />
         {data.categories.length > 0 && (

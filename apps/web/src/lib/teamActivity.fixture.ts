@@ -10,7 +10,7 @@ export function teamFixture(mode: FixtureMode): AskDetail {
     taskId: i===2 ? null : `task-${i}`, report: null, tainted:false, isNew:true, reuseLine:"新しく作りました",
     startedAt: i===2 ? null : new Date(Date.now()-12000).toISOString(), finishedAt:null, activity:[], files:null,
   }));
-  if(mode==="many") for(let i=3;i<6;i++) stages.push({...stages[0]!,memberId:`member-${i}`,agentId:`agent-${i}`,agentName:`追加担当${i-2}`,position:i+1,taskId:`task-${i}`,state:"waiting",taskStatus:null});
+  if(mode==="many") for(let i=3;i<6;i++) stages.push({...stages[0]!,memberId:`member-${i}`,agentId:`agent-${i}`,agentName:`追加エージェント${i-2}`,position:i+1,taskId:`task-${i}`,state:"waiting",taskStatus:null});
   if(mode==="waiting") stages.forEach(s=>Object.assign(s,{taskStatus:"queued",state:"running",stateText:"待っています",startedAt:null}));
   if(mode==="failed") Object.assign(stages[0]!,{state:"failed",taskStatus:"failed",stateText:"失敗：接続が切れました",finishedAt:new Date().toISOString()});
   if(mode==="approval") Object.assign(stages[0]!,{state:"awaiting_approval",taskStatus:"awaiting_approval",stateText:"確認待ち"});

@@ -93,7 +93,7 @@ describe("本番の記録の形（2026-10-06 の確認）", () => {
 
   it("ask.*：ID の列にしない", () => {
     expect(sum("ask.answered", { askId: id, askRunId: id, answerTaskId: id, bodyHash: hash })).toBe("依頼に答えた");
-    expect(sum("ask.step.started", { askId: id, askRunId: id, memberId: id, taskId: id, inputTaskIds: [id], tainted: false })).toBe("担当が仕事を始めた");
+    expect(sum("ask.step.started", { askId: id, askRunId: id, memberId: id, taskId: id, inputTaskIds: [id], tainted: false })).toBe("エージェントが仕事を始めた");
     expect(sum("ask.run.started", { askId: id, askRunId: id, runNo: 2, trigger: "manual" })).toBe("依頼を動かした · 手動 · 2回目");
     expect(sum("ask.run.finished", { askId: id, askRunId: id, status: "done" })).toBe("依頼の実行が終わった · 完了");
     expect(sum("ask.message.posted", { askId: id, messageId: id, fromMemberId: id, toMemberId: id, kind: "share", bodyHash: hash, tainted: false })).toBe("チームに伝えた · 共有");

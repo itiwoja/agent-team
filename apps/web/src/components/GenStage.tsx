@@ -33,7 +33,7 @@ export function GenFormation({ state, heading = "h1" }: { state: GenState; headi
             <div>
               <h2 className="gen-name">{m.agentName}</h2>
               <h3 className="gen-summary">{m.summary}</h3>
-              <p className="muted">{m.isNew ? "新しく作りました" : "いつもの担当"}</p>
+              <p className="muted">{m.isNew ? "新しく作りました" : "いつものエージェント"}</p>
             </div>
           </li>
         ))}
@@ -47,7 +47,7 @@ export function GenFormation({ state, heading = "h1" }: { state: GenState; headi
   );
   return (
     <section aria-live="polite" className="gen">
-      <Heading className="sr-only">担当ができました</Heading>
+      <Heading className="sr-only">エージェントができました</Heading>
       {state.askId ? (
         <Link to={`/asks/${state.askId}`} className="gen-link">
           {body}
