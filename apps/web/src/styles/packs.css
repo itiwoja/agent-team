@@ -75,7 +75,7 @@
 .packs-empty p {
   margin: 0;
 }
-/* 棚に並ぶ小さな札（広い画面では2列） */
+/* 棚に並ぶ小さな札（広い画面では2列、PC では3列） */
 .packs-grid {
   display: grid;
   grid-template-columns: 1fr;
@@ -84,6 +84,11 @@
 @media (min-width: 720px) {
   .packs-grid {
     grid-template-columns: 1fr 1fr;
+  }
+}
+@media (min-width: 1280px) {
+  .packs-grid {
+    grid-template-columns: 1fr 1fr 1fr;
   }
 }
 .packs-grid > li {

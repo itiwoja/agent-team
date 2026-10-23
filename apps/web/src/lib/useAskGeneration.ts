@@ -20,8 +20,11 @@ export interface AskGeneration {
   formations: Record<string, FormationView>;
 }
 
-export function useAskGeneration(opts: { packId?: string } = {}): AskGeneration {
+/** onLateAsk：打ち切りの後に依頼が作られていたとき（既定は依頼のページへ移る。チャットはその場で会話に足す） */
+export function useAskGeneration(opts: { packId?: string; onLateAsk?: (askId: string) => void } = {}): AskGeneration {
   const { packId } = opts;
+  const onLateAskRef = useRef(opts.onLateAsk);
+  onLateAskRef.current = opts.onLateAsk;
   const [state, dispatch] = useReducer(generationReducer, initialGen);
   const [formations, setFormations] = useState<Record<string, FormationView>>({});
   const phaseRef = useRef(state.phase);
@@ -54,7 +57,7 @@ export function useAskGeneration(opts: { packId?: string } = {}): AskGeneration 
       void askCreatedAfterGiveUp(askId, (id) => api.ask(id)).then((id) => {
         if (cancelled || generationRef.current !== generation || askIdRef.current !== askId) return;
         const ph = phaseRef.current;
-        if (id !== null && (ph === "generating" || ph === "question")) navigate(`/asks/${id}`);
+        if (id !== null && (ph === "generating" || ph === "question")) (onLateAskRef.current ?? ((x: string) => navigate(`/asks/${x}`)))(id);
         else dispatch({ type: "timeout" });
       });
     }, GIVE_UP_MS);

@@ -448,7 +448,7 @@ function AnswerCard({
 }
 
 /** 担当から利用者への質問（ask_user）。押すか書いて答えると、待っている担当がそのまま受け取って続ける */
-function AgentQuestionCard({ askId, q, onAnswered, blocked }: { askId: string; q: AgentQuestionView; onAnswered: () => void; blocked: boolean }) {
+export function AgentQuestionCard({ askId, q, onAnswered, blocked }: { askId: string; q: AgentQuestionView; onAnswered: () => void; blocked: boolean }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -505,7 +505,7 @@ function AgentQuestionCard({ askId, q, onAnswered, blocked }: { askId: string; q
 }
 
 /** 窓口の「次の手の提案」。押すとその文を返事（API-077）として送り、窓口がそのまま動く */
-function NextActions({ askId, actions, onReply, blocked }: { askId: string; actions: string[]; onReply: () => void; blocked: boolean }) {
+export function NextActions({ askId, actions, onReply, blocked }: { askId: string; actions: string[]; onReply: () => void; blocked: boolean }) {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const go = (text: string) => {

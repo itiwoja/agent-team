@@ -1,0 +1,178 @@
+/* SCR-020 チャット（`/`）：依頼をひとつの会話に並べる。入力欄（.dock・.composer-box は entrance.css）はいつも画面の下 */
+.chat {
+  /* 入口と同じく、見えている高さから AppHeader と .screen の上の余白を引き、下の余白は負の margin で打ち消す */
+  min-height: calc(var(--app-h) - 56px - env(safe-area-inset-top, 0px) - 8px);
+  margin-bottom: -64px;
+  display: flex;
+  flex-direction: column;
+}
+.chat-log {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 28px;
+  padding: 16px 0 12px;
+  max-width: 760px;
+  width: 100%;
+  margin: 0 auto;
+}
+.chat-log.is-empty {
+  justify-content: center;
+  padding-bottom: 8vh;
+}
+@media (min-width: 768px) {
+  .chat .dock {
+    width: 100%;
+    max-width: 760px;
+    margin: 0 auto;
+  }
+}
+
+/* 依頼ひとつ（頼んだこと → 回答 の往復） */
+.chat-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.chat-user {
+  margin-left: auto;
+}
+.chat-agent {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  max-width: 100%;
+}
+.chat-agent-spacer {
+  flex: 0 0 32px;
+}
+.chat-agent-body {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+  flex: 1;
+}
+.chat-meta {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.chat-bubble {
+  margin: 0;
+  padding: 10px 14px;
+  border-radius: 4px 18px 18px 18px;
+  font-size: 15px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.chat-bubble-agent {
+  background: var(--surface);
+  color: var(--text);
+  align-self: flex-start;
+  max-width: 100%;
+}
+.chat-bubble .answer-text > :first-child {
+  margin-top: 0;
+}
+.chat-bubble .answer-text > :last-child {
+  margin-bottom: 0;
+}
+
+/* 取り組んでいる間の「…」 */
+.chat-typing {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}
+.chat-dots {
+  display: inline-flex;
+  gap: 3px;
+}
+.chat-dots span {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: currentColor;
+  animation: chat-dot 1.2s infinite ease-in-out;
+}
+.chat-dots span:nth-child(2) {
+  animation-delay: 0.15s;
+}
+.chat-dots span:nth-child(3) {
+  animation-delay: 0.3s;
+}
+@keyframes chat-dot {
+  0%,
+  80%,
+  100% {
+    opacity: 0.25;
+  }
+  40% {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .chat-dots span {
+    animation: none;
+    opacity: 0.6;
+  }
+}
+
+/* 止まった・確認待ちなどの短い知らせ（エージェントの側に寄せる） */
+.chat-note {
+  margin: 0 0 0 42px;
+  font-size: 14px;
+}
+.chat-note.is-muted {
+  color: var(--muted);
+}
+.chat-note.is-failed {
+  color: var(--red);
+}
+.chat-note.is-attention {
+  color: var(--amber);
+}
+
+/* 定期の実行の区切り */
+.chat-divider {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.chat-divider::before,
+.chat-divider::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: var(--line);
+}
+
+.chat-detail-link {
+  align-self: flex-start;
+  margin-left: 42px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* 生成中のたまご（会話の中なので小さく） */
+.chat-gen {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.chat-gen .gen-egg svg {
+  width: 44px;
+  height: 50px;
+}
+.chat-gen p {
+  margin: 0;
+}
+.chat-ask .gen {
+  align-items: flex-start;
+}
