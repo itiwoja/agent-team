@@ -17,5 +17,5 @@ export function stageLabel(s: StageView): string {
 export function dependencies(detail: Pick<AskDetail, "formation">, s: StageView): string[] {
   const members = detail.formation?.members ?? [];
   const positions = members.find(m => m.memberId === s.memberId)?.dependsOn ?? [];
-  return positions.map(p => members.find(m => m.position === p)?.agentName ?? `担当 ${p}`);
+  return positions.map(p => members.find(m => m.position === p)?.agentName ?? `エージェント ${p}`);
 }

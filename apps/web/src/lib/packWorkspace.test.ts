@@ -81,7 +81,7 @@ const base: DeskInput = { installed: true, activity: "idle", askText: null, phas
 
 describe("deskStateOf（机の表示）", () => {
   it("入れていないときは静かな案内（待っている顔）", () => {
-    expect(deskStateOf({ ...base, installed: false, phase: "generating" })).toEqual({ mood: "waiting", bubble: "この作業場に来る担当です", kind: "guide", glow: false });
+    expect(deskStateOf({ ...base, installed: false, phase: "generating" })).toEqual({ mood: "waiting", bubble: "この作業場に来るエージェントです", kind: "guide", glow: false });
   });
   it("待機中は独り言（話さない tick は吹き出しなし）", () => {
     expect(deskStateOf({ ...base, musing: "grade.py を確かめています" })).toMatchObject({ mood: "idle", kind: "ambient", bubble: "grade.py を確かめています" });

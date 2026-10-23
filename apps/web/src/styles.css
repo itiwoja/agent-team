@@ -41,6 +41,7 @@
   --radius: 20px;
   --gap: 24px;
   --gutter: 20px;
+  --sidebar-w: 272px;
   --app-h: 100dvh;
   color-scheme: light dark;
 }

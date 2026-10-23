@@ -238,7 +238,7 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
       )}
       {justInstalled && !ceremony && (
         <p className="pw-done" role="status">
-          {justInstalled.join("・")}が入りました。<Link to="/agents">担当を見る</Link>
+          {justInstalled.join("・")}が入りました。<Link to="/agents">エージェントを見る</Link>
         </p>
       )}
 
@@ -251,7 +251,7 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
             {p.agents.length}人{installed && (working > 0 ? ` · ${working}人が動いています` : " · 待機中")}
           </span>
         </div>
-        <ul className="plain pw-desks" aria-label="担当の机">
+        <ul className="plain pw-desks" aria-label="エージェントの机">
           {desks.map((d, i) => (
             <Desk key={d.agent.name} agent={d.agent} state={d.state} installed={installed} joinedSummary={Object.hasOwn(joined, d.agent.name) ? (joined[d.agent.name] ?? null) : null} latest={latestAsk(d.item)} index={i} />
           ))}
@@ -259,11 +259,11 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
             <HelperDesk key={h.key} helper={h} index={i} />
           ))}
         </ul>
-        {!installed && <p className="muted small pw-room-note">入れると、この部屋に担当がそろって働きはじめます。</p>}
+        {!installed && <p className="muted small pw-room-note">入れると、この部屋にエージェントがそろって働きはじめます。</p>}
       </section>
 
       {p.needsSandbox && !p.sandboxAvailable && (
-        <p className="muted small pack-note">「作る」「見直す」担当が使う作業場（コードを書いて動かす場所）は、この環境ではまだ使えません。入れることはでき、作業場なしでできる範囲で動きます。</p>
+        <p className="muted small pack-note">「作る」「見直す」エージェントが使う作業場（コードを書いて動かす場所）は、この環境ではまだ使えません。入れることはでき、作業場なしでできる範囲で動きます。</p>
       )}
 
       {installed ? (
@@ -419,7 +419,7 @@ function HelperDesk({ helper: h, index }: { helper: Helper; index: number }) {
           <h3 className="pw-desk-name">応援：{h.agentName}</h3>
         </div>
         <p className="pw-desk-summary">{h.summary}</p>
-        <p className="muted small">{h.isNew ? "新しく作りました" : "いつもの担当"}</p>
+        <p className="muted small">{h.isNew ? "新しく作りました" : "いつものエージェント"}</p>
       </div>
     </li>
   );
@@ -446,7 +446,7 @@ function Progress({
     case "generating":
       body = (
         <div className="pw-progress">
-          <p className="pw-progress-line">頼みました。担当たちが段取りを決めています…</p>
+          <p className="pw-progress-line">頼みました。エージェントたちが段取りを決めています…</p>
           {state.slow && <p className="muted small">まだ考えています</p>}
         </div>
       );

@@ -140,7 +140,7 @@ export interface DeskInput {
  * 机の表示状態。優先：入れていない → 止めた → 生成中（反応）→ 動いている・確認待ち（編成に入った机は光ったまま）→ 編成に入った → 待機（独り言）
  */
 export function deskStateOf(d: DeskInput): DeskState {
-  if (!d.installed) return { mood: "waiting", bubble: "この作業場に来る担当です", kind: "guide", glow: false };
+  if (!d.installed) return { mood: "waiting", bubble: "この作業場に来るエージェントです", kind: "guide", glow: false };
   if (d.activity === "disabled") return { mood: "stopped", bubble: "止めています", kind: "status", glow: false };
   if (d.phase === "generating") return { mood: "running", bubble: d.reaction, kind: "reaction", glow: false };
   if (d.phase === "question") return { mood: "approval", bubble: "ひとつ聞かせてください", kind: "reaction", glow: false };

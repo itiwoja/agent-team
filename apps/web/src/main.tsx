@@ -1,14 +1,11 @@
 import { StrictMode, useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { createRoot } from "react-dom/client";
 import { api, onUnauthorized, type Me, type SessionState } from "./api";
-import { AppHeader } from "./components/AppHeader";
-import { AskComposerSheet } from "./components/AskComposerSheet";
+import { AppHeader, Sidebar, useWide } from "./components/AppHeader";
 import { Notices } from "./components/Notices";
 import { installHistory, Link, navigate, takePendingScroll, useRoute, type Route } from "./lib/router";
 import { restoreWhenTall } from "./lib/scrollMemory";
 import { backOf, titleOf } from "./lib/screen";
-import { enterAskDelay } from "./lib/generation";
-import { useAskGeneration } from "./lib/useAskGeneration";
 import { composeTitle, useScreenTitleOverride } from "./lib/title";
 import { useViewportHeight } from "./lib/viewport";
 import { Agents } from "./screens/Agents";
@@ -18,11 +15,12 @@ import { AskPage } from "./screens/AskPage";
 import { Audit } from "./screens/Audit";
 import { Check } from "./screens/Check";
 import { Done } from "./screens/Done";
-import { Entrance } from "./screens/Entrance";
+import { Chat } from "./screens/Chat";
 import { useWorkspace, WorkspaceProvider } from "./workspace";
 import "./styles.css";
 import "./styles/shell.css";
 import "./styles/entrance.css";
+import "./styles/chat.css";
 import "./styles/check.css";
 import "./styles/ask.css";
 import "./styles/audit.css";
@@ -35,7 +33,8 @@ import "./styles/avatar.css";
 import "./styles/notice.css";
 import "./styles/asks.css";
 
-type Session = { state: "loading" } | SessionState;
+// unreachable：GET /session が失敗した（app や DB が止まっている）。トークンの入口だけを出すと、ローカルでも入れないように見える
+type Session = { state: "loading" } | { state: "unreachable" } | SessionState;
 
 function App() {
   const [session, setSession] = useState<Session>({ state: "loading" });
@@ -44,17 +43,20 @@ function App() {
     return api
       .session()
       .then(setSession)
-      .catch(() => setSession({ state: "signed_out" }));
+      .catch(() => setSession({ state: "unreachable" }));
   }, []);
 
   useEffect(() => {
     void refresh();
-    return onUnauthorized(() => setSession({ state: "signed_out" }));
+    // 401 のあとも GET /session から入り直す（ローカルならトークンなしの入口が出る）
+    return onUnauthorized(() => void refresh());
   }, [refresh]);
 
   switch (session.state) {
     case "loading":
       return <Loading />;
+    case "unreachable":
+      return <Unreachable onRetry={refresh} />;
     case "setup_required":
       return <SetupRequired missing={session.missing} />;
     case "signed_out":
@@ -71,6 +73,24 @@ function Loading() {
       <p className="muted" role="status">
         読み込んでいます…
       </p>
+    </main>
+  );
+}
+
+function Unreachable({ onRetry }: { onRetry: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const retry = () => {
+    setBusy(true);
+    void onRetry().finally(() => setBusy(false));
+  };
+  return (
+    <main className="center">
+      <h1>AgentTeam</h1>
+      <p role="alert">サーバーにつながりません。</p>
+      <p className="muted">ローカルなら app（pnpm dev）と DB（docker compose up -d db）が起動しているか確かめてください。</p>
+      <button type="button" className="btn btn-primary" onClick={retry} disabled={busy}>
+        {busy ? "確かめています…" : "もう一度試す"}
+      </button>
     </main>
   );
 }
@@ -97,7 +117,7 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const enterBy = async (call: () => ReturnType<typeof api.enter>) => {
+  const enterBy = async (call: () => ReturnType<typeof api.enter>, local = false) => {
     setBusy(true);
     setError(null);
     try {
@@ -107,14 +127,17 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
       await onSignedIn();
     } catch (err) {
       const status = (err as { status?: number }).status;
-      setError(status === 401 ? "トークンが違います" : "入れませんでした。時間をおいて試してください");
+      if (status === 401) setError("トークンが違います");
+      else if (local && status === 403) setError("トークンなしで入れるのはこのマシンからだけです");
+      else if (local) setError("トークンなしで入れませんでした。DB（docker compose up -d db）が起動しているか確かめてください");
+      else setError("入れませんでした。時間をおいて試してください");
     } finally {
       // 入れた直後の GET /session が失敗しても「入る」を押せるままにする（成功なら入口ごと消える）
       setBusy(false);
     }
   };
   const enterWith = (value: string) => enterBy(() => api.enter(value.trim()));
-  const enterLocal = () => enterBy(() => api.enterLocal());
+  const enterLocal = () => enterBy(() => api.enterLocal(), true);
 
   // ローカルの起動なら、開いたときにトークンなしで入る（本番では localEntry が来ない）
   useEffect(() => {
@@ -132,7 +155,7 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
   return (
     <main className="center">
       <h1>AgentTeam</h1>
-      <p className="muted">頼むだけで、あなたの担当が生まれる</p>
+      <p className="muted">あなただけの、エージェント。</p>
       {localEntry && (
         <button type="button" className="btn btn-primary" onClick={() => void enterLocal()} disabled={busy}>
           {busy ? "入っています…" : "トークンなしで入る（ローカル）"}
@@ -192,15 +215,11 @@ function screenKeyOf(route: Route): string {
 
 function Screens() {
   const route = useRoute();
-  const { counts, online } = useWorkspace();
+  const { counts } = useWorkspace();
   const titleOverride = useScreenTitleOverride();
   useViewportHeight();
-  // 全画面共通の「頼む」シート（<main key> の外に持つので、画面を移っても生成は続く）
-  const [askSheetOpen, setAskSheetOpen] = useState(false);
-  const openAskSheet = useCallback(() => setAskSheetOpen(true), []);
-  const closeAskSheet = useCallback(() => setAskSheetOpen(false), []);
-  const gen = useAskGeneration();
-  useSlashToAsk(openAskSheet);
+  const wide = useWide();
+  useSlashToChat();
   const mainRef = useRef<HTMLElement>(null);
   const screenKey = screenKeyOf(route);
   const firstScreen = useRef(true);
@@ -226,30 +245,6 @@ function Screens() {
     });
   }, [screenKey]);
 
-  // 画面を移ったらシートは閉じる（生成は続く）
-  useEffect(() => setAskSheetOpen(false), [screenKey]);
-
-  // 編成ができたら、担当が生まれるのを見せてから依頼のページへ移る。作れなかった・質問が来た・編成ができたときは、閉じていてもシートを開く
-  const { phase, askId, members } = gen.state;
-  const { reset } = gen;
-  const memberCount = members.length;
-  useEffect(() => {
-    if (phase !== "shown" || !askId) return;
-    const id = setTimeout(() => {
-      navigate(`/asks/${askId}`);
-      reset();
-    }, enterAskDelay(memberCount));
-    return () => clearTimeout(id);
-  }, [phase, askId, memberCount, reset]);
-  // 編成を押して先に依頼のページへ移ったら、待たずに終える（同じページを履歴に重ねない）
-  const onFormedAsk = phase === "shown" && route.name === "ask" && route.askId === askId;
-  useEffect(() => {
-    if (onFormedAsk) reset();
-  }, [onFormedAsk, reset]);
-  useEffect(() => {
-    if (phase === "failed" || phase === "question" || phase === "shown") setAskSheetOpen(true);
-  }, [phase]);
-
   // 画面を移ったら main にフォーカスを移す（スクリーンリーダーに移ったことを伝える）。最初の描画では動かさない
   useEffect(() => {
     if (firstScreen.current) {
@@ -261,11 +256,12 @@ function Screens() {
 
   return (
     <div className="app">
+      {wide && <Sidebar />}
       <AppHeader back={backOf(route)} />
       <main className="screen" ref={mainRef} tabIndex={-1}>
         {/* 画面が変わるたびに作り直して、中身をふわっと出す（フォーカスは main に残る） */}
         <div key={screenKey} className="screen-enter">
-          {route.name === "home" && <Entrance />}
+          {route.name === "home" && <Chat />}
           {route.name === "check" && <Check />}
           {route.name === "done" && <Done />}
           {route.name === "audit" && <Audit seq={route.seq} />}
@@ -277,24 +273,13 @@ function Screens() {
           {route.name === "notFound" && <NotFound />}
         </div>
       </main>
-      {route.name !== "home" && (
-        <button type="button" className="ask-fab" onClick={openAskSheet} aria-haspopup="dialog" aria-keyshortcuts="/">
-          <span aria-hidden="true">＋</span> 頼む
-        </button>
-      )}
-      {askSheetOpen && (
-        <AskComposerSheet gen={gen} onAskPage={route.name === "ask"} disabled={!online} onClose={closeAskSheet} />
-      )}
       <Notices />
     </div>
   );
 }
 
-/**
- * 「/」でどの画面からでも頼む入力欄へ（入口では #ask-input、それ以外の画面では「頼む」シート）。入力中・修飾キーつき・シートやメニューが開いている間は動かさない。
- * 画面を移ったときの main へのフォーカス（上の effect）より後に入れるため、入口へ移ったときは次の描画を待つ
- */
-function useSlashToAsk(openSheet: () => void) {
+/** 「/」でどの画面からでもチャットの入力欄へ（ほかの画面ならチャットへ移ってから）。入力中・修飾キーつき・シートやメニューが開いている間は動かさない */
+function useSlashToChat() {
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.metaKey || e.ctrlKey || e.altKey || e.isComposing || e.defaultPrevented) return;
@@ -304,12 +289,15 @@ function useSlashToAsk(openSheet: () => void) {
       e.preventDefault();
       const input = document.getElementById("ask-input");
       if (input) return input.focus();
-      // 入口で生成中など、入力欄が出ていないときは何もしない。入口以外の画面ではシートを開く
-      if (location.pathname !== "/") openSheet();
+      // 画面を移ったときの main へのフォーカスより後に入れるため、次の描画を待つ
+      if (location.pathname !== "/") {
+        navigate("/");
+        setTimeout(() => document.getElementById("ask-input")?.focus(), 50);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [openSheet]);
+  }, []);
 }
 
 function NotFound() {
@@ -318,7 +306,7 @@ function NotFound() {
       <h1>ページが見つかりません</h1>
       <p className="muted">アドレスが違うか、ページが移ったようです。</p>
       <Link to="/" className="btn btn-ghost">
-        入口へ戻る
+        チャットへ戻る
       </Link>
     </div>
   );

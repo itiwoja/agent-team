@@ -5,7 +5,7 @@ import type { Route } from "./router";
 export function titleOf(route: Route): string {
   switch (route.name) {
     case "home":
-      return "入口";
+      return "チャット";
     case "check":
       return "チェック";
     case "done":
@@ -15,7 +15,7 @@ export function titleOf(route: Route): string {
     case "ask":
       return "依頼";
     case "agents":
-      return "担当";
+      return "エージェント";
     case "asks":
       return "依頼の一覧";
     case "packs":
@@ -27,7 +27,7 @@ export function titleOf(route: Route): string {
   }
 }
 
-/** ヘッダーの「戻る」の行き先：ひとつ上の階層（依頼→依頼の一覧、パックの作業場→棚、済んだもの→チェック）。それ以外は入口。入口自体では出さない */
+/** ヘッダーの「戻る」の行き先：ひとつ上の階層（パックの作業場→棚、済んだもの→チェック）。それ以外はチャット。チャット自体では出さない */
 export function backOf(route: Route): { to: string; label: string } | null {
   switch (route.name) {
     case "home":
@@ -37,8 +37,8 @@ export function backOf(route: Route): { to: string; label: string } | null {
     case "done":
       return { to: "/check", label: "チェック" };
     case "ask":
-      return { to: "/asks", label: "依頼" };
+      return { to: "/", label: "チャット" };
     default:
-      return { to: "/", label: "入口" };
+      return { to: "/", label: "チャット" };
   }
 }
