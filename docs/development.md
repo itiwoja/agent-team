@@ -14,7 +14,10 @@ DATABASE_URL=postgres://postgres:postgres@localhost:5432/open_team pnpm --filter
 pnpm dev
 ```
 
-画面は http://localhost:5173（`/api` は 8080 へ中継）。ローカルでは入口のトークンを自動で入れます。ポートは各 `dev` スクリプトが固定します（app 8080・gateway 8082）。個別に起動するときは `pnpm --filter @open-team/<app|gateway|gcal|github|web> dev`（gcal 8083・github 8084）。
+画面は http://localhost:5173（`/api` は Node 版の app の 8080 へ中継）。ローカルでは入口のトークンを自動で入れます。ポートは各 `dev` スクリプトが固定します（app 8080・gateway 8082）。
+
+- `pnpm dev` は vite が先に立ち上がり、app が受け付けるまで（`/mnt/c` の上では数十秒）かかる。その間の `/api` は vite が app の起動を待ってから中継するので、画面を早く開いても入れる（待つのは最大 120 秒）。
+- `pnpm dev` は Cloudflare 版の Worker（`apps/worker`、8787）も起動するが、画面はまだつながない（下の「Cloudflare の版」）。gcal・github は `GCAL_SHARED_TOKEN`・`GITHUB_SHARED_TOKEN` がないと起動を断るが、画面には要らない。個別に起動するときは `pnpm --filter @open-team/<app|gateway|gcal|github|web> dev`（gcal 8083・github 8084）。
 
 `.env`（`apps/app`・`apps/gateway` の `dev` が `../../.env` を読む）：
 
@@ -57,3 +60,5 @@ pnpm --filter @open-team/worker types   # wrangler.jsonc を変えたら型を�
 
 ローカルでログインするとき：`apps/worker/.dev.vars.example` を `.dev.vars` にコピーして Google の OAuth クライアントの値と許可するメールアドレスを入れ、
 D1 にテーブルを作る（`pnpm --filter @open-team/worker exec wrangler d1 migrations apply makase --local`）。
+
+画面（`apps/web`）はまだ Worker に載せ替えていない。Worker の API は `/api/session`・`/api/auth/google/*` と `/api/v1/` の担当・依頼の一部だけで、画面が使う `GET /api/v1/session`・`POST /api/v1/entry/local`（トークンなしの入口）はない。vite の中継先を 8787 に変えると入れないので、載せ替えまでは 8080 のままにする。
