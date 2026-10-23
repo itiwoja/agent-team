@@ -394,7 +394,7 @@ export interface UsageRecordInput {
   promptHash: string;
 }
 
-/** 費用の行（TBL-011。持ち主は task・agent・ask のどれか1つ以上） */
+/** 費用の行（TBL-011。持ち主は task・agent・ask のどれか1つ以上。ただし phase 'planner' は作れなかったエージェントの費用など、持ち主なしも許す） */
 export function insertUsageRecord(db: WsDb, u: UsageRecordInput, now: Date): void {
   run(
     db,

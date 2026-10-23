@@ -108,6 +108,8 @@ describe("T-08・T-10・T-12・T-13・T-29：費用・スナップショット�
           phase,
         );
       expectCheck(() => ins(null, "plan"), "usage_records_owner_chk");
+      // エージェントの作成の失敗など：phase 'planner' だけ持ち主なしを許す
+      ins(null, "planner");
       ins(agent.agentId, "implement");
       ins(agent.agentId, "rehearsal_tighten");
       expectCheck(() => ins(agent.agentId, "design"));
