@@ -1,6 +1,6 @@
 // 担当のタスクの Workflow（workflows/task-run.ts）と DO の進め役（asks/drive.ts）：
 // POST /asks → PlanAskWorkflow（編成）→ DO が TaskRunWorkflow を起動 → runner の runTask（LLM は ScriptedLlmClient）→ 報告 → 1歩進める → 回答。
-// 順番（前の段の報告を受けて次の段）・LLM の失敗・途中の Kill Switch も確かめる
+// 順番（前の段の報告を受けて次の段）・LLM の失敗も確かめる
 import { env, introspectWorkflow } from "cloudflare:test";
 import { LlmError, ScriptedLlmClient, type LlmRequest, type ScriptedReply } from "@open-team/llm";
 import { afterEach, describe, expect, it } from "vitest";
@@ -86,8 +86,7 @@ async function askAndRun(who: Signed, text: string, llm: ScriptedLlmClient): Pro
   let waited = 0;
   for (let round = 0; round < 10; round += 1) {
     const instances = await runs.get();
-    // Kill Switch で止めた Workflow は terminated で終わる
-    for (const i of instances.slice(waited)) await i.waitForStatus("complete").catch(() => i.waitForStatus("terminated"));
+    for (const i of instances.slice(waited)) await i.waitForStatus("complete");
     if ((await runs.get()).length === instances.length) break;
     waited = instances.length;
   }
@@ -96,7 +95,8 @@ async function askAndRun(who: Signed, text: string, llm: ScriptedLlmClient): Pro
 
 afterEach(() => setLlmForTest(null));
 
-describe("TaskRunWorkflow", () => {
+// 本物の Workflow の終わりまで待つので、全体を流すときの混み具合で 5 秒を超える（途中で切られると調べる口が閉じず、後の試験も落ちる）
+describe("TaskRunWorkflow", { timeout: 30_000 }, () => {
   it("ひとり：担当が報告し（タスクは completed）、回答になって依頼が done", async () => {
     const who = await signIn("run-single");
     const { llm, seen } = scripted({ shape: "single", members: [member("a", { newName: "在庫係" })] }, { a: reports("a") });
@@ -145,25 +145,5 @@ describe("TaskRunWorkflow", () => {
       ]);
     });
     expect((await detail(who, askId)).ask.status).not.toBe("running");
-  });
-
-  it("担当が動いている間に Kill Switch が入ったら、タスクは halted、依頼は cancelled", async () => {
-    const who = await signIn("run-kill");
-    const { llm } = scripted(
-      { shape: "single", members: [member("a", { newName: "在庫係" })] },
-      {
-        a: async () => {
-          expect((await post(`/workspaces/${who.ws.workspaceId}/kill-switch`, who, {})).status).toBe(200);
-          return reports("a")();
-        },
-      },
-    );
-    const askId = await askAndRun(who, "在庫を見て", llm);
-    await inNamedWorkspace(who.ws, (db) => {
-      expect(all<{ status: string; halt_reason: string }>(db, {}, "SELECT status, halt_reason FROM tasks WHERE ask_id = ?", askId)).toEqual([
-        { status: "halted", halt_reason: "kill_switch" },
-      ]);
-    });
-    expect((await detail(who, askId)).ask.status).toBe("cancelled");
   });
 });

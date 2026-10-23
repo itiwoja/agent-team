@@ -1,8 +1,9 @@
-// LLM Proxy（edgeLlmPrepare・edgeLlmBegin・edgeLlmSettle・edgeLlmFail）の試験：入力の検証・回数・予算（decide と checkSpend）・Kill Switch・
+// LLM Proxy（edgeLlmPrepare・edgeLlmBegin・edgeLlmSettle・edgeLlmFail）の試験：入力の検証・回数・予算（decide と checkSpend）・
 // LLM の失敗・費用の加算・応答のツール呼び出しの判定（M-14・M-15・M-12）・Intent（recordMcpIntent）・Breaker・submit_report の後ろ（決定 (e)）
 // （packages/edge/src/proxy.test.ts の WorkspaceDO 版。やり直しの試験は llm-call.ts の側）
 import { computeMcpIntentHash, destinationKey, optionDigest, toMicroUsd, type JsonObject } from "@open-team/kernel";
-import { DEFAULT_AGENT_MODEL, LlmError, type LlmRequest } from "@open-team/llm";
+import { LlmError, type LlmRequest } from "@open-team/llm";
+import { DEFAULT_CLAUDE_MODEL as DEFAULT_AGENT_MODEL } from "../../src/llm/claude.ts";
 import type { TaskContext } from "@open-team/runner";
 import { describe, expect, it } from "vitest";
 import { all, one, run, type WsDb } from "../../src/db/sqlite.ts";
@@ -118,17 +119,17 @@ describe("費用の加算（§3.10-8、FR-013）", () => {
     await inWorkspace(async (db, ws) => {
       const w = world(db, ws, { env: { script: [{ parts: [text("在庫を見ます")], usage: USAGE }] } });
       const res = await w.env.llmMessages(w.taskId, llmRequest([], { phase: "implement" }));
-      expect(res.usage).toEqual({ inputTokens: 1000, outputTokens: 100, costUsd: "0.002250" });
-      expect(res.budget).toEqual({ costUsd: "0.002250", stepsUsed: 1 });
+      expect(res.usage).toEqual({ inputTokens: 1000, outputTokens: 100, costUsd: "0.006000" });
+      expect(res.budget).toEqual({ costUsd: "0.006000", stepsUsed: 1 });
       expect(res.governance).toEqual([]);
       const usage = all<Record<string, unknown>>(db, {}, "SELECT * FROM usage_records");
       expect(usage).toEqual([
-        expect.objectContaining({ task_id: w.taskId, agent_id: w.agent.agentId, phase: "implement", input_tokens: 1000, output_tokens: 100, cost_micro_usd: 2250, model: DEFAULT_AGENT_MODEL, provider: "google" }),
+        expect.objectContaining({ task_id: w.taskId, agent_id: w.agent.agentId, phase: "implement", input_tokens: 1000, output_tokens: 100, cost_micro_usd: 6000, model: DEFAULT_AGENT_MODEL, provider: "anthropic" }),
       ]);
-      expect(taskRow(db, w.taskId)).toMatchObject({ cost_micro_usd: 2250, steps_used: 1, status: "running" });
+      expect(taskRow(db, w.taskId)).toMatchObject({ cost_micro_usd: 6000, steps_used: 1, status: "running" });
       expect(count(db, "SELECT 1 FROM task_events WHERE task_id = ? AND type = 'llm_called'", w.taskId)).toBe(1);
       const audit = auditEvents(db, "llm.called");
-      expect(audit).toEqual([expect.objectContaining({ taskId: w.taskId, model: DEFAULT_AGENT_MODEL, costUsd: "0.002250", ignoredToolCalls: 0 })]);
+      expect(audit).toEqual([expect.objectContaining({ taskId: w.taskId, model: DEFAULT_AGENT_MODEL, costUsd: "0.006000", ignoredToolCalls: 0 })]);
       expect(audit[0]).toHaveProperty("promptHash");
       const decisions = all(db, {}, "SELECT subject_kind, decision, reason_code FROM policy_decisions WHERE task_id = ?", w.taskId);
       expect(decisions).toEqual([{ subject_kind: "llm_call", decision: "allow", reason_code: "not_gated" }]);
@@ -136,10 +137,11 @@ describe("費用の加算（§3.10-8、FR-013）", () => {
   });
 });
 
-describe("呼ぶ前の確かめ（edgeLlmBegin：decide(llm_call) と checkSpend・Kill Switch）", () => {
+describe("呼ぶ前の確かめ（edgeLlmBegin：decide(llm_call) と checkSpend）", () => {
   it("HL-10・HL-11 per_task_usd 0.2：0.15＋見積もりは通す、0.16＋見積もりは halted(budget_exceeded)・監査ログ budget.exceeded・判定の記録", async () => {
     await inWorkspace(async (db, ws) => {
-      const est = estimateCallMicroUsd(bareRequest(3200));
+      // 出力 2,400 × $20/M ＝ $0.048 ＋ 入力の上限の分（Opus 5.5）
+      const est = estimateCallMicroUsd(bareRequest(2400));
       expect(est).toBeGreaterThan(40_000);
       expect(est).toBeLessThan(50_000);
       const ok = world(db, ws, { task: { status: "running", costMicroUsd: 150_000 } });
@@ -206,28 +208,17 @@ describe("呼ぶ前の確かめ（edgeLlmBegin：decide(llm_call) と checkSpend
       expect(d.details).toMatchObject({ matchedRule: "budget.per_task_usd" });
     });
   });
-
-  it("Kill Switch 発動中は呼ばずに TASK_HALTED（haltReason: kill_switch）、タスクは halted(kill_switch)", async () => {
-    await inWorkspace(async (db, ws) => {
-      const w = world(db, ws);
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", T0);
-      const e = await expectEdgeError(() => edgeLlmBegin(db, w.env.rt, w.taskId, { budgetEstimateMicroUsd: 1_000, model: DEFAULT_AGENT_MODEL, phase: "plan" }, T0), "TASK_HALTED");
-      expect(e.details).toMatchObject({ haltReason: "kill_switch" });
-      expect(taskRow(db, w.taskId)).toMatchObject({ status: "halted", halt_reason: "kill_switch" });
-    });
-  });
 });
 
 describe("呼んだあと・失敗（edgeLlmSettle・edgeLlmFail）", () => {
-  it("呼んでいる間に Kill Switch でタスクが止まった：費用は数え、ツール呼び出しは判定せず TASK_HALTED", async () => {
+  it("呼んでいる間にタスクが止まった：費用は数え、ツール呼び出しは判定せず TASK_HALTED", async () => {
     await inWorkspace(async (db, ws) => {
       let taskId = "";
       const w = world(db, ws, {
         env: {
           script: [
             () => {
-              run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", T0);
-              run(db, "UPDATE tasks SET status = 'halted', halt_reason = 'kill_switch', finished_at = ? WHERE id = ?", T0, taskId);
+              run(db, "UPDATE tasks SET status = 'halted', halt_reason = 'budget_exceeded', finished_at = ? WHERE id = ?", T0, taskId);
               return { parts: [mcp("c1", "supplier", "place_order", ORDER)], usage: USAGE };
             },
           ],
@@ -235,7 +226,7 @@ describe("呼んだあと・失敗（edgeLlmSettle・edgeLlmFail）", () => {
       });
       taskId = w.taskId;
       await expectEdgeError(() => w.env.llmMessages(w.taskId, llmRequest(w.ctx.tools)), "TASK_HALTED");
-      expect(taskRow(db, w.taskId).cost_micro_usd).toBe(2250);
+      expect(taskRow(db, w.taskId).cost_micro_usd).toBe(6000);
       expect(count(db, "SELECT 1 FROM usage_records WHERE task_id = ?", w.taskId)).toBe(1);
       expect(count(db, "SELECT 1 FROM action_intents WHERE task_id = ?", w.taskId)).toBe(0);
     });
@@ -247,7 +238,7 @@ describe("呼んだあと・失敗（edgeLlmSettle・edgeLlmFail）", () => {
       const { llmReq, phase } = edgeLlmPrepare(db, w.env.rt, w.taskId, llmRequest([]), T0);
       const usage = { model: llmReq.model, inputTokens: 0, outputTokens: 0, thinkingTokens: 0, costMicroUsd: 3000, estimatedMicroUsd: 3000, latencyMs: 5, attempts: 4 };
       const e = await expectEdgeError(
-        () => edgeLlmFail(db, w.env.rt, w.taskId, { llmReq, phase, kind: "llm", llmStatus: 503, message: "混んでいる", usage, provider: "google" }, T0),
+        () => edgeLlmFail(db, w.env.rt, w.taskId, { llmReq, phase, kind: "llm", llmStatus: 503, message: "混んでいる", usage, provider: "anthropic" }, T0),
         "LLM_UPSTREAM_ERROR",
       );
       expect(e.details).toEqual({ status: 503 });
@@ -262,13 +253,13 @@ describe("呼んだあと・失敗（edgeLlmSettle・edgeLlmFail）", () => {
       const w = world(db, ws);
       const { llmReq, phase } = edgeLlmPrepare(db, w.env.rt, w.taskId, llmRequest([]), T0);
       const aborted = await expectEdgeError(
-        () => edgeLlmFail(db, w.env.rt, w.taskId, { llmReq, phase, kind: "aborted", llmStatus: null, message: "中断", usage: null, provider: "google" }, T0),
+        () => edgeLlmFail(db, w.env.rt, w.taskId, { llmReq, phase, kind: "aborted", llmStatus: null, message: "中断", usage: null, provider: "anthropic" }, T0),
         "TASK_HALTED",
       );
       expect(aborted.details).toEqual({ haltReason: "aborted" });
       expect(taskRow(db, w.taskId).status).toBe("running");
       const e = await expectEdgeError(
-        () => edgeLlmFail(db, w.env.rt, w.taskId, { llmReq, phase, kind: "unpriced_model", llmStatus: null, message: "価格表にないモデルは呼びません", usage: null, provider: "google" }, T0),
+        () => edgeLlmFail(db, w.env.rt, w.taskId, { llmReq, phase, kind: "unpriced_model", llmStatus: null, message: "価格表にないモデルは呼びません", usage: null, provider: "anthropic" }, T0),
         "LLM_UPSTREAM_ERROR",
       );
       expect(e.details).toMatchObject({ reason: "unpriced_model" });

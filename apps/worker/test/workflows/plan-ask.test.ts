@@ -1,5 +1,5 @@
 // 依頼の編成の Workflow（workflows/plan-ask.ts）：POST /asks → DO が PlanAskWorkflow を起動 → 設定プランナー（ScriptedLlmClient）→
-// 保存して最初の実行を始める（担当のタスクができ、DO が TaskRunWorkflow を起動する）。質問・LLM の失敗・途中の Kill Switch も確かめる。
+// 保存して最初の実行を始める（担当のタスクができ、DO が TaskRunWorkflow を起動する）。質問・LLM の失敗も確かめる。
 // 担当の実行そのものは task-run.test.ts。ここでは台本が尽きて担当の LLM は失敗するが、試験の後に残らないよう、起動した担当の Workflow の終わりまで待つ
 import { env, introspectWorkflow, type WorkflowIntrospector } from "cloudflare:test";
 import { LlmError, ScriptedLlmClient, type ScriptedStep } from "@open-team/llm";
@@ -76,7 +76,8 @@ async function askAndPlan(who: Signed, text: string, script: readonly ScriptedSt
 
 afterEach(() => setLlmForTest(null));
 
-describe("PlanAskWorkflow", () => {
+// 本物の Workflow の終わりまで待つので、全体を流すときの混み具合で 5 秒を超える（途中で切られると調べる口が閉じず、後の試験も落ちる）
+describe("PlanAskWorkflow", { timeout: 30_000 }, () => {
   it("ひとり：新しい担当を作り、担当のタスクができる。費用は planner で残る", async () => {
     const who = await signIn("plan-single");
     const { askId, output } = await askAndPlan(who, "在庫の少ないものを教えて", [
@@ -145,22 +146,6 @@ describe("PlanAskWorkflow", () => {
     expect(view.ask).toMatchObject({ status: "failed", failure: { reason: "planner_error" } });
     await inNamedWorkspace(who.ws, (db) => {
       expect(count(db, "SELECT count(*) FROM usage_records WHERE ask_id = ? AND cost_micro_usd > 0", askId)).toBe(1);
-    });
-  });
-
-  it("計画の途中で Kill Switch が入ったら、保存せず failed（kill_switch）", async () => {
-    const who = await signIn("plan-kill");
-    const { askId, output } = await askAndPlan(who, "在庫を見て", [
-      async () => {
-        expect((await post(`/workspaces/${who.ws.workspaceId}/kill-switch`, who, {})).status).toBe(200);
-        return jsonReply({ formation: { shape: "single", members: [member({ newName: "在庫係" })] } });
-      },
-    ]);
-    expect(output.outcome).toBe("failed");
-    expect((await detail(who, askId)).ask).toMatchObject({ status: "failed", failure: { reason: "kill_switch" } });
-    await inNamedWorkspace(who.ws, (db) => {
-      expect(count(db, "SELECT count(*) FROM agents")).toBe(0);
-      expect(count(db, "SELECT count(*) FROM tasks")).toBe(0);
     });
   });
 });

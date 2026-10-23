@@ -10,6 +10,7 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@open-team/gcal-core": "workspace:*",
     "@open-team/github-core": "workspace:*",
     "@open-team/kernel": "workspace:*",

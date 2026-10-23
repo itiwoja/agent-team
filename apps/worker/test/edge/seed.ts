@@ -18,7 +18,9 @@ import {
   type ToolClassification,
   type ToolHash,
 } from "@open-team/kernel";
-import { DEFAULT_AGENT_MODEL, LlmError, ScriptedLlmClient, type ScriptedResponder, type ScriptedStep } from "@open-team/llm";
+import { LlmError, type ScriptedResponder, type ScriptedStep } from "@open-team/llm";
+import { DEFAULT_CLAUDE_MODEL as DEFAULT_AGENT_MODEL } from "../../src/llm/claude.ts";
+import { ClaudeScriptedLlm as ScriptedLlmClient } from "../llm/scripted.ts";
 import { EdgeError, type AssistantPart, type LlmMessagesRequest, type LlmMessagesResponse } from "@open-team/runner";
 import { expect } from "vitest";
 import { newId, one, type WsDb } from "../../src/db/sqlite.ts";
@@ -340,7 +342,7 @@ export function llmRequest(tools: ReadonlyArray<{ name: string }>, o: Partial<Ll
   };
 }
 
-/** 決まった量の使用量（gemini の単価で 2,250 マイクロドル） */
+/** 決まった量の使用量（Opus 5.5 の単価で 6,000 マイクロドル：入力 1,000 × $4/M ＋ 出力 100 × $20/M） */
 export const USAGE = { inputTokens: 1000, outputTokens: 100, thinkingTokens: 0 } as const;
 
 export interface TestEdge {
@@ -374,10 +376,10 @@ export function buildEdge(
         response = await llm.generate(llmReq);
       } catch (e) {
         const err = e instanceof LlmError ? e : new LlmError(String(e), null, false);
-        return edgeLlmFail(db, rt, taskId, { llmReq, phase, kind: "llm", llmStatus: err.status, message: err.message, usage: null, provider: "google" }, now);
+        return edgeLlmFail(db, rt, taskId, { llmReq, phase, kind: "llm", llmStatus: err.status, message: err.message, usage: null, provider: "anthropic" }, now);
       }
       const usage = { ...response.usage, model: response.model, estimatedMicroUsd: est, latencyMs: 1, attempts: 1 };
-      return edgeLlmSettle(db, rt, taskId, { llmReq, phase, usage, response, provider: "google" }, now);
+      return edgeLlmSettle(db, rt, taskId, { llmReq, phase, usage, response, provider: "anthropic" }, now);
     },
   };
 }

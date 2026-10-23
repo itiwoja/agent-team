@@ -1,13 +1,20 @@
-// Worker の LLM（docs/cloudflare-design.md）。キーと設定は Workers secrets・vars（ローカルは .dev.vars）から、Node 版と同じ readLlmEnv で読む
-// （LLM_PROVIDER・GEMINI_API_KEY・LLM_MODEL_AGENT など。apps/app/src/deps.ts の組み立てと同じ）。キーがなければ呼ぶ前に断るクライアントにする。
-// やり直しは edge/llm-call.ts の callLlm の1か所で数えるので、クライアントは「1回だけ呼ぶ」設定で作る。
+// Worker の LLM（docs/cloudflare-design.md）。Claude だけに対応する（llm/claude.ts）。
+// キーは Workers secrets の ANTHROPIC_API_KEY（ローカルは .dev.vars）、モデルは vars の CLAUDE_MODEL（省けば claude-opus-5-5。設定プランナーも担当も同じモデル）。
+// キーがなければ呼ぶ前に断るクライアントにする。やり直しは edge/llm-call.ts の callLlm の1か所で数える。
 // 試験は setLlmForTest で ScriptedLlmClient に差し替える（Workflow も試験と同じ isolate で動くので、モジュールの変数が見える）
 
-import { createLlmClient, findPrice, LlmError, PROVIDER_KEY_NAMES, profilePrice, readLlmEnv, type LlmClient, type LlmConfig } from "@open-team/llm";
+import { LlmError, type LlmClient } from "@open-team/llm";
+import { CLAUDE_PRICES, ClaudeClient, DEFAULT_CLAUDE_MODEL } from "./llm/claude.ts";
+
+/** 設定プランナー・担当が使うモデル（modelForPurpose・modelForPhase に渡す形） */
+export interface LlmModels {
+  agentModel: string;
+  plannerModel: string;
+}
 
 export interface LlmSetup {
   client: LlmClient;
-  config: LlmConfig;
+  config: LlmModels;
 }
 
 let testClient: LlmClient | null = null;
@@ -18,23 +25,23 @@ export function setLlmForTest(client: LlmClient | null): void {
 }
 
 /** キーがないとき。呼ぶ前に断る（status null・やり直さない） */
-function unavailableLlm(config: LlmConfig): LlmClient {
-  const keyName = PROVIDER_KEY_NAMES[config.provider];
-  const unavailable = (): never => {
-    throw new LlmError(`${keyName} が設定されていないので LLM を呼べない`, null, false);
-  };
-  return {
-    priceFor: (model) => (config.provider === "gemini" ? findPrice(model) : Object.hasOwn(config.profiles, model) ? profilePrice(model, config.profiles[model]!) : null),
-    preflight: unavailable,
-    async generate() {
-      return unavailable();
-    },
-  };
-}
+const unavailableLlm: LlmClient = {
+  provider: "anthropic",
+  priceFor: (model) => CLAUDE_PRICES[model] ?? null,
+  preflight: () => {
+    throw new LlmError("ANTHROPIC_API_KEY が設定されていないので LLM を呼べない", null, false);
+  },
+  async generate() {
+    throw new LlmError("ANTHROPIC_API_KEY が設定されていないので LLM を呼べない", null, false);
+  },
+};
 
-/** env から LLM のクライアントと設定を作る（設定が壊れていれば LlmConfigurationError） */
+/** env から Claude のクライアントとモデルを作る */
 export function llmOf(env: Env): LlmSetup {
-  const config = readLlmEnv(env as unknown as NodeJS.ProcessEnv);
+  const vars = env as unknown as Record<string, string | undefined>;
+  const model = vars.CLAUDE_MODEL?.trim() || DEFAULT_CLAUDE_MODEL;
+  const config = { agentModel: model, plannerModel: model };
   if (testClient !== null) return { client: testClient, config };
-  return { client: config.apiKey ? createLlmClient(config) : unavailableLlm(config), config };
+  const apiKey = vars.ANTHROPIC_API_KEY?.trim();
+  return { client: apiKey ? new ClaudeClient({ apiKey }) : unavailableLlm, config };
 }

@@ -1,28 +1,27 @@
 // LLM の呼び出し（SO §3.12 callGemini。packages/edge/src/gemini.ts の WorkspaceDO 版）。
 // Node 版は「トランザクション → 呼ぶ → トランザクション」を1つの関数でしていた。ここでは DB の部分を DO（llmGate・llmRecord。同期）に、
 // 呼ぶ部分を Worker・Workflow の側（callLlm。DO の RPC を ledger として受け取る）に分ける。手順は同じ：
-// 1 中断・価格表にないモデル（呼ばない）→ 2 見積もり → 3 DO：Kill Switch → checkSpend（やり直しの分も含めた見積もり）→
+// 1 中断・価格表にないモデル（呼ばない）→ 2 見積もり → 3 DO：checkSpend（やり直しの分も含めた見積もり）→
 // 4 呼ぶ（やり直しはここの1か所：429・5xx・ネットワークを 1・4・16秒で3回。送れたか・使った量が分からない失敗は見積もりを費用に数える）→
 // 5 DO：usage_records（失敗でも数えた分があれば残す）。
 // タスクの判定（beforeCall・afterCall の decide(llm_call)・使った量）は 4c で ledger に足す
 
 import { canonicalJson, sha256Hex } from "@open-team/kernel";
 import {
-  GROUNDING_QUERIES_ESTIMATE,
-  GROUNDING_QUERY_MICRO_USD,
   LLM_RETRY_DELAYS_MS,
   LlmError,
-  estimateMicroUsd,
-  findPrice,
+  computeMicroUsd,
   inputTokensUpperBound,
   withRetry,
   type GeminiPurpose,
   type LlmClient,
   type LlmRequest,
+  type PriceEntry,
   type LlmResponse,
   type SleepFn,
 } from "@open-team/llm";
 import { insertUsageRecord, type UsageRecordInput } from "../db/repo/edge.ts";
+import { CLAUDE_PRICES } from "../llm/claude.ts";
 import type { WsDb } from "../db/sqlite.ts";
 import type { UsagePhase, Uuid } from "../db/types.ts";
 import { getWorkspace } from "../db/workspace.ts";
@@ -52,7 +51,7 @@ export interface LlmCallUsage {
   attempts: number;
 }
 
-export type LlmCallErrorKind = "kill_switch" | "budget" | "unpriced_model" | "incompatible_model" | "aborted" | "llm";
+export type LlmCallErrorKind = "budget" | "unpriced_model" | "incompatible_model" | "aborted" | "llm";
 
 /** callLlm の失敗（kind で見分ける。Workflow の歩みをまたぐときは name・kind・message だけが残る） */
 export class LlmCallError extends Error {
@@ -73,13 +72,11 @@ export class LlmCallError extends Error {
 // =====================================================================
 
 /** 呼ぶ前の確かめの結果 */
-export type LlmGate = { ok: true } | { ok: false; kind: "kill_switch" } | { ok: false; kind: "budget"; spend: SpendDenied };
+export type LlmGate = { ok: true } | { ok: false; kind: "budget"; spend: SpendDenied };
 
-/** 3. 呼ぶ前の確かめ：Kill Switch → 費用の上限（全体。M-19） */
+/** 3. 呼ぶ前の確かめ：費用の上限（全体。M-19） */
 export function llmGate(db: WsDb, budgetEstimateMicroUsd: number, now: Date): LlmGate {
-  const ws = getWorkspace(db);
-  if (ws === null) throw new Error("ワークスペースの行がない");
-  if (ws.kill_switch_engaged) return { ok: false, kind: "kill_switch" };
+  if (getWorkspace(db) === null) throw new Error("ワークスペースの行がない");
   const spend = checkSpend(db, budgetEstimateMicroUsd, now);
   if (!spend.ok) return { ok: false, kind: "budget", spend };
   return { ok: true };
@@ -108,10 +105,13 @@ export interface LlmCallDeps {
   retry?: { delaysMs?: readonly number[]; sleep?: SleepFn };
 }
 
-/** 呼ぶ前の見積もり（BR-10：入力の上限 × 入力単価 ＋ maxTokens × 出力単価 ＋ 思考の上限 × 単価） */
-export function estimateCallMicroUsd(req: LlmRequest): number {
-  const tokens = estimateMicroUsd(req.model, { inputTokens: inputTokensUpperBound(req), maxOutputTokens: req.maxTokens, thinkingBudget: req.maxTokens });
-  return req.googleSearch === true ? tokens + GROUNDING_QUERIES_ESTIMATE * GROUNDING_QUERY_MICRO_USD : tokens;
+/**
+ * 呼ぶ前の見積もり（BR-10：入力の上限 × 入力単価 ＋ maxTokens × 出力単価）。Claude の出力のトークンは思考を含み max_tokens の中に収まるので、
+ * 思考の分を別に足さない
+ */
+export function estimateCallMicroUsd(req: LlmRequest, price: PriceEntry | undefined = CLAUDE_PRICES[req.model]): number {
+  if (price === undefined) throw new LlmCallError("unpriced_model", "料金表にないモデルは呼びません");
+  return computeMicroUsd(price, inputTokensUpperBound(req), req.maxTokens, 0);
 }
 
 /** プロンプトのハッシュ（usage_records.prompt_hash。本文は保存しない：A-15・§8-32） */
@@ -139,9 +139,9 @@ function errorMessage(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
 }
 
-/** usage_records.provider。llm の provider 未設定（Gemini）は google */
+/** usage_records.provider。Worker は Claude だけなので、provider を持たないクライアント（試験の台本）も anthropic として残す */
 export function usageProviderOf(llm: LlmClient): UsageRecordInput["provider"] {
-  return llm.provider === undefined || llm.provider === "gemini" ? "google" : llm.provider;
+  return llm.provider === undefined ? "anthropic" : llm.provider === "gemini" ? "google" : llm.provider;
 }
 
 function usageRow(target: LlmCallTarget, req: LlmRequest, usage: LlmCallUsage, provider: UsageRecordInput["provider"]): UsageRecordInput {
@@ -173,14 +173,15 @@ export interface PreparedLlmCall {
 
 export function prepareLlmCall(llm: LlmClient, req: LlmRequest, o: { delaysMs?: readonly number[]; signal?: AbortSignal } = {}): PreparedLlmCall {
   if (o.signal?.aborted) throw new LlmCallError("aborted", "LLM の呼び出しを中断しました");
-  const price = llm.priceFor ? llm.priceFor(req.model) : findPrice(req.model);
+  // 料金はクライアントの表（llm/claude.ts の ClaudeClient）。表を持たないクライアント（試験の台本）は Claude の料金表で数える
+  const price = llm.priceFor ? llm.priceFor(req.model) : (CLAUDE_PRICES[req.model] ?? null);
   if (price === null) throw new LlmCallError("unpriced_model", "価格表にないモデルは呼びません");
   try {
     llm.preflight?.(req);
   } catch (e) {
     throw new LlmCallError("incompatible_model", e instanceof LlmError ? e.message : "モデルの能力・設定を確認してください");
   }
-  const est = llm.estimateMicroUsd ? llm.estimateMicroUsd(req) : estimateCallMicroUsd(req);
+  const est = llm.estimateMicroUsd ? llm.estimateMicroUsd(req) : estimateCallMicroUsd(req, price);
   const delaysMs = o.delaysMs ?? LLM_RETRY_DELAYS_MS;
   // HTTP のアダプターは使った量が分からなくても送っていることがある。やり直しの分も先に見積もる（実際の回数で数える）
   const budgetEstimate = llm.estimateMicroUsd ? est * (delaysMs.length + 1) : est;
@@ -277,7 +278,6 @@ export async function callLlm(
   // 3. 呼ぶ前の確かめ（DO）
   const gate = await deps.ledger.llmGate(prepared.budgetEstimateMicroUsd, deps.now());
   if (!gate.ok) {
-    if (gate.kind === "kill_switch") throw new LlmCallError("kill_switch", "Kill Switch が発動中です");
     throw new LlmCallError("budget", `費用の上限を超えます（${gate.spend.scope}）`, { spend: gate.spend });
   }
 
