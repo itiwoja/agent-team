@@ -182,7 +182,8 @@ if (process.env[SHIM_ENV] === "1") {
 // ---------------------------------------------------------------------------
 
 // テスト・テスト用の置き物（本番では読み込まれない）
-const TEST_FILES = "(^|/)(__fixtures__|__golden__|__mocks__)/|\\.(test|spec)\\.[cm]?tsx?$|(^|/)test-helpers\\.[cm]?ts$";
+// apps/<名前>/test/ は試験だけのディレクトリ（apps/worker。workerd の中で動かす試験と、その道具）
+const TEST_FILES = "(^|/)(__fixtures__|__golden__|__mocks__)/|\\.(test|spec)\\.[cm]?tsx?$|(^|/)test-helpers\\.[cm]?ts$|^apps/[^/]+/test/";
 // ビルドの設定（devDependencies を使ってよい）
 const BUILD_CONFIG_FILES = "(^|/)(vite|vitest)\\.config\\.[cm]?[jt]s$";
 
