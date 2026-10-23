@@ -35,7 +35,8 @@ import "./styles/avatar.css";
 import "./styles/notice.css";
 import "./styles/asks.css";
 
-type Session = { state: "loading" } | SessionState;
+// unreachable：GET /session が失敗した（app や DB が止まっている）。トークンの入口だけを出すと、ローカルでも入れないように見える
+type Session = { state: "loading" } | { state: "unreachable" } | SessionState;
 
 function App() {
   const [session, setSession] = useState<Session>({ state: "loading" });
@@ -44,17 +45,20 @@ function App() {
     return api
       .session()
       .then(setSession)
-      .catch(() => setSession({ state: "signed_out" }));
+      .catch(() => setSession({ state: "unreachable" }));
   }, []);
 
   useEffect(() => {
     void refresh();
-    return onUnauthorized(() => setSession({ state: "signed_out" }));
+    // 401 のあとも GET /session から入り直す（ローカルならトークンなしの入口が出る）
+    return onUnauthorized(() => void refresh());
   }, [refresh]);
 
   switch (session.state) {
     case "loading":
       return <Loading />;
+    case "unreachable":
+      return <Unreachable onRetry={refresh} />;
     case "setup_required":
       return <SetupRequired missing={session.missing} />;
     case "signed_out":
@@ -71,6 +75,24 @@ function Loading() {
       <p className="muted" role="status">
         読み込んでいます…
       </p>
+    </main>
+  );
+}
+
+function Unreachable({ onRetry }: { onRetry: () => Promise<void> }) {
+  const [busy, setBusy] = useState(false);
+  const retry = () => {
+    setBusy(true);
+    void onRetry().finally(() => setBusy(false));
+  };
+  return (
+    <main className="center">
+      <h1>AgentTeam</h1>
+      <p role="alert">サーバーにつながりません。</p>
+      <p className="muted">ローカルなら app（pnpm dev）と DB（docker compose up -d db）が起動しているか確かめてください。</p>
+      <button type="button" className="btn btn-primary" onClick={retry} disabled={busy}>
+        {busy ? "確かめています…" : "もう一度試す"}
+      </button>
     </main>
   );
 }
@@ -97,7 +119,7 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const enterBy = async (call: () => ReturnType<typeof api.enter>) => {
+  const enterBy = async (call: () => ReturnType<typeof api.enter>, local = false) => {
     setBusy(true);
     setError(null);
     try {
@@ -107,14 +129,17 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
       await onSignedIn();
     } catch (err) {
       const status = (err as { status?: number }).status;
-      setError(status === 401 ? "トークンが違います" : "入れませんでした。時間をおいて試してください");
+      if (status === 401) setError("トークンが違います");
+      else if (local && status === 403) setError("トークンなしで入れるのはこのマシンからだけです");
+      else if (local) setError("トークンなしで入れませんでした。DB（docker compose up -d db）が起動しているか確かめてください");
+      else setError("入れませんでした。時間をおいて試してください");
     } finally {
       // 入れた直後の GET /session が失敗しても「入る」を押せるままにする（成功なら入口ごと消える）
       setBusy(false);
     }
   };
   const enterWith = (value: string) => enterBy(() => api.enter(value.trim()));
-  const enterLocal = () => enterBy(() => api.enterLocal());
+  const enterLocal = () => enterBy(() => api.enterLocal(), true);
 
   // ローカルの起動なら、開いたときにトークンなしで入る（本番では localEntry が来ない）
   useEffect(() => {
@@ -132,7 +157,7 @@ function Entry({ onSignedIn, localEntry }: { onSignedIn: () => Promise<void>; lo
   return (
     <main className="center">
       <h1>AgentTeam</h1>
-      <p className="muted">頼むだけで、あなたの担当が生まれる</p>
+      <p className="muted">あなただけの、エージェント。</p>
       {localEntry && (
         <button type="button" className="btn btn-primary" onClick={() => void enterLocal()} disabled={busy}>
           {busy ? "入っています…" : "トークンなしで入る（ローカル）"}
