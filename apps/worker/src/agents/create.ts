@@ -2,8 +2,9 @@
 // 流れ（LLM の呼び出しを DO のトランザクションの中でしない：G-14）：Worker の側（createAgentFromText）が
 // 1 DO：上限・冪等性・材料（prepareAgentCreate）→ 2 LLM：名前・role・コネクタとツール・1行の説明を決める（draftAgent）→ 3 DO：検証して保存（saveNewAgent）の順に進める。
 // - LLM の出力は zod で検証し、つながっていない・使えないコネクタとツールは捨てる（planner.ts の normalizeGrants）。名前は 2〜12文字。合わなければ作り直しは1回まで、それでも駄目なら既定の名前
-// - 費用の記録は callLlm の ledger に任せる。ただしこの時点ではエージェントの行がなく（usage_records は持ち主が要る）、
-//   呼び出しの記録は集めておき、保存の段でエージェントの ID を付けて同じトランザクションで残す
+// - 費用の記録は callLlm の ledger に任せる。ただしこの時点ではエージェントの行がなく（外部キーがあり仮の ID は入れられない）、
+//   呼び出しの記録は集めておき、保存の段でエージェントの ID を付けて同じトランザクションで残す。
+//   エージェントを作れなかった（LLM の失敗・読めない出力・保存の失敗）ときも使った費用は日ごとの上限に数えるので、持ち主なし（agent_id NULL・phase 'planner'）で残す
 
 import {
   AGENT_ROLES,
@@ -310,8 +311,8 @@ export function saveNewAgent(
   return { agent: { agentId: res.agent.id, name, role: draft.role, summary: draft.summary } };
 }
 
-/** LLM の呼び出しの記録に、できたエージェントの ID を付けて残す */
-export function recordCreateUsage(db: WsDb, agentId: Uuid, usage: readonly UsageRecordInput[], now: Date): void {
+/** LLM の呼び出しの記録に、できたエージェントの ID を付けて残す。null は作れなかったエージェントの費用（持ち主なし） */
+export function recordCreateUsage(db: WsDb, agentId: Uuid | null, usage: readonly UsageRecordInput[], now: Date): void {
   for (const u of usage) insertUsageRecord(db, { ...u, agentId }, now);
 }
 
@@ -339,7 +340,7 @@ export async function createAgentFromText(
   const materials = prep.body.materials;
   if (materials === null) throw new Error("材料がない");
 
-  // 費用の持ち主はこれから作るエージェント。記録は集めておき、保存の段で本物の ID を付けて残す（usage_records は持ち主の行が要る）
+  // 費用の持ち主はこれから作るエージェント。記録は集めておき、保存の段で本物の ID を付けて残す（作れなかったときは持ち主なしで残す）
   const usage: UsageRecordInput[] = [];
   const ledger: LlmLedger = {
     llmGate: (budgetEstimateMicroUsd, now) => ws.llmGate(budgetEstimateMicroUsd, now),
@@ -358,6 +359,8 @@ export async function createAgentFromText(
     };
     draft = await draftAgent(i.text, materials, { llm, model: modelForPurpose(config, "planner"), signal: controller.signal });
   } catch (e) {
+    // 呼んだ分の費用は失敗でも残す（上限に数える）。target の agentId は仮なので持ち主なしに置き換える。budget で断られたときは空
+    if (usage.length > 0) await ws.recordUnownedCreateUsage(usage, i.now());
     const failure = llmFailure(e, i.now());
     if (failure instanceof AppError) return captureAppError(() => { throw failure; });
     throw failure;

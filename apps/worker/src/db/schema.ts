@@ -885,6 +885,44 @@ CREATE TRIGGER agent_workspace_snapshots_immutable BEFORE UPDATE ON agent_worksp
   BEGIN SELECT RAISE(ABORT, 'agent_workspace_snapshots cannot be updated'); END;
 `;
 
+/**
+ * 3：usage_records の持ち主の決まりをゆるめる。エージェントの作成（POST /agents）のように、まだ持ち主の行がないワークスペースの設定の呼び出し
+ * （phase 'planner'）だけ、作れなかったときの費用を持ち主なしで残せるようにする。SQLite は CHECK を ALTER できないので作り直す
+ * （usage_records を参照する表・トリガーはない。外部キーは持つ側なので DROP しても他の表に響かない）
+ */
+const USAGE_OWNER_RELAX = `
+CREATE TABLE usage_records_new (
+  id                        TEXT    PRIMARY KEY,
+  task_id                   TEXT    REFERENCES tasks (id),
+  agent_id                  TEXT    REFERENCES agents (id),
+  ask_id                    TEXT    REFERENCES asks (id),
+  provider                  TEXT    NOT NULL,
+  model                     TEXT    NOT NULL,
+  phase                     TEXT    NOT NULL,
+  input_tokens              INTEGER NOT NULL,
+  output_tokens             INTEGER NOT NULL,
+  estimated_cost_micro_usd  INTEGER NOT NULL,
+  cost_micro_usd            INTEGER NOT NULL,
+  latency_ms                INTEGER NOT NULL,
+  prompt_hash               TEXT    NOT NULL,
+  created_at                TEXT    NOT NULL DEFAULT ${NOW},
+  CONSTRAINT usage_records_provider_check CHECK (${oneOf("provider", [
+    "google", "anthropic", "openai", "deepseek", "openrouter", "xai", "groq", "mistral", "together", "fireworks", "cerebras", "moonshot", "zai", "qwen", "custom",
+  ])}),
+  CONSTRAINT usage_records_model_check CHECK (${len("model", 1, 128)}),
+  CONSTRAINT usage_records_phase_check CHECK (${oneOf("phase", [
+    "plan", "investigate", "implement", "test", "summarize", "review", "report", "planner", "rehearsal_generate", "rehearsal_interpret", "rehearsal_tighten",
+  ])}),
+  CONSTRAINT usage_records_counts_check CHECK (input_tokens >= 0 AND output_tokens >= 0 AND estimated_cost_micro_usd >= 0 AND cost_micro_usd >= 0 AND latency_ms >= 0),
+  CONSTRAINT usage_records_owner_chk CHECK (task_id IS NOT NULL OR agent_id IS NOT NULL OR ask_id IS NOT NULL OR phase = 'planner')
+);
+INSERT INTO usage_records_new SELECT id, task_id, agent_id, ask_id, provider, model, phase, input_tokens, output_tokens, estimated_cost_micro_usd, cost_micro_usd, latency_ms, prompt_hash, created_at FROM usage_records;
+DROP TABLE usage_records;
+ALTER TABLE usage_records_new RENAME TO usage_records;
+CREATE INDEX usage_records_task_idx ON usage_records (task_id) WHERE task_id IS NOT NULL;
+CREATE INDEX usage_records_time_idx ON usage_records (created_at);
+`;
+
 /** 番号の順に当てる。当てたあとの中身は書き換えない（直すときは新しい番号を足す） */
 export const MIGRATIONS: ReadonlyArray<{ version: number; name: string; sql: string }> = [
   {
@@ -902,4 +940,5 @@ export const MIGRATIONS: ReadonlyArray<{ version: number; name: string; sql: str
     name: "workspace_tables",
     sql: [WORKSPACE, AUDIT, CONNECTORS, AGENTS, ASKS, TASKS, INTENTS, SKILLS_SANDBOX].join("\n"),
   },
+  { version: 3, name: "usage_records_unowned_planner", sql: USAGE_OWNER_RELAX },
 ];
