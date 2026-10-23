@@ -19,7 +19,7 @@ import { insertWorkspacePolicyIfMissing } from "./db/repo/app.ts";
 import { bumpPlannerAttempts, getAsk, getAskRun } from "./db/repo/asks.ts";
 import type { UsageRecordInput } from "./db/repo/edge.ts";
 import { MIGRATIONS } from "./db/schema.ts";
-import { all, wsDbOf, type WsDb } from "./db/sqlite.ts";
+import { wsDbOf, type WsDb } from "./db/sqlite.ts";
 import { getWorkspace, initWorkspace } from "./db/workspace.ts";
 import { captureEdge, type EdgeOutcome } from "./edge/fault.ts";
 import { llmGate, llmRecord, type LlmGate } from "./edge/llm-call.ts";
@@ -37,7 +37,6 @@ import {
 } from "./edge/task-edge.ts";
 import { llmOf } from "./llm.ts";
 import { runIdempotent, type IdemRequest } from "./idempotency.ts";
-import { engageKillSwitch, releaseKillSwitch, type KillSwitchEngageResponse, type KillSwitchReleaseResponse } from "./kill-switch.ts";
 import type { AgentLibraryResponse } from "./views/agents/contract.ts";
 import { buildAgentLibrary } from "./views/agents/view.ts";
 import type {
@@ -50,7 +49,7 @@ import type {
   ListAsksResponse,
 } from "./views/asks/contract.ts";
 import { buildAskDetail, listAskSummaries, listMessages } from "./views/asks/view.ts";
-import { captureAppError, type WriteResult } from "./write.ts";
+import type { WriteResult } from "./write.ts";
 
 export { MIGRATIONS };
 
@@ -266,7 +265,7 @@ export class WorkspaceDO extends DurableObject<Env> {
 
   // ---- LLM の呼び出しの記録（edge/llm-call.ts の callLlm の ledger） ----
 
-  /** 呼ぶ前の確かめ（Kill Switch・費用の上限） */
+  /** 呼ぶ前の確かめ（費用の上限） */
   llmGate(budgetEstimateMicroUsd: number, now: Date): LlmGate {
     return llmGate(this.db, budgetEstimateMicroUsd, now);
   }
@@ -274,28 +273,5 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** 費用の記録 */
   llmRecord(usage: UsageRecordInput, now: Date): void {
     llmRecord(this.db, usage, now);
-  }
-
-  /** EP-27：Kill Switch の発動 */
-  async engageKillSwitch(i: { userId: string; reason: string | null; idem: IdemRequest | null; now: Date }): Promise<WriteResult<KillSwitchEngageResponse>> {
-    // 動いている TaskWorkflow（provisioning・running のタスク）は、発動のあと止める（次の歩みを待たない）
-    const running = all<{ id: string }>(this.db, {}, "SELECT id FROM tasks WHERE status IN ('provisioning', 'running') AND ask_run_id IS NOT NULL");
-    const r = runIdempotent(this.db, i.idem, 200, i.now, () => engageKillSwitch(this.db, i));
-    if (r.ok && r.replayed !== true) {
-      for (const t of running) {
-        try {
-          await (await this.env.TASK_RUN.get(`task-${t.id}`)).terminate();
-        } catch (e) {
-          // もう終わっていれば止められない（タスクは halted にしてあるので、次の歩みの DO の確かめでも止まる）
-          console.warn("task.terminate_failed", { taskId: t.id, error: e instanceof Error ? e.message : String(e) });
-        }
-      }
-    }
-    return r;
-  }
-
-  /** EP-28：Kill Switch の解除 */
-  releaseKillSwitch(i: { userId: string; reason: string; now: Date }): WriteResult<KillSwitchReleaseResponse> {
-    return captureAppError(() => ({ status: 200, body: releaseKillSwitch(this.db, i) }));
   }
 }

@@ -10,8 +10,6 @@ const blob = "blob" as const;
 
 export const CODECS = {
   workspace: {
-    kill_switch_engaged: bool,
-    kill_switch_engaged_at: at,
     audit_last_hash: blob,
     created_at: at,
     updated_at: at,

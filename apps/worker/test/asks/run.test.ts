@@ -1,7 +1,6 @@
 // 編成の実行の DB 側（src/asks/run.ts）の試験：実行を始める（startAskRunTx）・1歩進める（advanceTx）・回答の保存。
 // apps/app/src/asks/run.test.ts のうち、タスクを動かさず DB だけで確かめられるもの（タスクの終わりは行を書き換えて作る）。
 // タスクを動かす部分（driveRun・executeTask など）は 4c で移すので、ここでは試さない
-import { AppError } from "@open-team/platform";
 import { describe, expect, it } from "vitest";
 import { startAskRunTx, advanceTx, askStatusFor } from "../../src/asks/run.ts";
 import { getAsk, getAskRun, listMembers, listRunTasks } from "../../src/db/repo/asks.ts";
@@ -35,15 +34,6 @@ function finishTask(db: WsDb, taskId: Uuid, report: string, kind: "normal" | "an
 
 function failTaskRow(db: WsDb, taskId: Uuid): void {
   run(db, "UPDATE tasks SET status = 'failed', fail_reason = 'agent_unable', started_at = ?, finished_at = ? WHERE id = ?", NOW, NOW, taskId);
-}
-
-function caught(fn: () => unknown): unknown {
-  try {
-    fn();
-  } catch (e) {
-    return e;
-  }
-  throw new Error("投げるはず");
 }
 
 describe("startAskRunTx", () => {
@@ -88,17 +78,6 @@ describe("startAskRunTx", () => {
       expect(startAskRunTx(db, askId, { requesterId: ws.userId, trigger: "initial", now: at(1) })).not.toBeNull();
       expect(startAskRunTx(db, askId, { requesterId: ws.userId, trigger: "manual", now: at(2) })).toBeNull();
     }));
-
-  it("Kill Switch 発動中は 423（実行も作らない）", () =>
-    inWorkspace(async (db, ws) => {
-      fxPolicy(db, NOW);
-      const { askId } = await formAsk(db, ws.userId, NOW, single);
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
-      const e = caught(() => startAskRunTx(db, askId, { requesterId: ws.userId, trigger: "initial", now: at(1) }));
-      expect(e).toBeInstanceOf(AppError);
-      expect(e).toMatchObject({ code: "KILL_SWITCH_ENGAGED" });
-      expect(auditTypes(db)).not.toContain("ask.run.started");
-    }));
 });
 
 describe("advanceTx", () => {
@@ -138,17 +117,6 @@ describe("advanceTx", () => {
       expect(advanceTx(db, started.run.id, { requesterId: ws.userId, now: at(2) })).toEqual({ tasks: [], runStatus: "waiting_input" });
       expect(listRunTasks(db, started.run.id)).toHaveLength(1);
       expect(getAsk(db, askId)?.status).toBe("waiting_input");
-    }));
-
-  it("Kill Switch 発動中は何も始めない", () =>
-    inWorkspace(async (db, ws) => {
-      fxPolicy(db, NOW);
-      const { askId } = await formAsk(db, ws.userId, NOW, chain(2));
-      const started = startAskRunTx(db, askId, { requesterId: ws.userId, trigger: "initial", now: at(1) })!;
-      finishTask(db, started.tasks[0]!.id, "1段目の結果");
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
-      expect(advanceTx(db, started.run.id, { requesterId: ws.userId, now: at(2) })).toEqual({ tasks: [], runStatus: null });
-      expect(listRunTasks(db, started.run.id)).toHaveLength(1);
     }));
 });
 

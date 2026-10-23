@@ -192,7 +192,7 @@ function screenKeyOf(route: Route): string {
 
 function Screens() {
   const route = useRoute();
-  const { counts, online, killSwitchEngaged } = useWorkspace();
+  const { counts, online } = useWorkspace();
   const titleOverride = useScreenTitleOverride();
   useViewportHeight();
   // 全画面共通の「頼む」シート（<main key> の外に持つので、画面を移っても生成は続く）
@@ -283,7 +283,7 @@ function Screens() {
         </button>
       )}
       {askSheetOpen && (
-        <AskComposerSheet gen={gen} onAskPage={route.name === "ask"} disabled={!online || killSwitchEngaged} onClose={closeAskSheet} />
+        <AskComposerSheet gen={gen} onAskPage={route.name === "ask"} disabled={!online} onClose={closeAskSheet} />
       )}
       <Notices />
     </div>

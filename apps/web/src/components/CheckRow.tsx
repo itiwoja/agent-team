@@ -76,10 +76,10 @@ export function CheckRow({ item, ...h }: { item: CheckItem } & RowHandlers) {
   }
 }
 
-/** 使えない条件：全部止めている・オフライン（○ を無効にする） */
+/** 使えない条件：オフライン（○ を無効にする） */
 function useBlocked(): boolean {
-  const { killSwitchEngaged, online } = useWorkspace();
-  return killSwitchEngaged || !online;
+  const { online } = useWorkspace();
+  return !online;
 }
 
 /** ○：48px のタップ領域に 28px の輪。送る前の確認は下に「送る」「許可」を文字でも出す */

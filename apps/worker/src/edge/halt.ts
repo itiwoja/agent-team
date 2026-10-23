@@ -12,7 +12,6 @@ import type { SpendDenied } from "./spend.ts";
 
 /** 止めた理由（tasks.halt_reason と、監査ログの中身） */
 export type HaltCause =
-  | { reason: "kill_switch" }
   | { reason: "budget_exceeded" | "timeout"; audit: JsonObject }
   | { reason: "breaker_tripped"; audit: JsonObject };
 
@@ -20,8 +19,6 @@ export type HaltCause =
 export function haltCauseOf(result: DecideResult): HaltCause | null {
   if (result.decision !== "halt") return null;
   switch (result.reasonCode) {
-    case "kill_switch":
-      return { reason: "kill_switch" };
     case "budget_exceeded": {
       const d = result.detail;
       if (d?.kind === "budget") {
@@ -74,13 +71,12 @@ function recordStatusChange(
 }
 
 /**
- * タスクを halted にする（トークンの失効・未実行の Intent と承認の失効・監査ログ）。Kill Switch の Intent は expired(kill_switch)、
- * ほかは expired(task_ended)（IA §8-7）。すでに終了状態なら何もしないで null
+ * タスクを halted にする（トークンの失効・未実行の Intent と承認の失効・監査ログ）。Intent は expired(task_ended)（IA §8-7）。すでに終了状態なら何もしないで null
  */
 export function haltTask(db: WsDb, task: Pick<TaskRow, "id" | "status">, cause: HaltCause, now: Date): TaskRow | null {
   const ended = endTask(db, task.id, { status: "halted", haltReason: cause.reason as HaltReason }, now);
   if (ended === null) return null;
-  const expired = expireOpenIntentsOfTask(db, task.id, cause.reason === "kill_switch" ? "kill_switch" : "task_ended", now);
+  const expired = expireOpenIntentsOfTask(db, task.id, "task_ended", now);
   recordStatusChange(db, task.status, ended, { haltReason: cause.reason, expiredIntents: expired.intentIds.length }, now, { type: "system", id: "edge" });
   if (cause.reason === "budget_exceeded" || cause.reason === "timeout") {
     appendAuditLog(db, { eventType: "budget.exceeded", actorType: "system", actorId: "edge", taskId: task.id, payload: { taskId: task.id, ...cause.audit } }, now);

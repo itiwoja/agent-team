@@ -25,7 +25,6 @@ import type {
   ToolHash,
   Uuid,
 } from "../types.ts";
-import { requireWorkspace } from "../workspace.ts";
 
 /** gateway が監査ログ・事象に書く行為者（actor_type = system） */
 export const GATEWAY_ACTOR = { actorType: "system" as ActorType, actorId: "gateway" } as const;
@@ -51,18 +50,17 @@ export interface GatewayTask {
   readonly agentId: Uuid;
   readonly status: TaskStatus;
   readonly isDryRun: boolean;
-  readonly killSwitchEngaged: boolean;
 }
 
 export type TaskTokenResolution =
   | { ok: true; task: GatewayTask }
   | { ok: false; error: "UNAUTHORIZED" }
-  /** 終了状態・Kill Switch（409 TASK_HALTED：AS §3.17 EP-49 の1） */
-  | { ok: false; error: "TASK_HALTED"; haltReason: "kill_switch" | "task_terminated"; task: GatewayTask };
+  /** 終了状態（409 TASK_HALTED：AS §3.17 EP-49 の1） */
+  | { ok: false; error: "TASK_HALTED"; haltReason: "task_terminated"; task: GatewayTask };
 
 /**
  * X-Task-Token からタスクを引き直す（SO §3.10 resolveTaskByToken、DB §4.1 の3）。
- * 空・長すぎる・知らない・期限切れ（期限ちょうども無効）→ UNAUTHORIZED、Kill Switch・終了状態 → TASK_HALTED
+ * 空・長すぎる・知らない・期限切れ（期限ちょうども無効）→ UNAUTHORIZED、終了状態 → TASK_HALTED
  */
 export function resolveTaskByToken(db: WsDb, rawToken: string | null | undefined, now: Date): TaskTokenResolution {
   if (typeof rawToken !== "string" || rawToken.trim() === "" || rawToken.length > TASK_TOKEN_MAX_LENGTH) {
@@ -76,16 +74,13 @@ export function resolveTaskByToken(db: WsDb, rawToken: string | null | undefined
     now,
   );
   if (!row) return { ok: false, error: "UNAUTHORIZED" };
-  const ws = requireWorkspace(db);
   const task: GatewayTask = {
     taskId: row.id,
     jobId: row.job_id,
     agentId: row.agent_id,
     status: row.status,
     isDryRun: row.is_dry_run,
-    killSwitchEngaged: ws.kill_switch_engaged,
   };
-  if (ws.kill_switch_engaged) return { ok: false, error: "TASK_HALTED", haltReason: "kill_switch", task };
   if (TERMINAL.includes(row.status)) return { ok: false, error: "TASK_HALTED", haltReason: "task_terminated", task };
   return { ok: true, task };
 }
@@ -526,9 +521,4 @@ export function listTaskAuditEvents(db: WsDb, taskId: Uuid): ProvenanceAuditEven
     "SELECT seq, occurred_at, event_type, actor_type, actor_id, payload FROM audit_logs WHERE task_id = ? ORDER BY seq",
     taskId,
   );
-}
-
-/** Kill Switch の発動（killswitch.engaged）の seq。古い順。発動は未実行の Intent と承認待ちを一括で失効させる（行ごとの監査ログはない） */
-export function listKillSwitchEngagedSeqs(db: WsDb): number[] {
-  return all<{ seq: number }>(db, {}, "SELECT seq FROM audit_logs WHERE event_type = 'killswitch.engaged' ORDER BY seq").map((x) => x.seq);
 }

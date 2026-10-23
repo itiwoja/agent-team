@@ -1,6 +1,5 @@
 // AppHeader：左は ≡（メニュー：入口・依頼・チェック・担当・パック）、真ん中はひとつ上へ戻る矢印（行き先は lib/screen.ts の backOf。入口自体では出さない）。
 // 右はチェックのシートを開くボタン（件数の印つき。0件のときは控えめに出す）。チェックの画面自身では出さず、左と同じ幅の空きにして真ん中を中央に保つ。
-// 全部止めている間は帯で知らせる。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { AskSummary } from "../api";
 import { filterOf } from "../lib/askList";
@@ -15,7 +14,7 @@ import { AgentsIcon, BackIcon, CalendarIcon, CheckIcon, Chevron, CloseIcon, Comp
 import { useWorkspace } from "../workspace";
 
 export function AppHeader({ back }: { back: { to: string; label: string } | null }) {
-  const { killSwitchEngaged, online, counts } = useWorkspace();
+  const { online, counts } = useWorkspace();
   const route = useRoute();
   const attention = counts?.attention ?? 0;
   const [menuOpen, setMenuOpen] = useState(false);
@@ -108,11 +107,6 @@ export function AppHeader({ back }: { back: { to: string; label: string } | null
           <span className="appheader-spacer" aria-hidden="true" />
         )}
       </header>
-      {killSwitchEngaged && (
-        <p className="banner banner-danger" role="status">
-          全部止めています
-        </p>
-      )}
       {!online && (
         <p className="banner banner-muted" role="status">
           つながっていません

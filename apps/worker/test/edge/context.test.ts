@@ -104,17 +104,17 @@ describe("edgeTaskContext（API-036）", () => {
     });
   });
 
-  it("SO §3.10：見つからない・空の taskId → UNAUTHORIZED、Kill Switch 中 → TASK_HALTED（状態は変えない）", async () => {
+  it("SO §3.10：見つからない・空の taskId → UNAUTHORIZED、終了状態 → TASK_HALTED（状態は変えない）", async () => {
     await inWorkspace(async (db, ws) => {
       const { inbox } = chain(db, ws);
       const taskId = seedTask(db, ws, inbox, "read-supplier-mail");
       const { rt } = buildEdge(db);
       await expectEdgeError(() => edgeTaskContext(db, rt, "no-such-task", T0), "UNAUTHORIZED");
       await expectEdgeError(() => edgeTaskContext(db, rt, "", T0), "UNAUTHORIZED");
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", T0);
+      run(db, "UPDATE tasks SET status = 'cancelled', finished_at = ? WHERE id = ?", T0, taskId);
       const e = await expectEdgeError(() => edgeTaskContext(db, rt, taskId, T0), "TASK_HALTED");
-      expect(e.details).toMatchObject({ haltReason: "kill_switch" });
-      expect(one<{ status: string }>(db, {}, "SELECT status FROM tasks WHERE id = ?", taskId)!.status).toBe("queued");
+      expect(e.details).toMatchObject({ haltReason: "task_terminated" });
+      expect(one<{ status: string }>(db, {}, "SELECT status FROM tasks WHERE id = ?", taskId)!.status).toBe("cancelled");
     });
   });
 });

@@ -39,8 +39,6 @@ export function describeError(e: unknown): string {
       return "つながっていません";
     case "UNAUTHORIZED":
       return "もう一度入り直してください";
-    case "KILL_SWITCH_ENGAGED":
-      return "全部止めているので、いまはできません";
     case "APPROVAL_NOT_PENDING":
       return "すでに決まっているか、期限が切れました";
     case "INTENT_CHANGED":
@@ -171,7 +169,6 @@ export interface WorkspaceView {
   role: "owner" | "maintainer" | "viewer" | string;
   timezone: string;
   maxConcurrentTasks: number;
-  killSwitch: { engaged: boolean; engagedAt: string | null; engagedBy: string | null; reason: string | null };
   budget: { todayCostUsd: string; perDayUsd: string; remainingUsd: string };
   /** Google カレンダー（available＝この環境で使えるか。connected・email＝つながっているか） */
   google: { available: boolean; connected: boolean; email: string | null };
@@ -571,7 +568,6 @@ export interface CheckResponse {
   items: CheckItem[];
   running: RunningItem[];
   counts: CheckCounts;
-  killSwitch: { engaged: boolean };
   focus: string | null;
 }
 
@@ -741,9 +737,8 @@ export interface AuditVerifyResult {
 // ---------------------------------------------------------------------------
 // ワークスペースの SSE（EP-45）
 
-/** 受ける事象の名前（check/contract.ts の CHECK_EVENT_TYPES・asks/contract.ts の ASK_EVENT_TYPES・Kill Switch） */
+/** 受ける事象の名前（check/contract.ts の CHECK_EVENT_TYPES・asks/contract.ts の ASK_EVENT_TYPES） */
 const EVENT_TYPES = [
-  "killswitch",
   "reset",
   "check.upsert",
   "check.remove",
@@ -823,10 +818,6 @@ export const api = {
   disconnectGithub: () => request<void>("DELETE", "/connect/github"),
   /** main・既定のブランチへの直接の書き込みの許可を切り替える */
   setGithubProtectedWrite: (allow: boolean) => request<{ allowProtectedWrite: boolean }>("PUT", "/connect/github/protected-write", { body: { allow } }),
-
-  // 全部止める（EP-27）
-  engageKillSwitch: (workspaceId: string, reason: string | null, idempotencyKey: string) =>
-    request<unknown>("POST", `${ws(workspaceId)}/kill-switch`, { body: reason ? { reason } : {}, idempotencyKey }),
 
   // チェック・承認（check/contract.ts）
   counts: () => request<CheckCounts>("GET", "/counts"),

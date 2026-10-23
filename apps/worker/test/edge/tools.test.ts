@@ -200,19 +200,17 @@ describe("TaskWorkflow の前後（finishTaskRun・haltQueuedTask）", () => {
     });
   });
 
-  it("haltQueuedTask：queued のときだけ halted（kill_switch／budget_exceeded／timeout）。ほかは触らない", async () => {
+  it("haltQueuedTask：queued のときだけ halted（budget_exceeded／timeout）。ほかは触らない", async () => {
     await inWorkspace((db, ws) => {
       seedConnectors(db);
       const agent = seedAgent(db, supplierDefinition());
-      const k = seedTask(db, ws, agent, "reorder");
       const b = seedTask(db, ws, agent, "reorder");
       const t = seedTask(db, ws, agent, "reorder");
       const r = seedTask(db, ws, agent, "reorder", { status: "running" });
-      haltQueuedTask(db, k, "kill_switch", T0);
       haltQueuedTask(db, b, "budget", T0);
       haltQueuedTask(db, t, "timeout", T0);
-      haltQueuedTask(db, r, "kill_switch", T0);
-      expect([k, b, t, r].map((id) => taskOf(db, id).halt_reason)).toEqual(["kill_switch", "budget_exceeded", "timeout", null]);
+      haltQueuedTask(db, r, "budget", T0);
+      expect([b, t, r].map((id) => taskOf(db, id).halt_reason)).toEqual(["budget_exceeded", "timeout", null]);
       expect(taskOf(db, r).status).toBe("running");
       const budget = all<{ payload: string }>(db, {}, "SELECT payload FROM audit_logs WHERE event_type = 'budget.exceeded'").map((x) => JSON.parse(x.payload));
       expect(budget).toEqual([expect.objectContaining({ taskId: b, scope: "ask_start", gate: "budget" }), expect.objectContaining({ taskId: t, scope: "ask_start", gate: "timeout" })]);

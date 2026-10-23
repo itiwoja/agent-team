@@ -3,9 +3,9 @@
 //   advanceTx（1つのトランザクション）が「担当のタスクを作る（queued）・実行と依頼の状態・回答・SSE の事象」を書く。
 //   タスクはトランザクションの外で動かす（外部を呼ぶのはトランザクションの外：G-14）。
 // Node 版との違い：
-// - どれも DO の中で呼ぶ同期の関数。ワークスペースの行のロック（lockWorkspace）は要らない（DO の中は1本の流れ）。Kill Switch は同じトランザクションの中で読む
+// - どれも DO の中で呼ぶ同期の関数。ワークスペースの行のロック（lockWorkspace）は要らない（DO の中は1本の流れ）
 // - 実行を始めるのは startAskRunTx（beginRunTx と最初の advanceTx を1つのトランザクションで）。作ったタスクを返すので、呼ぶ側がそれを動かす
-// - タスクを動かす部分（driveRun・executeTask・startWhenRoom・追いのターン・順番待ちの返事・再開・Kill Switch の後始末）はここにない（第4段の 4c で移す）
+// - タスクを動かす部分（driveRun・executeTask・startWhenRoom・追いのターン・順番待ちの返事・再開）はここにない（第4段の 4c で移す）
 
 import { taintFromInputs } from "@open-team/kernel";
 import { AppError } from "@open-team/platform";
@@ -165,12 +165,11 @@ export interface StepResult {
 
 /**
  * 実行を1歩進める（1つのトランザクション）：評価 → 作るタスク → 実行・依頼の状態 → 回答。
- * Kill Switch 発動中は何も始めない（状態は Kill Switch の後始末が cancelled にする）。動いていない実行は何もしない
+ * 動いていない実行は何もしない
  */
 export function advanceTx(db: WsDb, runId: Uuid, o: { requesterId: Uuid; now: Date; aggregatorWaitMs?: number; reply?: string; replyOf?: Uuid }): StepResult {
   return db.transaction((): StepResult => {
-    const ws = getWorkspace(db);
-    if (ws === null || ws.kill_switch_engaged) return { tasks: [], runStatus: null };
+    if (getWorkspace(db) === null) return { tasks: [], runStatus: null };
     const s = loadState(db, runId);
     if (s === null || s.run.status !== "running") return { tasks: [], runStatus: null };
     const plan = evaluateRun({
@@ -245,12 +244,10 @@ export function advanceTx(db: WsDb, runId: Uuid, o: { requesterId: Uuid; now: Da
 
 // ---- 実行を始める ----
 
-/** 実行を始めるトランザクションの中身。動いている実行があれば null。Kill Switch 発動中は 423（KILL_SWITCH_ENGAGED） */
+/** 実行を始めるトランザクションの中身。動いている実行があれば null */
 export function beginRunTx(db: WsDb, askId: Uuid, trigger: AskRunTrigger, now: Date): AskRunRow | null {
   return db.transaction(() => {
-    const ws = getWorkspace(db);
-    if (ws === null) throw new AppError("NOT_FOUND");
-    if (ws.kill_switch_engaged) throw new AppError("KILL_SWITCH_ENGAGED");
+    if (getWorkspace(db) === null) throw new AppError("NOT_FOUND");
     const ask = getAsk(db, askId);
     if (ask === null) throw new AppError("NOT_FOUND");
     if (ask.status !== "running" && ask.status !== "done") return null;
@@ -268,7 +265,7 @@ export function beginRunTx(db: WsDb, askId: Uuid, trigger: AskRunTrigger, now: D
 
 /**
  * 本番の実行を始める（初回・手動・定期・返事）：実行の行を作り、最初の1歩（advanceTx）で担当のタスクを queued で作る。1つのトランザクション。
- * 動いている実行があれば始めず null。Kill Switch 発動中は 423（KILL_SWITCH_ENGAGED）。
+ * 動いている実行があれば始めず null。
  * Node 版の startAskRun の DB 側（driveRun の最初の歩みまで）。作ったタスクを動かすのは呼ぶ側（4c）
  */
 export function startAskRunTx(

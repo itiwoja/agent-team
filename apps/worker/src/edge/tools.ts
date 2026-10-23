@@ -17,7 +17,6 @@ import { touchSkillUsed } from "../db/repo/evolution.ts";
 import { listAgentSkills } from "../db/repo/sandbox.ts";
 import type { WsDb } from "../db/sqlite.ts";
 import type { PolicyDecisionRow, ReportSource, TaskRow } from "../db/types.ts";
-import { getWorkspace } from "../db/workspace.ts";
 import { DEFERRED_TOOLS } from "./context.ts";
 import { finalizeTaskAfterLoop } from "./halt.ts";
 import { forgetTask, type TaskEdgeRuntime } from "./runtime.ts";
@@ -184,10 +183,9 @@ export function edgeCallTool(db: WsDb, rt: TaskEdgeRuntime, taskId: string, tool
 
   // 実行を1回だけ受け付ける（DO の中は1本の流れなので、確かめて記録するまでに同じ呼び出しが割り込まない）
   db.transaction(() => {
-    const ws = getWorkspace(db);
     const t = getTask(db, task.id);
     if (t === null) throw new EdgeError("UNAUTHORIZED");
-    if (t.status !== "running" || ws?.kill_switch_engaged === true) throw new EdgeError("TASK_HALTED", haltedDetails(t, ws ?? undefined));
+    if (t.status !== "running") throw new EdgeError("TASK_HALTED", haltedDetails(t));
     if (!claimToolCallExecution(db, t.id, { toolCallId, name: call.name }, now)) throw new EdgeError("TOOL_CALL_NOT_ALLOWED", { reason: "already_executed" });
   });
 

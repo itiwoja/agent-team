@@ -27,18 +27,18 @@ export interface ResolvedTask {
 }
 
 /** TASK_HALTED の details（runner は details.haltReason を読む） */
-export function haltedDetails(task: Pick<TaskRow, "status" | "halt_reason" | "fail_reason">, workspace?: Pick<WorkspaceRow, "kill_switch_engaged">): {
+export function haltedDetails(task: Pick<TaskRow, "status" | "halt_reason" | "fail_reason">): {
   haltReason: string;
   status: TaskStatus;
 } {
   const haltReason =
-    task.halt_reason ?? (workspace?.kill_switch_engaged ? "kill_switch" : null) ?? task.fail_reason ?? (TERMINAL.has(task.status) ? "task_terminated" : task.status);
+    task.halt_reason ?? task.fail_reason ?? (TERMINAL.has(task.status) ? "task_terminated" : task.status);
   return { haltReason, status: task.status };
 }
 
 /**
  * taskId からタスクを引き直す（SO §3.10 resolveTaskByToken の代わり）。
- * 空・形が違う・見つからない・報告が保存済み → 401 UNAUTHORIZED。終了状態・Kill Switch 発動中 → 409 TASK_HALTED。
+ * 空・形が違う・見つからない・報告が保存済み → 401 UNAUTHORIZED。終了状態 → 409 TASK_HALTED。
  * allow（既定は running だけ）にない状態も TASK_HALTED（LLM の呼び出しは running のタスクだけ：si:106）。
  * now は Node 版のトークンの期限の確かめに使っていた（max_minutes の超過は decide(llm_call) の timeout が止める）
  */
@@ -48,7 +48,6 @@ export function resolveTask(db: WsDb, taskId: unknown, now: Date, allow: readonl
   const task = getTask(db, taskId);
   const workspace = getWorkspace(db);
   if (task === null || workspace === null || task.report !== null) throw new EdgeError("UNAUTHORIZED");
-  if (TERMINAL.has(task.status) || workspace.kill_switch_engaged) throw new EdgeError("TASK_HALTED", haltedDetails(task, workspace));
-  if (!allow.includes(task.status)) throw new EdgeError("TASK_HALTED", haltedDetails(task, workspace));
+  if (TERMINAL.has(task.status) || !allow.includes(task.status)) throw new EdgeError("TASK_HALTED", haltedDetails(task));
   return { task, workspace };
 }

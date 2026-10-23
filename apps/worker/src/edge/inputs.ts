@@ -3,7 +3,7 @@
 // subject.tool ＝ connector_tools＋connectors.enabled から effectiveArgRoles ／ stepsUsed・costUsd・deniedCount・repeat* ＝ tasks ／
 // dayCostUsd ＝ ワークスペースの Asia/Tokyo の当日の usage_records ／ agentDayCostUsd ＝ 当日のうち agent_id か task のエージェントが同じもの ／
 // elapsedSec ＝ floor(now − started_at) ／ intentsCount ＝ そのタスクの action_intents の行数 ／
-// unknownOutcomeKeys ＝ 同じ job_id のタスク ／ flags ＝ ワークスペースの行の Kill Switch ／ taint ＝ tasks.tainted・taint_sources
+// unknownOutcomeKeys ＝ 同じ job_id のタスク ／ flags ＝ タスクの状態 ／ taint ＝ tasks.tainted・taint_sources
 // Node 版との違い：どれも同期。ワークスペースの行のロック（M-21）は要らない（DO の中は1本の流れ）。金額はマイクロドルの整数から USD の数にする
 
 import {
@@ -167,7 +167,7 @@ export interface LoadDecideOptions {
   taskPolicy?: TaskPolicy;
 }
 
-/** 判定の入力のうち subject によらないもの。呼ぶ側のトランザクションの中で（Kill Switch はそのトランザクションの中で読む） */
+/** 判定の入力のうち subject によらないもの。呼ぶ側のトランザクションの中で */
 export function loadDecideBase(db: WsDb, task: TaskRow, now: Date, opts: LoadDecideOptions = {}): DecideBase {
   const workspace = getWorkspace(db);
   if (workspace === null) throw new EdgeDataError("ワークスペースの行がない");
@@ -193,7 +193,8 @@ export function loadDecideBase(db: WsDb, task: TaskRow, now: Date, opts: LoadDec
       intentsCount,
       unknownOutcomeKeys,
     },
-    flags: { killSwitchEngaged: workspace.kill_switch_engaged, taskStatus: task.status },
+    // 全部止める仕組みはない。kernel（Node 版と共有）の入力の形に合わせて常に false を渡す
+    flags: { killSwitchEngaged: false, taskStatus: task.status },
     taint: { tainted: task.tainted, sources: Array.isArray(task.taint_sources) ? task.taint_sources : [] },
   };
 }

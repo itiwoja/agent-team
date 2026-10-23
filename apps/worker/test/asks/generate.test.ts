@@ -3,7 +3,6 @@
 // 時間切れ・登録簿の中断は Workflow 側（4b の残り）なので、ここでは failureReasonOf の対応だけを見る
 import { defaultWorkspacePolicy } from "@open-team/kernel";
 import { ScriptedLlmClient } from "@open-team/llm";
-import { AppError } from "@open-team/platform";
 import { describe, expect, it } from "vitest";
 import {
   closeFailedStart,
@@ -159,22 +158,6 @@ describe("materializeFormation", () => {
       expect(materializeFormation(db, { askId, requesterId: ws.userId, planned: plan.formation, now: NOW })).toBeNull();
       expect(count(db, "SELECT count(*) FROM agents")).toBe(0);
     }));
-
-  it("Kill Switch 発動中は kill_switch（何も作らない）", () =>
-    inWorkspace(async (db, ws) => {
-      fxPolicy(db, NOW);
-      const askId = generating(db, ws);
-      const mats = loadPlannerMaterials(db, askId)!;
-      const plan = await planFormation(mats.input, { llm: new ScriptedLlmClient([jsonReply({ formation: { shape: "single", members: [draftMember({ newName: "調べ屋" })] } })]), model: "m" });
-      if (plan.kind !== "formation") throw new Error("編成のはず");
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
-      const e = caught(() => materializeFormation(db, { askId, requesterId: ws.userId, planned: plan.formation, now: NOW }));
-      expect(e).toBeInstanceOf(AskPlanError);
-      expect(e).toMatchObject({ code: "kill_switch" });
-      expect(failureReasonOf(e, false)).toBe("kill_switch");
-      expect(count(db, "SELECT count(*) FROM agents")).toBe(0);
-      expect(getAsk(db, askId)?.status).toBe("generating");
-    }));
 });
 
 describe("failGeneration・failureReasonOf", () => {
@@ -196,10 +179,9 @@ describe("failGeneration・failureReasonOf", () => {
   it("理由の対応：AskPlanError の code・LlmCallError の kind・時間切れ", () => {
     const llmErr = (kind: string) => Object.assign(new Error("x"), { name: "LlmCallError", kind });
     expect(failureReasonOf(new AskPlanError("agent_limit", "x"), true)).toBe("agent_limit");
-    expect(failureReasonOf(llmErr("kill_switch"), false)).toBe("kill_switch");
     expect(failureReasonOf(llmErr("budget"), false)).toBe("budget_exceeded");
     expect(failureReasonOf(llmErr("aborted"), true)).toBe("timeout");
-    expect(failureReasonOf(llmErr("aborted"), false)).toBe("kill_switch");
+    expect(failureReasonOf(llmErr("aborted"), false)).toBe("planner_error");
     expect(failureReasonOf(llmErr("llm"), false)).toBe("planner_error");
     expect(failureReasonOf(llmErr("unpriced_model"), true)).toBe("planner_error");
     expect(failureReasonOf(new Error("x"), true)).toBe("timeout");
@@ -215,15 +197,6 @@ describe("編成のあと実行を始められなかったとき（closeFailedSt
     return askId;
   }
   const statuses = (db: WsDb) => events(db, "ask.status").map((e) => e.data.status);
-
-  it("Kill Switch で止まったら running → cancelled（SSE も出す）", () =>
-    inWorkspace((db, ws) => {
-      const askId = runningAsk(db, ws);
-      closeFailedStart(db, { askId, error: new AppError("KILL_SWITCH_ENGAGED"), now: NOW, secrets: [] });
-      expect(getAsk(db, askId)).toMatchObject({ status: "cancelled" });
-      expect(statuses(db)).toEqual(["cancelled"]);
-      expect(auditTypes(db)).toContain("ask.cancelled");
-    }));
 
   it("そのほかの失敗は running → failed（SSE も出す）", () =>
     inWorkspace((db, ws) => {

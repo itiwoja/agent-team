@@ -1,4 +1,4 @@
-// ログイン後の共通の状態：ワークスペース・Kill Switch・件数・オンライン・SSE の事象の配り
+// ログイン後の共通の状態：ワークスペース・件数・オンライン・SSE の事象の配り
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { api, subscribeWorkspace, type CheckCounts, type Me, type WorkspaceView } from "./api";
 
@@ -7,9 +7,6 @@ type Listener = (type: string, data: unknown) => void;
 interface WorkspaceContextValue {
   me: Me;
   workspace: WorkspaceView;
-  killSwitchEngaged: boolean;
-  /** 全部止めた直後に画面を先に切り替える（事象が届けば同じ値になる） */
-  setKillSwitchEngaged: (engaged: boolean) => void;
   online: boolean;
   counts: CheckCounts | null;
   refreshCounts: () => void;
@@ -42,7 +39,6 @@ export function useWorkspaceEvent(handler: Listener): void {
 
 export function WorkspaceProvider({ me, onSignedOut, children }: { me: Me; onSignedOut: () => void; children: ReactNode }) {
   const workspaceId = me.workspace.id;
-  const [engaged, setEngaged] = useState(me.workspace.killSwitch.engaged);
   const [counts, setCounts] = useState<CheckCounts | null>(null);
   const [browserOnline, setBrowserOnline] = useState(() => navigator.onLine);
   const [streamDown, setStreamDown] = useState(false);
@@ -92,7 +88,6 @@ export function WorkspaceProvider({ me, onSignedOut, children }: { me: Me; onSig
       // 切れてすぐではなく、猶予（8 秒）の間につながらなかったとき（ブラウザの自動のつなぎ直し中は出さない）
       onDown: () => setStreamDown(true),
       onEvent: (type, data) => {
-        if (type === "killswitch" && data && typeof data === "object") setEngaged(Boolean((data as { engaged?: unknown }).engaged));
         if (type === "check.counts" && data && typeof data === "object") {
           // 件数そのものが届いたので、取り直さない
           setCounts(data as CheckCounts);
@@ -119,8 +114,6 @@ export function WorkspaceProvider({ me, onSignedOut, children }: { me: Me; onSig
     () => ({
       me,
       workspace: me.workspace,
-      killSwitchEngaged: engaged,
-      setKillSwitchEngaged: setEngaged,
       online: browserOnline && !streamDown,
       counts,
       refreshCounts,
@@ -131,7 +124,7 @@ export function WorkspaceProvider({ me, onSignedOut, children }: { me: Me; onSig
       github,
       setGithub,
     }),
-    [me, engaged, browserOnline, streamDown, counts, refreshCounts, subscribe, signOut, google, github],
+    [me, browserOnline, streamDown, counts, refreshCounts, subscribe, signOut, google, github],
   );
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;
 }

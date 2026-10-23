@@ -9,7 +9,6 @@ import { appendAuditLog } from "../audit.ts";
 import { CODECS } from "../codecs.ts";
 import { all, newId, one, run, type WsDb } from "../sqlite.ts";
 import type { AgentEvolutionEventRow, AgentSkillRow, EffectivePolicies, EvolutionItem, SkillProposalRow, Uuid } from "../types.ts";
-import { requireWorkspace } from "../workspace.ts";
 
 // ---- スキル ----
 
@@ -380,12 +379,11 @@ export interface EvolutionTarget {
 }
 
 /**
- * スキルの案を作る候補：Kill Switch でなければ、removed でない担当で、
+ * スキルの案を作る候補：removed でない担当で、
  * 最後の案（skipped を含む。なければ最初から）より後・windowMs 以内に終わった本番の成功タスクが minTasks 件以上のもの。
  * 未決定の案（proposed）がある担当は除く（人が決めるまで次の案は作らない。除かないと limit の枠を占め続ける）
  */
 export function scanAgentsForSkillLearning(db: WsDb, now: Date, o: { minTasks?: number; windowMs?: number; limit: number }): EvolutionTarget[] {
-  if (requireWorkspace(db).kill_switch_engaged) return [];
   const since = new Date(now.getTime() - (o.windowMs ?? EVOLUTION_DEFAULTS.windowMs));
   return all<{ agent_id: Uuid }>(
     db,
@@ -411,12 +409,11 @@ export function scanAgentsForSkillLearning(db: WsDb, now: Date, o: { minTasks?: 
 }
 
 /**
- * 整理の候補：Kill Switch でなければ、removed でない担当で、
+ * 整理の候補：removed でない担当で、
  * 外す候補のスキル（idleMs より使われていない）があるか、今の定義にルール（rules[]）があるもの。
  * ルールの期限の判定はアプリ側（rules を持つ担当を返すだけ）
  */
 export function scanAgentsForPruning(db: WsDb, now: Date, o: { idleMs?: number; limit: number }): EvolutionTarget[] {
-  if (requireWorkspace(db).kill_switch_engaged) return [];
   const before = new Date(now.getTime() - (o.idleMs ?? EVOLUTION_DEFAULTS.idleMs));
   return all<{ agent_id: Uuid }>(
     db,

@@ -33,7 +33,6 @@ export interface FxWorkspace {
 
 export interface FxWorkspaceOptions {
   now?: Date;
-  killSwitchEngaged?: boolean;
   maxConcurrentTasks?: number;
 }
 
@@ -81,16 +80,7 @@ export function fxWorkspace(db: WsDb, o: FxWorkspaceOptions = {}): FxWorkspace {
   const now = o.now ?? FIXED_NOW;
   const ws = { workspaceId: newId(), userId: newId() };
   initWorkspace(db, { workspaceId: ws.workspaceId, ownerUserId: ws.userId, now });
-  if (o.killSwitchEngaged || o.maxConcurrentTasks !== undefined) {
-    run(
-      db,
-      `UPDATE workspace SET kill_switch_engaged = ?, kill_switch_engaged_at = CASE WHEN ? THEN ? END, max_concurrent_tasks = ? WHERE id = 1`,
-      o.killSwitchEngaged ?? false,
-      o.killSwitchEngaged ?? false,
-      now,
-      o.maxConcurrentTasks ?? 3,
-    );
-  }
+  if (o.maxConcurrentTasks !== undefined) run(db, "UPDATE workspace SET max_concurrent_tasks = ? WHERE id = 1", o.maxConcurrentTasks);
   return ws;
 }
 
@@ -292,7 +282,7 @@ export function fxTask(db: WsDb, ws: FxWorkspace, agent: FxAgent, o: FxTaskOptio
     o.tainted ?? false,
     o.tainted ? [{ kind: "web_search", at: now.toISOString() }] : [],
     status,
-    status === "halted" ? "kill_switch" : null,
+    status === "halted" ? "budget_exceeded" : null,
     status === "failed" ? "agent_unable" : null,
     status === "queued" ? null : now,
     terminal ? now : null,

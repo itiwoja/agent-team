@@ -1,4 +1,4 @@
-// 画面の API（/api/v1/*）の書き込みの経路：POST /asks・/asks/:id/answer・Kill Switch の発動と解除（routes/ → WorkspaceDO の RPC）。
+// 画面の API（/api/v1/*）の書き込みの経路：POST /asks・/asks/:id/answer（routes/ → WorkspaceDO の RPC）。
 // ログインしたセッションは D1 に直接作り（ensureUser・issueSession）、DO の中の行は fixtures で入れて読む
 import { env } from "cloudflare:workers";
 import { describe, expect, it } from "vitest";
@@ -7,7 +7,7 @@ import { ensureUser, issueSession } from "../src/auth/session.ts";
 import { all, count, newId, run } from "../src/db/sqlite.ts";
 import { createApp } from "../src/index.ts";
 import { AskAcceptedResponseSchema, ListAsksResponseSchema } from "../src/views/asks/contract.ts";
-import { fxAgent, fxAsk, fxTask, fxUsage, inNamedWorkspace, type FxWorkspace } from "./db/fixtures.ts";
+import { fxAgent, fxAsk, fxUsage, inNamedWorkspace, type FxWorkspace } from "./db/fixtures.ts";
 
 const NOW = new Date("2026-10-22T09:00:00.000Z");
 const ORIGIN = "https://makase.test";
@@ -151,45 +151,5 @@ describe("POST /asks/:id/answer", () => {
     expect(again.status).toBe(409);
     expect((await errorOf(again)).code).toBe("ASK_NOT_WAITING");
     expect((await post(`/asks/${newId()}/answer`, who, { choiceId: "c1" })).status).toBe(404);
-  });
-});
-
-describe("Kill Switch", () => {
-  it("発動で動いているタスクを止め、依頼は 423 になる。発動中の発動は何も増やさない。解除すると依頼できる", async () => {
-    const who = await signIn("kill");
-    const taskId = await inNamedWorkspace(who.ws, (db, ws) => fxTask(db, ws, fxAgent(db), { status: "running", now: NOW }).taskId);
-    const path = `/workspaces/${who.ws.workspaceId}/kill-switch`;
-
-    const on = await post(path, who, { reason: "様子が変" });
-    expect(on.status).toBe(200);
-    expect(await on.json()).toEqual({ engaged: true, engagedAt: NOW.toISOString(), affectedTaskIds: [taskId] });
-
-    const blocked = await post("/asks", who, { text: "在庫を見て" });
-    expect(blocked.status).toBe(423);
-    expect((await errorOf(blocked)).code).toBe("KILL_SWITCH_ENGAGED");
-
-    expect((await post(path, who, {})).status).toBe(200);
-    await inNamedWorkspace(who.ws, (db) => {
-      expect(all<{ status: string; halt_reason: string }>(db, {}, "SELECT status, halt_reason FROM tasks WHERE id = ?", taskId)[0]).toEqual({
-        status: "halted",
-        halt_reason: "kill_switch",
-      });
-      expect(count(db, "SELECT count(*) FROM audit_logs WHERE event_type = 'killswitch.engaged'")).toBe(1);
-      expect(count(db, "SELECT count(*) FROM workspace_events WHERE type = 'killswitch'")).toBe(1);
-    });
-
-    expect((await post(`${path}/release`, who, {})).status).toBe(400);
-    const off = await post(`${path}/release`, who, { reason: "確かめた" });
-    expect(off.status).toBe(200);
-    expect(await off.json()).toEqual({ engaged: false });
-    expect((await post("/asks", who, { text: "在庫を見て" })).status).toBe(201);
-    await inNamedWorkspace(who.ws, (db) => {
-      expect(count(db, "SELECT count(*) FROM audit_logs WHERE event_type = 'killswitch.released'")).toBe(1);
-    });
-  });
-
-  it("ほかのワークスペースの ID は 404", async () => {
-    const who = await signIn("kill-other");
-    expect((await post(`/workspaces/${newId()}/kill-switch`, who, {})).status).toBe(404);
   });
 });

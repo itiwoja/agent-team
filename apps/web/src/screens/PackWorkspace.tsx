@@ -97,7 +97,7 @@ function activeAskText(item: AgentLibraryItem | undefined): string | null {
 const live = (s: GenState) => s.phase === "generating" || s.phase === "question";
 
 export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInstalled: (p: PackView) => void }) {
-  const { killSwitchEngaged, online } = useWorkspace();
+  const { online } = useWorkspace();
   const installed = p.installedAt !== null;
   const reduced = useReducedMotion();
   const roomId = useId();
@@ -209,7 +209,7 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
   const working = desks.filter((d) => d.state.mood === "running" || d.state.mood === "approval").length;
 
   // 生成中も入力欄は触れる（フォーカスを失わない）。送るのだけ止める
-  const inputDisabled = killSwitchEngaged || !online;
+  const inputDisabled = !online;
   const placeholder = p.examples[0] ? `例：${p.examples[0]}` : "この作業場に頼みたいこと";
 
   return (
@@ -277,7 +277,7 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
               {state.message}
             </p>
           )}
-          {killSwitchEngaged ? <p className="muted small">全部止めているあいだは頼めません</p> : !online && <p className="muted small">つながっていません</p>}
+          {!online && <p className="muted small">つながっていません</p>}
           <Composer value={text} onChange={setText} onSubmit={(v) => void submit(v)} disabled={inputDisabled} sending={live(state)} placeholder={placeholder} inputRef={inputRef} />
           {!live(state) && p.examples.length > 0 && (
             <div className="pw-examples" role="group" aria-label="例の依頼">
@@ -286,7 +286,6 @@ export function PackWorkspace({ pack: p, onInstalled }: { pack: PackView; onInst
                   key={ex}
                   type="button"
                   className="chip pw-example"
-                  disabled={killSwitchEngaged}
                   onClick={() => {
                     setText(ex);
                     inputRef.current?.focus();

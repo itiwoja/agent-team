@@ -1,7 +1,6 @@
 // 古い行の掃除（packages/db/src/system/cleanup.ts の WorkspaceDO 版。db-schema.md §4.4 の4）。
 // 自分の DO の中の、24時間より古い idempotency_keys・workspace_events を消す（alarm から呼ぶ）。
 // entry_attempts は D1（全体）の表なので、ここでは消さない（全体の掃除は Cron Triggers の側）。
-// Kill Switch の LISTEN/NOTIFY のチャンネル（KILL_SWITCH_CHANNEL）は要らない（Kill Switch は DO の中で発動し、その場で止める）
 
 import { run, type WsDb } from "../sqlite.ts";
 

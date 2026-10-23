@@ -32,11 +32,10 @@ export function emitAskEvent(db: WsDb, data: AskEventData, now: Date): void {
   appendWorkspaceEvent(db, { type: data.type, data: data as unknown as Json }, now);
 }
 
-/** 受け付けてよいか：Kill Switch・費用の上限（同時実行数は待つだけなので止めない） */
+/** 受け付けてよいか：費用の上限（同時実行数は待つだけなので止めない） */
 function assertCanAccept(db: WsDb, now: Date): void {
   const ws = getWorkspace(db);
   if (ws === null) throw new AppError("NOT_FOUND");
-  if (ws.kill_switch_engaged) throw new AppError("KILL_SWITCH_ENGAGED");
   const r = canStartWork(db, ws, now);
   if (!r.ok && r.reason === "global") throw spendDeniedAppError({ scope: r.reason }, now);
 }

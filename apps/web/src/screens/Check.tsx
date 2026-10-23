@@ -103,7 +103,7 @@ function RunningRow({
   item: RunningItem;
   onChanged: () => void;
 }) {
-  const { killSwitchEngaged, online } = useWorkspace();
+  const { online } = useWorkspace();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -129,7 +129,7 @@ function RunningRow({
           type="button"
           className="link quiet"
           onClick={() => setConfirming(true)}
-          disabled={killSwitchEngaged || !online}
+          disabled={!online}
         >
           やめる
         </button>

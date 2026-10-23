@@ -54,7 +54,6 @@ const DECISION: Record<string, string> = {
 };
 
 const REASON: Record<string, string> = {
-  kill_switch: "全部止めていた",
   task_terminated: "仕事が終わっていた",
   budget_exceeded: "費用の上限",
   breaker_tripped: "安全装置が働いた",
@@ -117,7 +116,6 @@ const REASON: Record<string, string> = {
   proposal_audit_mismatch: "監査ログの送る案と合わない",
   already_finished: "もう終わった送る案だった",
   execution_replayed: "同じ送る案をもう一度送ろうとした",
-  kill_switch_expired: "全部止めたときに無効になっていた",
   approval_missing: "人の確認の記録がない",
   approval_mismatch: "人の確認の記録と合わない",
   approval_not_approved: "人が確認していない",
@@ -264,8 +262,6 @@ const EVENT_LABEL: Record<string, string> = {
   "task.status_changed": "仕事の状態",
   "task.cancelled": "仕事の取り消し",
   "task.report_submitted": "報告",
-  "killswitch.engaged": "全部止める",
-  "killswitch.released": "全部止めるの解除",
   "ask.created": "依頼",
   "ask.question": "依頼への質問",
   "ask.question_answered": "質問への答え",
@@ -374,12 +370,6 @@ function summarizeKnown(type: string, p: Payload): string | null {
       return "仕事を取り消した";
     case "task.report_submitted":
       return join(["報告を出した", num(p.bodyChars) !== null && `${num(p.bodyChars)}文字`]);
-    case "killswitch.engaged": {
-      const n = count(p.affectedTaskIds);
-      return join(["全部止めた", n !== null && `止めた仕事 ${n}件`, p.reason === "cleanup" ? "後片付け" : str(p.reason)]);
-    }
-    case "killswitch.released":
-      return join(["全部止めるを解除した", str(p.reason)]);
     case "ask.created":
       return "依頼を受けた";
     case "ask.question":
@@ -478,7 +468,6 @@ export const COMMON_EVENT_TYPES = [
   "approval.decided",
   "action.executed",
   "budget.exceeded",
-  "killswitch.engaged",
   "task.status_changed",
   "llm.called",
 ] as const;

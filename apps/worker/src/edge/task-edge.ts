@@ -11,7 +11,6 @@ import { appendAuditLog } from "../db/audit.ts";
 import { getTask, insertTaskEvent, listAskMembers, markTaskRunning, touchTaskHeartbeat } from "../db/repo/edge.ts";
 import type { WsDb } from "../db/sqlite.ts";
 import type { TaskRow, Uuid } from "../db/types.ts";
-import { getWorkspace } from "../db/workspace.ts";
 import { emitAskEvent } from "../asks/accept.ts";
 import { stageStateOf } from "../views/asks/format.ts";
 import { buildTaskContext, loadTaskSetup } from "./context.ts";
@@ -37,13 +36,11 @@ export function edgeTaskContext(db: WsDb, rt: TaskEdgeRuntime, taskId: string, n
   if (task.status === "queued" || task.status === "provisioning") {
     const before = task.status;
     task = db.transaction(() => {
-      const ws = getWorkspace(db);
       const current = getTask(db, taskId);
       if (current === null) throw new EdgeError("UNAUTHORIZED");
-      if (ws?.kill_switch_engaged === true) throw new EdgeError("TASK_HALTED", haltedDetails(current, ws));
       if (current.status === "running") return current;
       const running = markTaskRunning(db, current.id, now);
-      if (running === null) throw new EdgeError("TASK_HALTED", haltedDetails(current, ws ?? undefined));
+      if (running === null) throw new EdgeError("TASK_HALTED", haltedDetails(current));
       appendAuditLog(
         db,
         { eventType: "task.status_changed", actorType: "system", actorId: "edge", taskId: running.id, payload: { taskId: running.id, from: before, to: "running" } },
@@ -101,14 +98,13 @@ export function finishTaskRun(db: WsDb, taskId: Uuid, ended: RunTaskEnd | "error
 }
 
 /**
- * 始める前に止める（executeTask の start.kind === "halt" の分岐）：queued のときだけ halted（kill_switch／budget_exceeded／timeout）。
+ * 始める前に止める（executeTask の start.kind === "halt" の分岐）：queued のときだけ halted（budget_exceeded／timeout）。
  * 段の終わりの事象は出さない（Node 版は続く後始末が出していた。呼ぶ側が finishTaskRun か実行を進める処理でつなぐ）
  */
-export function haltQueuedTask(db: WsDb, taskId: Uuid, gate: "kill_switch" | "budget" | "timeout", now: Date): void {
+export function haltQueuedTask(db: WsDb, taskId: Uuid, gate: "budget" | "timeout", now: Date): void {
   db.transaction(() => {
     const t = getTask(db, taskId);
     if (t === null || t.status !== "queued") return;
-    if (gate === "kill_switch") haltTask(db, t, { reason: "kill_switch" }, now);
-    else haltTask(db, t, { reason: gate === "budget" ? "budget_exceeded" : "timeout", audit: { scope: "ask_start", gate } }, now);
+    haltTask(db, t, { reason: gate === "budget" ? "budget_exceeded" : "timeout", audit: { scope: "ask_start", gate } }, now);
   });
 }

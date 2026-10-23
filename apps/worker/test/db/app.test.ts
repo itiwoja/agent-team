@@ -5,12 +5,10 @@ import { appendAuditLog } from "../../src/db/audit.ts";
 import {
   appendWorkspaceEvent,
   applyToolClassification,
-  engageKillSwitchTx,
   findAgentByName,
   findAgentJob,
   findAskBySeedKey,
   findIdempotencyRecord,
-  findStoppedTasks,
   getAgent,
   getLatestWorkspacePolicy,
   getWorkspaceDayCostMicroUsd,
@@ -25,81 +23,13 @@ import {
   listConnectors,
   listConnectorTools,
   listWorkspaceEventsAfter,
-  releaseKillSwitchTx,
   saveIdempotencyRecord,
   workspaceEventExists,
 } from "../../src/db/repo/app.ts";
-import { all, isUniqueViolation, one, run } from "../../src/db/sqlite.ts";
-import { getWorkspace } from "../../src/db/workspace.ts";
-import { fxAgent, fxApproval, fxConnector, fxIntent, fxTask, fxUsage, inWorkspace } from "./fixtures.ts";
+import { isUniqueViolation, run } from "../../src/db/sqlite.ts";
+import { fxAgent, fxConnector, fxUsage, inWorkspace } from "./fixtures.ts";
 
 const NOW = new Date("2026-10-14T01:00:00.000Z");
-
-describe("Kill Switch の DB の部分", () => {
-  it("engageKillSwitchTx：終了していないタスクを halted・トークン失効、承認・未実行の Intent を expired、executing は残す。2回目は何もしない", async () => {
-    await inWorkspace((db, ws) => {
-      const conn = fxConnector(db);
-      const agent = fxAgent(db);
-      const running = fxTask(db, ws, agent, { status: "running" });
-      const done = fxTask(db, ws, agent, { status: "completed" });
-      const pending = fxIntent(db, { taskId: running.taskId, jobId: agent.jobId, connectorId: conn.connectorId });
-      fxApproval(db, ws, { taskId: running.taskId, intentId: pending.intentId });
-      const executing = fxIntent(db, { taskId: running.taskId, jobId: agent.jobId, connectorId: conn.connectorId, status: "executing" });
-      const queued = fxTask(db, ws, agent, { status: "queued" });
-      run(db, "UPDATE tasks SET task_token_hash = randomblob(32), task_token_expires_at = ? WHERE id = ?", NOW, running.taskId);
-
-      const r = engageKillSwitchTx(db, { by: ws.userId, reason: "r", now: NOW });
-      expect(r).toMatchObject({ alreadyEngaged: false, engagedAt: NOW, expiredIntentIds: [pending.intentId] });
-      expect(r?.haltedTasks.map((t) => t.id)).toEqual([running.taskId, queued.taskId].sort());
-      expect(r?.haltedTasks.find((t) => t.id === queued.taskId)).toMatchObject({ previousStatus: "queued", jobId: agent.jobId, agentId: agent.agentId });
-      expect(r?.expiredApprovalIds).toHaveLength(1);
-      const statuses = all<{ id: string; status: string; halt_reason: string | null; task_token_hash: unknown }>(
-        db,
-        {},
-        "SELECT id, status, halt_reason, task_token_hash FROM tasks",
-      );
-      expect(Object.fromEntries(statuses.map((x) => [x.id, x.status]))).toEqual({
-        [running.taskId]: "halted",
-        [done.taskId]: "completed",
-        [queued.taskId]: "halted",
-      });
-      expect(statuses.find((x) => x.id === running.taskId)).toMatchObject({ halt_reason: "kill_switch", task_token_hash: null });
-      expect(one<{ status: string }>(db, {}, "SELECT status FROM action_intents WHERE id = ?", executing.intentId)?.status).toBe("executing");
-      expect(getWorkspace(db)).toMatchObject({ kill_switch_engaged: true, kill_switch_engaged_at: NOW, kill_switch_engaged_by: ws.userId, kill_switch_reason: "r" });
-
-      // 2回目は何もしない（冪等）
-      const again = engageKillSwitchTx(db, { by: ws.userId, reason: "x", now: new Date(NOW.getTime() + 1000) });
-      expect(again).toEqual({ alreadyEngaged: true, engagedAt: NOW, haltedTasks: [], expiredApprovalIds: [], expiredIntentIds: [] });
-      expect(getWorkspace(db)?.kill_switch_reason).toBe("r");
-    });
-  });
-
-  it("releaseKillSwitchTx：発動中なら外して時刻・人・理由を消す、発動中でなければ wasEngaged false", async () => {
-    await inWorkspace(
-      (db) => {
-        expect(releaseKillSwitchTx(db, NOW)).toEqual({ wasEngaged: true });
-        expect(releaseKillSwitchTx(db, NOW)).toEqual({ wasEngaged: false });
-        expect(getWorkspace(db)).toMatchObject({ kill_switch_engaged: false, kill_switch_engaged_at: null, kill_switch_reason: null });
-      },
-      { killSwitchEngaged: true },
-    );
-  });
-
-  it("findStoppedTasks：終了状態のタスクと Kill Switch", async () => {
-    await inWorkspace((db, ws) => {
-      const agent = fxAgent(db);
-      const live = fxTask(db, ws, agent, { status: "running" });
-      const ended = fxTask(db, ws, agent, { status: "cancelled" });
-      expect(findStoppedTasks(db, [live.taskId, ended.taskId, "00000000-0000-4000-8000-000000000000"])).toEqual({
-        killSwitchEngaged: false,
-        terminalTaskIds: [ended.taskId],
-      });
-      expect(findStoppedTasks(db, [])).toEqual({ killSwitchEngaged: false, terminalTaskIds: [] });
-      engageKillSwitchTx(db, { by: null, reason: null, now: NOW });
-      expect(findStoppedTasks(db, [live.taskId]).killSwitchEngaged).toBe(true);
-    });
-  });
-});
 
 describe("ワークスペースの事象（SSE）", () => {
   it("appendWorkspaceEvent は行を足し、読み出しは id の昇順。type の形が違えば例外", async () => {

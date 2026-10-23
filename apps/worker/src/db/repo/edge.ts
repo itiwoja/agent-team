@@ -55,7 +55,7 @@ export interface TaskTokenHit {
 
 /**
  * タスクのトークン（の SHA-256）からタスクとワークスペースの行を引く（リクエストの ID は読まない：15:486）。
- * 期限（task_token_expires_at > now）の外・失効（NULL）は null。状態・Kill Switch の確かめは呼ぶ側
+ * 期限（task_token_expires_at > now）の外・失効（NULL）は null。状態の確かめは呼ぶ側
  */
 export function findTaskByTokenHash(db: WsDb, tokenHash: Uint8Array, now: Date): TaskTokenHit | null {
   const task = one<TaskRow>(db, CODECS.tasks, "SELECT * FROM tasks WHERE task_token_hash = ? AND task_token_expires_at > ?", tokenHash, now);
@@ -560,7 +560,7 @@ export function insertApproval(db: WsDb, a: ApprovalInput, now: Date): Uuid {
 
 /**
  * タスクの未実行の Intent（proposed・pending_approval・approved）を expired にし、待っている承認も expired にする
- * （IA §8-7：finish・予算・Breaker・sandbox_lost でも task_ended。Kill Switch は kill_switch）。executing は完了まで待つ
+ * （IA §8-7：finish・予算・Breaker・sandbox_lost でも task_ended）。executing は完了まで待つ
  */
 export function expireOpenIntentsOfTask(db: WsDb, taskId: Uuid, reason: IntentExpireReason, now: Date): { intentIds: Uuid[]; approvals: number } {
   return db.transaction(() => {

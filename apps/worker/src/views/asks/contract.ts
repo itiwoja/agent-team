@@ -21,7 +21,7 @@ export const AskStatusSchema = z.enum(ASK_STATUSES);
 export type AskStatus = z.infer<typeof AskStatusSchema>;
 
 /** 生成に失敗した理由（asks.failure_reason）と、画面に出す1行は message */
-export const ASK_FAILURE_REASONS = ["formation_invalid", "timeout", "budget_exceeded", "kill_switch", "agent_limit", "planner_error"] as const;
+export const ASK_FAILURE_REASONS = ["formation_invalid", "timeout", "budget_exceeded", "agent_limit", "planner_error"] as const;
 export const AskFailureReasonSchema = z.enum(ASK_FAILURE_REASONS);
 export type AskFailureReason = z.infer<typeof AskFailureReasonSchema>;
 

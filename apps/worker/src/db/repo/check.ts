@@ -577,7 +577,7 @@ export interface StalledIntent {
   userId: Uuid | null;
 }
 
-/** 承認されたのに実行が始まっていない Intent（approved のまま olderThan より前から。本番のタスクの Intent だけ。Kill Switch の発動中は何も返さない） */
+/** 承認されたのに実行が始まっていない Intent（approved のまま olderThan より前から。本番のタスクの Intent だけ） */
 export function listStalledApprovedIntents(db: WsDb, olderThan: Date, limit: number): StalledIntent[] {
   return all<{ id: Uuid; requester_id: Uuid | null }>(
     db,
@@ -587,7 +587,6 @@ export function listStalledApprovedIntents(db: WsDb, olderThan: Date, limit: num
        JOIN tasks t ON t.id = i.task_id
       WHERE i.status = 'approved' AND i.enforced AND i.updated_at < ?
         AND NOT t.is_dry_run
-        AND NOT (SELECT kill_switch_engaged FROM workspace WHERE id = 1)
       ORDER BY i.updated_at, i.id LIMIT ?`,
     olderThan,
     limit,

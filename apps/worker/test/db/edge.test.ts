@@ -97,7 +97,7 @@ describe("タスクのトークン", () => {
       const hit = findTaskByTokenHash(db, hash, NOW)!;
       expect(hit.task).toMatchObject({ id: taskId, task_token_expires_at: LATER });
       expect(hit.task.task_token_hash?.equals(hash)).toBe(true);
-      expect(hit.workspace).toMatchObject({ workspace_id: ws.workspaceId, owner_user_id: ws.userId, kill_switch_engaged: false });
+      expect(hit.workspace).toMatchObject({ workspace_id: ws.workspaceId, owner_user_id: ws.userId });
       expect(findTaskByTokenHash(db, hash, LATER)).toBeNull();
 
       revokeTaskToken(db, taskId, NOW);
@@ -139,7 +139,7 @@ describe("タスクの行", () => {
     await inWorkspace((db, ws) => {
       const agent = fxAgent(db);
       const cases = [
-        { change: { status: "halted", haltReason: "kill_switch" } as const, expect: { halt_reason: "kill_switch", fail_reason: null, status_detail: null } },
+        { change: { status: "halted", haltReason: "budget_exceeded" } as const, expect: { halt_reason: "budget_exceeded", fail_reason: null, status_detail: null } },
         { change: { status: "failed", failReason: "sandbox_lost" } as const, expect: { halt_reason: null, fail_reason: "sandbox_lost" } },
         { change: { status: "completed", detail: "report" } as const, expect: { status_detail: "report" } },
         { change: { status: "succeeded" } as const, expect: { status_detail: null } },

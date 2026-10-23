@@ -9,7 +9,6 @@ export const FAILURE_MESSAGES: Readonly<Record<AskFailureReason, string>> = {
   // 時間切れ・Gemini の失敗は依頼の言い方のせいではない（混雑・一時的な失敗）。言い方を変えるよう促さない
   timeout: "Gemini が混み合っていて、時間内に決められませんでした。もう一度送ってください",
   budget_exceeded: "今日の予算を使い切りました",
-  kill_switch: "全部止めています",
   agent_limit: "エージェントが上限に達しています。使っていない担当を整理してください",
   planner_error: "Gemini の呼び出しに失敗しました。もう一度送ってください",
 };

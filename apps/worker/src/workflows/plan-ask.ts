@@ -1,7 +1,7 @@
 // 依頼の編成を作る Workflow（FR-061。apps/app/src/asks/create.ts の generateAsk の Workflows 版）。依頼を受けた・質問に答えたあと DO が起動する。
 // 歩み：materials（DO：材料）→ plan（設定プランナー。LLM の呼び出しは edge/llm-call.ts の callLlm、費用の記録は DO）→ save（DO：保存して最初の実行を始める）。
 // - plan の歩みはやり直さない（LLM のやり直しは callLlm の中だけ。二重に課金しない）。失敗は値（kind: "failed"）にして save に渡す
-// - 打ち切りは30秒（A-98。plan の歩みの中の AbortController）。Kill Switch は callLlm の前（DO の llmGate）と保存（materializeFormation）で止まる
+// - 打ち切りは30秒（A-98。plan の歩みの中の AbortController）
 // 作ったタスクを動かすのは 4c
 
 import { FORMATION_LIMITS } from "@open-team/kernel";

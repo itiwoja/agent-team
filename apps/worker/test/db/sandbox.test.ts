@@ -69,10 +69,8 @@ describe("作業場", () => {
       expect(openSandboxSession(db, { taskId, agentId: agent.agentId, tokenHash: tokenHash("other"), provider: "docker", now: NOW })).toBeNull();
 
       const found = findSandboxSessionByTokenHash(db, tokenHash(taskId));
-      expect(found).toMatchObject({ session: { id: session.id }, workspace: { kill_switch_engaged: false } });
+      expect(found).toMatchObject({ id: session.id });
       expect(findSandboxSessionByTokenHash(db, tokenHash("nope"))).toBeNull();
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
-      expect(findSandboxSessionByTokenHash(db, tokenHash(taskId))?.workspace.kill_switch_engaged).toBe(true);
 
       setSandboxProviderRef(db, session.id, "c".repeat(600));
       touchSandboxSession(db, session.id, at(1000));

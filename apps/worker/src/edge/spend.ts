@@ -1,6 +1,6 @@
 // 費用の守り（BR-62。packages/edge/src/spend.ts・limits.ts の WorkspaceDO 版）。金額は整数のマイクロドルで比べる（cross-check §1.7）
 // - checkSpend：LLM を呼ぶたび、呼ぶ前に「使った額 ＋ 見積もり ＞ 上限」なら呼ばない（ちょうどは通す）
-// - canStartWork：タスク・依頼を始める前に「Kill Switch → 同時実行数 → 使った額 ≥ 上限」を見る（見積もりなし：M-38）
+// - canStartWork：タスク・依頼を始める前に「同時実行数 → 使った額 ≥ 上限」を見る（見積もりなし：M-38）
 // 全体の今日の費用（全ワークスペースの合計）は D1 の側に置く（第5段）。それまでは、このワークスペースの今日の費用を全体の上限と比べる
 // （使える人は ALLOWED_EMAILS の数人なので、全体の上限を1つのワークスペースで使い切ることはまずない）
 
@@ -32,7 +32,7 @@ export interface SpendDenied {
 }
 export type SpendCheck = { ok: true } | SpendDenied;
 
-export type StartDenyReason = "kill_switch" | "concurrency" | SpendScope;
+export type StartDenyReason = "concurrency" | SpendScope;
 
 /** 今日の費用（第5段までは、このワークスペースの分） */
 export function spentTodayMicroUsd(db: WsDb, now: Date): number {
@@ -50,15 +50,14 @@ export function checkSpend(db: WsDb, estimatedMicroUsd: number, now: Date, limit
 
 /**
  * 始める前の確かめ（SO §3.12 canStartWork。タスク・依頼）。
- * 1 Kill Switch → 始めない／2 provisioning・running のタスクが max_concurrent_tasks 以上 → 待つ（BR-08）／3 今日の費用 ≥ 上限
+ * 1 provisioning・running のタスクが max_concurrent_tasks 以上 → 待つ（BR-08）／2 今日の費用 ≥ 上限
  */
 export function canStartWork(
   db: WsDb,
-  ws: Pick<WorkspaceRow, "kill_switch_engaged" | "max_concurrent_tasks">,
+  ws: Pick<WorkspaceRow, "max_concurrent_tasks">,
   now: Date,
   limits: SpendLimits = SPEND_LIMITS,
 ): { ok: true } | { ok: false; reason: StartDenyReason } {
-  if (ws.kill_switch_engaged) return { ok: false, reason: "kill_switch" };
   if (countActiveLiveTasks(db) >= ws.max_concurrent_tasks) return { ok: false, reason: "concurrency" };
   if (spentTodayMicroUsd(db, now) >= limits.platformDayMicroUsd) return { ok: false, reason: "global" };
   return { ok: true };

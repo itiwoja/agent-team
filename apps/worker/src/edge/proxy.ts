@@ -1,6 +1,6 @@
 // LLM Proxy（packages/edge/src/proxy.ts の llmMessages の WorkspaceDO 版。FR-009、formation-runtime.md §3.10、M-14・M-15・M-19）
 // Node 版は1つの関数で「1 トークンでタスクを引き直す → 2 入力の検証（Zod）→ 3 1分あたり60回 → 4 Router でモデル → 5 見積もり →
-// 6 callGemini の中の1トランザクション：Kill Switch・checkSpend（全体）・decide(llm_call) → 7 Gemini（やり直し）→
+// 6 callGemini の中の1トランザクション：checkSpend（全体）・decide(llm_call) → 7 Gemini（やり直し）→
 // 8 1トランザクション：usage_records・tasks.cost／steps_used・task_events・監査ログ llm.called → 9 応答のツール呼び出しを順に decide」をしていた。
 // WorkspaceDO 版は LLM の呼び出し（5・7）を Workflow の側（workflows/task-run.ts・llm-call.ts）に出し、DO の側を同期の4つに分ける：
 //   edgeLlmPrepare（1〜4）→ edgeLlmBegin（6）→ [Workflow が呼ぶ] → edgeLlmSettle（8・9）／edgeLlmFail（呼べなかった・失敗した）。
@@ -339,7 +339,7 @@ export function edgeLlmPrepare(db: WsDb, rt: TaskEdgeRuntime, taskId: string, ra
 
 /**
  * 6：呼ぶ前の1トランザクション（Node 版の callGemini の「呼ぶ前」＋ onStopped・beforeCall）。
- * Kill Switch・checkSpend（全体。M-19）で止めたら halted（kill_switch／budget_exceeded＋監査ログ budget.exceeded）→ TASK_HALTED。
+ * checkSpend（全体。M-19）で止めたら halted（budget_exceeded＋監査ログ budget.exceeded）→ TASK_HALTED。
  * そのあと decide(llm_call)：予算（per_task_usd・per_day_usd・agent_day_usd・max_steps・max_minutes）と Breaker。判定は記録し、halt なら止める。
  * 止めた記録はコミットしてから投げる
  */
@@ -351,16 +351,14 @@ export function edgeLlmBegin(
   now: Date,
 ): void {
   const outcome = db.transaction((): { ok: true } | { ok: false; error: EdgeError; terminal: boolean } => {
-    const ws = getWorkspace(db);
-    if (ws === null) throw new Error("ワークスペースの行がない");
+    if (getWorkspace(db) === null) throw new Error("ワークスペースの行がない");
     const t = getTask(db, taskId);
     if (t === null) return { ok: false, error: new EdgeError("UNAUTHORIZED"), terminal: false };
-    // Kill Switch・全体 $15（M-19）。タスクの中で止めたら halted。止めた理由は Node 版の GeminiCallError の写しと同じ形
+    // 全体 $15（M-19）。タスクの中で止めたら halted。止めた理由は Node 版の GeminiCallError の写しと同じ形
     const stop = (cause: HaltCause, error: EdgeError) => {
       const ended = isTerminalStatus(t.status) ? null : haltTask(db, t, cause, now);
       return { ok: false as const, error, terminal: ended !== null };
     };
-    if (ws.kill_switch_engaged) return stop({ reason: "kill_switch" }, new EdgeError("TASK_HALTED", { haltReason: "kill_switch" }));
     const spend = checkSpend(db, a.budgetEstimateMicroUsd, now);
     if (!spend.ok) return stop(haltCauseOfSpend(spend), new EdgeError("TASK_HALTED", { haltReason: "budget_exceeded", scope: spend.scope }));
     // decide(llm_call)
@@ -420,7 +418,7 @@ function usageRow(task: Pick<TaskRow, "id" | "agent_id">, llmReq: LlmRequest, ph
 /**
  * 8・9：呼んだあとの1トランザクション（Node 版の callGemini の「呼んだあと」＋ afterCall）。
  * usage_records → tasks の費用とステップ（addTaskUsage）→ task_events の llm_called →（まだ running なら）応答のツール呼び出しの判定 → 監査ログ llm.called。
- * 呼んでいる間に Kill Switch・停止でタスクが止まっていたら、費用だけ数え、ツール呼び出しは判定せず TASK_HALTED（記録はコミットしてから投げる）。
+ * 呼んでいる間に停止でタスクが止まっていたら、費用だけ数え、ツール呼び出しは判定せず TASK_HALTED（記録はコミットしてから投げる）。
  * 記録した Intent の通知（Node 版の onIntentRecorded）は 4d で DO の側がつなぐ（Intent は action_intents に残っている）
  */
 export function edgeLlmSettle(
@@ -453,12 +451,12 @@ export function edgeLlmSettle(
         },
         now,
       );
-      // Kill Switch・停止が呼んでいる間に来た：費用だけ数え、ツール呼び出しは判定しない
+      // 停止が呼んでいる間に来た：費用だけ数え、ツール呼び出しは判定しない
       const ws = getWorkspace(db);
       if (ws === null) throw new Error("ワークスペースの行がない");
       if (t.status !== "running") {
         auditLlmCalled(db, t, usage, llmReq, 0, now);
-        return { kind: "halted", error: new EdgeError("TASK_HALTED", haltedDetails(t, ws)) };
+        return { kind: "halted", error: new EdgeError("TASK_HALTED", haltedDetails(t)) };
       }
       const refreshed: TaskRow = { ...t, cost_micro_usd: added.cost_micro_usd, steps_used: added.steps_used };
       const setup = loadTaskSetup(db, refreshed, ws, undefined, { sandboxProvider: false, trustedSkills: rt.trustedSkills });
@@ -492,7 +490,7 @@ export function edgeLlmSettle(
  * 呼べなかった・失敗した（Node 版の afterFailure と、llmMessages の catch の switch）。必ず EdgeError を投げる。
  * - 数えた費用（送れたか分からない回の見積もり）があれば usage_records とタスクの費用に足す（ステップは数えない）
  * - llm（やり直しのあとも失敗）→ failed(llm_unavailable)。unpriced_model・incompatible_model（費用を数えられない・呼べない）→ failed(llm_unavailable)
- * - kill_switch・budget：Node 版では呼ぶ前の確かめ（onStopped）でタスクを止めていた。ここに来たら（Workflow の側の確かめで止めた）同じく halted にする
+ * - budget：Node 版では呼ぶ前の確かめ（onStopped）でタスクを止めていた。ここに来たら（Workflow の側の確かめで止めた）同じく halted にする
  * - aborted：タスクは変えない（止めた側がすでに状態を決めている）
  */
 export function edgeLlmFail(
@@ -517,8 +515,6 @@ export function edgeLlmFail(
       case "incompatible_model":
         // 価格表にないモデルは呼ばない（決定 (d)）。費用を数えられないので、このタスクは続けられない
         return failTask(db, t, "llm_unavailable", now, { reason: a.kind, model: a.llmReq.model, message: a.message }) !== null;
-      case "kill_switch":
-        return haltTask(db, t, { reason: "kill_switch" }, now) !== null;
       case "budget":
         return haltTask(db, t, { reason: "budget_exceeded", audit: { scope: "global" } }, now) !== null;
       case "aborted":
@@ -527,8 +523,6 @@ export function edgeLlmFail(
   });
   if (terminal) forgetTask(rt, taskId);
   switch (a.kind) {
-    case "kill_switch":
-      throw new EdgeError("TASK_HALTED", { haltReason: "kill_switch" });
     case "budget":
       throw new EdgeError("TASK_HALTED", { haltReason: "budget_exceeded", scope: "global" });
     case "incompatible_model":

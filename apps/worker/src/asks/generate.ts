@@ -2,8 +2,6 @@
 // 編成を保存する（足りない担当を作り、使い回す担当には仕事を足す）・失敗で閉じる。どれも DO の中で呼ぶ同期の関数。
 // - 外部（Gemini）は呼ばない。設定プランナー（planner.ts の planFormation）は Workflow の step から呼び、その前後でここの関数を DO で呼ぶ（G-14）
 // - 編成の保存（担当・仕事・スナップショット・依頼の状態・事象）は1つのトランザクション。ロック（lockWorkspace）は要らない（DO の中は1本の流れ）
-// - Node 版は Kill Switch を登録簿（kind = ask_generate）の中断で止めていた。WorkspaceDO 版は materializeFormation が保存の前に
-//   ワークスペースの行を見て、発動中なら AskPlanError("kill_switch") を投げる（Gemini の呼び出しは呼ぶ側の llm-call が止める）
 // - 生成の打ち切り（30秒：A-98）は呼ぶ側（Workflow）が数え、failureReasonOf に timedOut で渡す
 // - 受け付け（acceptAsk・answerAskQuestion）は accept.ts、実行を始めるのは run.ts の startAskRunTx
 
@@ -22,7 +20,7 @@ import {
   type Json,
   type WorkspacePolicy,
 } from "@open-team/kernel";
-import { AppError, maskSecrets } from "@open-team/platform";
+import { maskSecrets } from "@open-team/platform";
 import { appendAuditLog } from "../db/audit.ts";
 import { findAgentByName, getAgent, getLatestWorkspacePolicy, insertAgentJob, insertAgentWithSnapshot, insertAskMember, listConnectors, listConnectorTools } from "../db/repo/app.ts";
 import {
@@ -201,7 +199,7 @@ export function withJob(
 /**
  * 編成を保存して依頼を動かせる状態（running）にする（1つのトランザクション）。
  * 新しい担当：最初の境界＋付与（つながっていて使えるものだけ）＋この依頼の仕事。使い回す担当：この依頼の仕事を足した新しいスナップショット（権限は広げない）。
- * generating でなくなっていれば（時間切れ・取り消しで先に閉じた）null。Kill Switch 発動中は AskPlanError("kill_switch")（Node 版の登録簿の中断の代わり）。
+ * generating でなくなっていれば（時間切れ・取り消しで先に閉じた）null。
  * ポリシーは Node 版のように呼ぶ側から受け取らず、ここで最新のものを読む（材料を集めてから保存するまでに変わっても、保存の時点のもので検査する）
  */
 export function materializeFormation(
@@ -210,11 +208,9 @@ export function materializeFormation(
 ): { ask: AskRow; members: MemberRowN[] } | null {
   const { planned, now, askId } = a;
   return db.transaction(() => {
-    const ws = getWorkspace(db);
-    if (ws === null) return null;
+    if (getWorkspace(db) === null) return null;
     const fresh = getAsk(db, askId);
     if (fresh === null || fresh.status !== "generating") return null;
-    if (ws.kill_switch_engaged) throw new AskPlanError("kill_switch", "Kill Switch が発動中なので編成を保存しない");
     const policy = requirePolicy(db);
     const catalog = catalogOf(listConnectors(db), listConnectorTools(db));
     const m = { policy, catalog };
@@ -355,9 +351,8 @@ export function failureReasonOf(e: unknown, timedOut: boolean): AskPlanError["co
   if (e instanceof AskPlanError) return e.code;
   if (typeof e === "object" && e !== null && (e as { name?: unknown }).name === "LlmCallError") {
     const kind = (e as { kind?: unknown }).kind;
-    if (kind === "kill_switch") return "kill_switch";
     if (kind === "budget") return "budget_exceeded";
-    if (kind === "aborted") return timedOut ? "timeout" : "kill_switch";
+    if (kind === "aborted") return timedOut ? "timeout" : "planner_error";
     return "planner_error";
   }
   if (timedOut) return "timeout";
@@ -381,25 +376,21 @@ export function failGeneration(
 }
 
 /**
- * 編成を保存したあと（依頼は running）、実行を始められなかったとき：running → cancelled（Kill Switch）か failed。
- * 実行の行がまだないので alarm も Kill Switch の後始末も拾えない。ここで閉じないと依頼が実行なしの running で固まる。
+ * 編成を保存したあと（依頼は running）、実行を始められなかったとき：running → failed。
+ * 実行の行がまだないので alarm も拾えない。ここで閉じないと依頼が実行なしの running で固まる。
  * 別の経路（返事など）が先に実行を始めていたら閉じない。外へは投げない（Node 版はログに残した。WorkspaceDO 版は console.error）
  */
 export function closeFailedStart(db: WsDb, a: { askId: Uuid; error: unknown; now: Date; secrets: readonly string[] }): void {
   const { askId, error, now } = a;
-  const killed = error instanceof AppError && error.code === "KILL_SWITCH_ENGAGED";
-  const to = killed ? "cancelled" : "failed";
   try {
     db.transaction(() => {
       if (getLatestLiveRun(db, askId) !== null) return;
-      const moved = transitionAsk(db, askId, ["running"], to, now);
+      const moved = transitionAsk(db, askId, ["running"], "failed", now);
       if (moved === null) return;
-      emitAskEvent(db, { type: "ask.status", askId, status: to }, now);
+      emitAskEvent(db, { type: "ask.status", askId, status: "failed" }, now);
       appendAuditLog(
         db,
-        killed
-          ? { eventType: "ask.cancelled", actorType: "system", actorId: "kill_switch", payload: { askId, reason: "kill_switch" } }
-          : { eventType: "ask.failed", actorType: "system", actorId: "asks", payload: { askId, reason: "start_failed", detail: maskSecrets(errorText(error), a.secrets).slice(0, 300) } },
+        { eventType: "ask.failed", actorType: "system", actorId: "asks", payload: { askId, reason: "start_failed", detail: maskSecrets(errorText(error), a.secrets).slice(0, 300) } },
         now,
       );
     });

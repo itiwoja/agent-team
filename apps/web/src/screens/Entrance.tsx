@@ -24,7 +24,7 @@ const EXAMPLES = [
 ];
 
 export function Entrance() {
-  const { killSwitchEngaged, online } = useWorkspace();
+  const { online } = useWorkspace();
   const { state, submit: send, answer, reset } = useAskGeneration();
   // 書きかけの文はほかの画面へ移っても残す（lib/draft.ts。送ったら消える）
   const [text, setText] = useState(readDraft);
@@ -95,7 +95,7 @@ export function Entrance() {
     if (send(value)) setText("");
   };
 
-  const disabled = killSwitchEngaged || !online;
+  const disabled = !online;
   const idle = state.phase === "idle" || state.phase === "failed";
   // 例文は、入力欄が空で、頼める状態のときだけ出す
   const showExamples = idle && !disabled && text.trim() === "";
@@ -103,7 +103,7 @@ export function Entrance() {
   return (
     <div className="entrance" ref={rootRef} onFocus={() => setPaused(true)} onBlur={() => setPaused(false)}>
       <div className="entrance-body">
-        <Center state={state} killSwitchEngaged={killSwitchEngaged} onAnswer={answer} />
+        <Center state={state} onAnswer={answer} />
         {connectNote && (
           <p className={`entrance-note connect-note${connectNote.error ? " error" : " muted"}`} role="status">
             {connectNote.text}
@@ -125,7 +125,7 @@ export function Entrance() {
                 {state.message}
               </p>
             )}
-            {!online && !killSwitchEngaged && <p className="muted entrance-note">つながっていません</p>}
+            {!online && <p className="muted entrance-note">つながっていません</p>}
           </>
         )}
       </div>
@@ -165,8 +165,7 @@ function Examples({ examples, onPick }: { examples: string[]; onPick: (example: 
   );
 }
 
-function Center({ state, killSwitchEngaged, onAnswer }: { state: GenState; killSwitchEngaged: boolean; onAnswer: (a: { choiceId: string } | { text: string }) => void }) {
-  if (killSwitchEngaged && (state.phase === "idle" || state.phase === "failed")) return <h1 className="hero entrance-title">全部止めています</h1>;
+function Center({ state, onAnswer }: { state: GenState; onAnswer: (a: { choiceId: string } | { text: string }) => void }) {
   switch (state.phase) {
     case "idle":
     case "failed":
