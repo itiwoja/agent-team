@@ -68,8 +68,8 @@ describe("ClaudeClient", () => {
     const { url, headers, body } = f.sent[0]!;
     expect(url).toContain("/v1/messages");
     expect(headers.get("x-api-key")).toBe("sk-test");
-    expect(headers.get("anthropic-beta")).toContain("server-side-fallback-2026-07-01");
-    expect(body).toMatchObject({ model: "claude-opus-5-5", max_tokens: 8000, system: "あなたは担当です", stream: true, fallbacks: "default" });
+    expect(headers.get("anthropic-beta")).toContain("server-side-fallback-2026-06-01");
+    expect(body).toMatchObject({ model: "claude-opus-5-5", max_tokens: 8000, system: "あなたは担当です", stream: true, fallbacks: [{ model: "claude-opus-4-8" }] });
     expect(body.tools).toEqual([{ name: "submit_report", description: "報告する", input_schema: { type: "object", properties: { title: { type: "string" } } } }]);
     expect(body).not.toHaveProperty("temperature");
     expect(body).not.toHaveProperty("thinking");
@@ -130,7 +130,24 @@ describe("ClaudeClient", () => {
     expect(g.sent).toHaveLength(0);
   });
 
-  it("料金表は Opus 5.5・Sonnet 5.5・Haiku 5.5・Fable 5.1", () => {
-    expect(Object.keys(CLAUDE_PRICES).sort()).toEqual(["claude-fable-5-1", "claude-haiku-5-5", "claude-opus-5-5", "claude-sonnet-5-5"]);
+  it("料金表は Opus 5.5・Sonnet 5.5・Haiku 5.5・Fable 5.1 と代わりの Opus 4.8", () => {
+    expect(Object.keys(CLAUDE_PRICES).sort()).toEqual(["claude-fable-5-1", "claude-haiku-5-5", "claude-opus-4-8", "claude-opus-5-5", "claude-sonnet-5-5"]);
+  });
+
+  it("呼ぶ前の見積もりの単価は、元のモデルと代わりのモデルの高いほう。見積もりは1回分（estimateMicroUsd を持たない）", () => {
+    const client = new ClaudeClient({ apiKey: "sk-test" });
+    // Opus 5.5（$4/$20）と代わりの Opus 4.8（$5/$25）の高いほう
+    expect(client.priceFor("claude-opus-5-5")).toMatchObject({ inputPerMTokMicroUsd: 5_000_000, outputPerMTokMicroUsd: 25_000_000 });
+    // 代わりを持たない Sonnet はそのまま
+    expect(client.priceFor("claude-sonnet-5-5")).toMatchObject({ inputPerMTokMicroUsd: 2_000_000, outputPerMTokMicroUsd: 10_000_000 });
+    expect(client.priceFor("claude-3-opus")).toBeNull();
+    expect((client as { estimateMicroUsd?: unknown }).estimateMicroUsd).toBeUndefined();
+  });
+
+  it("代わりのモデル（Opus 4.8）が答えたら、その単価で数える", async () => {
+    const f = fakeClaude(toolTurn("claude-opus-4-8"));
+    const res = await new ClaudeClient({ apiKey: "sk-test", fetch: f.fetch }).generate(baseReq());
+    // 入力 1000 × $5/M ＋ 出力 500 × $25/M = 0.005 + 0.0125
+    expect(res.usage.costMicroUsd).toBe(17_500);
   });
 });

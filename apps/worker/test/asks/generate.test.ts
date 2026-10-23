@@ -167,7 +167,7 @@ describe("failGeneration・failureReasonOf", () => {
       failGeneration(db, { askId, reason: "planner_error", detail: `呼べなかった ${SECRET}`, now: NOW, secrets: [SECRET] });
       expect(getAsk(db, askId)).toMatchObject({ status: "failed", failure_reason: "planner_error" });
       expect(events(db, "ask.failed").map((e) => e.data)).toEqual([
-        { type: "ask.failed", askId, reason: "planner_error", message: "Gemini の呼び出しに失敗しました。もう一度送ってください" },
+        { type: "ask.failed", askId, reason: "planner_error", message: "Claude の呼び出しに失敗しました。もう一度送ってください" },
       ]);
       const payload = all<{ payload: string }>(db, {}, "SELECT payload FROM audit_logs WHERE event_type = 'ask.failed'")[0]!.payload;
       expect(payload).not.toContain(SECRET);

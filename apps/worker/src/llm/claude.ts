@@ -7,8 +7,11 @@
 //   そのかわり、次の呼び出しでモデルは前の思考を見られない
 // - temperature は送らない（2026-10-21 以降の API は 400）
 // - 構造化出力（設定プランナー）は output_config.format。Claude が受け付けない制約（文字数・数の範囲など）は外して送り、受け取ったあとに zod で確かめる（planner.ts）
-// - 安全の判定で断られたとき（refusal）は、サーバー側の代わりのモデル（fallbacks: "default"）に回す（Opus・Sonnet・Fable だけ）。
-//   費用は応答の model（実際に答えたモデル）の単価で数える
+// - 安全の判定で断られたとき（refusal）は、サーバー側の代わりのモデルに回す（Opus 5.5・Fable 5.1 → Opus 4.8。単価が分かるよう、
+//   相手を決めない "default" ではなく名前で指定する）。費用は応答の model（実際に答えたモデル）の単価で数え、呼ぶ前の見積もり（priceFor）は
+//   元のモデルと代わりのモデルの高いほうの単価で出す（代わりが答えても見積もりを超えない）
+// - 呼ぶ前の見積もりは1回分（estimateMicroUsd を持たない）。持つと callLlm がやり直しの分まで4倍に見積もり、タスクの予算（既定 $0.5）で
+//   Opus がすぐ止まる。送れたか分からない失敗は、その回の見積もりを費用に数える（callLlm）
 // - 強制の tool_choice（any・tool）は使わない（Opus 5.5・Sonnet 5.5 は 400）
 
 import Anthropic from "@anthropic-ai/sdk";
@@ -17,7 +20,6 @@ import {
   buildToolDeclarations,
   computeMicroUsd,
   fromGeminiFunctionCall,
-  inputTokensUpperBound,
   LlmError,
   toGeminiFunctionCall,
   type LlmClient,
@@ -46,14 +48,30 @@ export const CLAUDE_PRICES: Readonly<Record<string, PriceEntry>> = {
   "claude-opus-5-5": price("claude-opus-5-5", 4, 20),
   "claude-sonnet-5-5": price("claude-sonnet-5-5", 2, 10),
   "claude-haiku-5-5": price("claude-haiku-5-5", 0.1, 0.5, { over: 100_000, input: 0.5, output: 2.5 }),
+  // 断られたときの代わりのモデル（FALLBACKS）。CLAUDE_MODEL にも使える
+  "claude-opus-4-8": price("claude-opus-4-8", 5, 25),
 };
 
 /** 応答の model が表にない（代わりのモデルが答えた など）ときに使う単価：表で一番高いもの（少なく数えない） */
 const HIGHEST_PRICE = CLAUDE_PRICES["claude-fable-5-1"]!;
 
-/** 断られたときにサーバー側で代わりのモデルに回せるモデル */
-const FALLBACK_MODELS = new Set(["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5"]);
-const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+/** 断られたときにサーバー側で回す代わりのモデル（モデル → 代わり）。Sonnet・Haiku は代わりを持たない（断られたらその回は refusal で終わる） */
+const FALLBACKS: Readonly<Record<string, string>> = { "claude-opus-5-5": "claude-opus-4-8", "claude-fable-5-1": "claude-opus-4-8" };
+const FALLBACK_BETA = "server-side-fallback-2026-06-01";
+
+/** 呼ぶ前の見積もりに使う単価：元のモデルと代わりのモデルの、項目ごとの高いほう */
+function budgetPrice(model: string): PriceEntry | null {
+  const own = CLAUDE_PRICES[model];
+  if (own === undefined) return null;
+  const fb = FALLBACKS[model] === undefined ? undefined : CLAUDE_PRICES[FALLBACKS[model]];
+  if (fb === undefined) return own;
+  return {
+    model,
+    inputPerMTokMicroUsd: Math.max(own.inputPerMTokMicroUsd, fb.inputPerMTokMicroUsd),
+    outputPerMTokMicroUsd: Math.max(own.outputPerMTokMicroUsd, fb.outputPerMTokMicroUsd),
+    thinkingPerMTokMicroUsd: Math.max(own.thinkingPerMTokMicroUsd, fb.thinkingPerMTokMicroUsd),
+  };
+}
 
 /** Claude の構造化出力が受け付けない JSON Schema のキーワード（外して送る。受け取ったあと zod で確かめる） */
 const UNSUPPORTED_SCHEMA_KEYS = new Set(["minLength", "maxLength", "minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minItems", "maxItems", "uniqueItems", "pattern", "default", "$schema"]);
@@ -130,20 +148,18 @@ export class ClaudeClient implements LlmClient {
 
   constructor(o: { apiKey: string; fetch?: typeof fetch; timeoutMs?: number }) {
     // やり直しは callLlm の1か所で数える（SDK の既定の2回は切る）
-    this.client = new Anthropic({ apiKey: o.apiKey, maxRetries: 0, timeout: o.timeoutMs ?? 600_000, ...(o.fetch === undefined ? {} : { fetch: o.fetch }) });
+    // 1回の打ち切りは5分（4,096 トークン前後の出力を stream で受けるには十分。歩み全体の打ち切りは workflows/task-run.ts）
+    this.client = new Anthropic({ apiKey: o.apiKey, maxRetries: 0, timeout: o.timeoutMs ?? 300_000, ...(o.fetch === undefined ? {} : { fetch: o.fetch }) });
   }
 
+  /** 呼ぶ前の見積もりの単価（代わりのモデルが答えても超えない側。実費は generate が答えたモデルの単価で数える） */
   priceFor(model: string): PriceEntry | null {
-    return CLAUDE_PRICES[model] ?? null;
+    return budgetPrice(model);
   }
 
   preflight(req: LlmRequest): void {
     if (CLAUDE_PRICES[req.model] === undefined) throw new LlmError(`料金表にない Claude のモデルです：${req.model}`, null, false);
     if (req.googleSearch === true) throw new LlmError("Google 検索の Grounding は Claude では使えません", null, false);
-  }
-
-  estimateMicroUsd(req: LlmRequest): number {
-    return computeMicroUsd(CLAUDE_PRICES[req.model] ?? HIGHEST_PRICE, inputTokensUpperBound(req), req.maxTokens, 0);
   }
 
   async generate(req: LlmRequest, opts: { signal?: AbortSignal } = {}): Promise<LlmResponse> {
@@ -173,7 +189,7 @@ export class ClaudeClient implements LlmClient {
               ...(req.thinkingLevel === undefined ? {} : { effort: req.thinkingLevel }),
             },
           }),
-      ...(FALLBACK_MODELS.has(req.model) ? { betas: [FALLBACK_BETA], fallbacks: "default" as const } : {}),
+      ...(FALLBACKS[req.model] === undefined ? {} : { betas: [FALLBACK_BETA], fallbacks: [{ model: FALLBACKS[req.model]! }] }),
     };
     let message: Anthropic.Beta.BetaMessage;
     try {

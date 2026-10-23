@@ -227,7 +227,7 @@ describe("GET /api/v1/asks・/asks/:id・/asks/:id/messages", () => {
       return { failed, single };
     });
     const f = AskDetailResponseSchema.parse(await (await get(`/asks/${ids.failed}`, who)).json());
-    expect(f.ask).toMatchObject({ status: "failed", failure: { reason: "planner_error", message: "Gemini の呼び出しに失敗しました。もう一度送ってください" }, needsConnection: "gcal" });
+    expect(f.ask).toMatchObject({ status: "failed", failure: { reason: "planner_error", message: "Claude の呼び出しに失敗しました。もう一度送ってください" }, needsConnection: "gcal" });
     expect(f.formation).toBeNull();
     expect(f.planner).toBeNull();
     const s = AskDetailResponseSchema.parse(await (await get(`/asks/${ids.single}`, who)).json());
