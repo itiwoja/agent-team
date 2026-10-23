@@ -9,6 +9,12 @@ import { z } from "zod";
 import { csrfOk, type AppEnv } from "../auth/routes.ts";
 import type { SessionCtx } from "../auth/session.ts";
 import type { WorkspaceDO } from "../workspace-do.ts";
+import { unwrapWrite, type WriteResult } from "../write.ts";
+
+/** ルートが使う外の道具（時計。試験で差し替える） */
+export interface ApiDeps {
+  now: () => Date;
+}
 
 export type ApiHandler = (c: Context<AppEnv>) => Response | Promise<Response>;
 
@@ -68,4 +74,32 @@ export function idParam(c: Context, name: string): string {
   const r = IdParam.safeParse(v);
   if (!r.success) throw new AppError("VALIDATION_ERROR", undefined, { details: [{ field: name, reason: "uuid の形ではありません" }] });
   return r.data.toLowerCase();
+}
+
+const JSON_TYPE = /^application\/json\b/i;
+
+/** 本文を JSON として読み、検証する（本文があるのに JSON の Content-Type でなければ 415、読めなければ・外れたら 400）。本文がなければ {} を検証する */
+export async function readJsonBody<S extends z.ZodType>(c: Context, schema: S): Promise<z.output<S>> {
+  const text = await c.req.text();
+  let raw: unknown = {};
+  if (text.trim() !== "") {
+    if (!JSON_TYPE.test(c.req.header("content-type") ?? "")) throw new AppError("UNSUPPORTED_MEDIA_TYPE");
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      throw new AppError("VALIDATION_ERROR", "本文を JSON として読めません", { details: [{ field: "", reason: "invalid_json" }] });
+    }
+  }
+  return parseInput(schema, raw);
+}
+
+/** パスのワークスペースがセッションのものか（違えば 404） */
+export function assertOwnWorkspace(s: SessionCtx, workspaceId: string): void {
+  if (workspaceId.toLowerCase() !== s.workspaceId.toLowerCase()) throw new AppError("NOT_FOUND");
+}
+
+/** DO の書き込みの結果を応答にする（エラーは AppError に戻して投げる） */
+export function reply<T>(c: Context<AppEnv>, r: WriteResult<T>): Response {
+  const { status, body } = unwrapWrite(r);
+  return c.json(body as object, status as 200);
 }

@@ -10,10 +10,13 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.135.0",
     "@open-team/gcal-core": "workspace:*",
     "@open-team/github-core": "workspace:*",
     "@open-team/kernel": "workspace:*",
+    "@open-team/llm": "workspace:*",
     "@open-team/platform": "workspace:*",
+    "@open-team/runner": "workspace:*",
     "hono": "^4.13.11",
     "zod": "^4.6.5"
   },

@@ -124,7 +124,7 @@ describe("承認", () => {
     });
   });
 
-  it("listStalledApprovedIntents：approved のまま止まった本番の Intent。試し実行・Kill Switch の発動中は除く", async () => {
+  it("listStalledApprovedIntents：approved のまま止まった本番の Intent。試し実行は除く", async () => {
     await inWorkspace((db, ws) => {
       const agent = fxAgent(db);
       const conn = fxConnector(db);
@@ -134,8 +134,6 @@ describe("承認", () => {
       fxIntent(db, { taskId: live, jobId: agent.jobId, connectorId: conn.connectorId, status: "approved", now: at(0) });
       fxIntent(db, { taskId: dry, jobId: agent.jobId, connectorId: conn.connectorId, status: "approved", now: at(-120) });
       expect(listStalledApprovedIntents(db, at(-60), 10)).toEqual([{ intentId: stalled, userId: ws.userId }]);
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
-      expect(listStalledApprovedIntents(db, at(-60), 10)).toEqual([]);
     });
   });
 

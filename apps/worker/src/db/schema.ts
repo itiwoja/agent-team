@@ -38,10 +38,6 @@ CREATE TABLE workspace (
   workspace_id            TEXT    NOT NULL,
   owner_user_id           TEXT    NOT NULL,
   status                  TEXT    NOT NULL DEFAULT 'active',
-  kill_switch_engaged     INTEGER NOT NULL DEFAULT 0,
-  kill_switch_engaged_at  TEXT,
-  kill_switch_engaged_by  TEXT,
-  kill_switch_reason      TEXT,
   timezone                TEXT    NOT NULL DEFAULT 'Asia/Tokyo',
   max_concurrent_tasks    INTEGER NOT NULL DEFAULT 3,
   audit_seq               INTEGER NOT NULL DEFAULT 0,
@@ -49,8 +45,6 @@ CREATE TABLE workspace (
   created_at              TEXT    NOT NULL,
   updated_at              TEXT    NOT NULL,
   CONSTRAINT workspace_status_check CHECK (${oneOf("status", ["active", "suspended"])}),
-  CONSTRAINT workspace_kill_switch_check CHECK (${bool("kill_switch_engaged")}),
-  CONSTRAINT workspace_kill_switch_reason_check CHECK (kill_switch_reason IS NULL OR length(kill_switch_reason) <= 500),
   CONSTRAINT workspace_timezone_check CHECK (${len("timezone", 1, 64)}),
   CONSTRAINT workspace_max_concurrent_tasks_check CHECK (max_concurrent_tasks >= 1),
   CONSTRAINT workspace_audit_seq_check CHECK (audit_seq >= 0),
@@ -359,7 +353,7 @@ CREATE TABLE asks (
   CONSTRAINT asks_question_check CHECK (question IS NULL OR json_type(question) = 'object'),
   CONSTRAINT asks_question_answer_check CHECK (question_answer IS NULL OR length(question_answer) <= 2000),
   CONSTRAINT asks_failure_reason_check CHECK (failure_reason IS NULL OR ${oneOf("failure_reason", [
-    "formation_invalid", "timeout", "budget_exceeded", "kill_switch", "agent_limit", "planner_error",
+    "formation_invalid", "timeout", "budget_exceeded", "agent_limit", "planner_error",
   ])}),
   CONSTRAINT asks_seed_key_check CHECK (seed_key IS NULL OR ${len("seed_key", 1, 64)}),
   CONSTRAINT asks_pack_id_check CHECK (pack_id IS NULL OR ${kebab("pack_id", 2, 40)}),
@@ -514,7 +508,7 @@ CREATE TABLE tasks (
     "queued", "provisioning", "running", "awaiting_approval", "executing", "succeeded", "completed", "rejected", "failed", "cancelled", "halted",
   ])}),
   CONSTRAINT tasks_halt_reason_check CHECK (halt_reason IS NULL OR ${oneOf("halt_reason", [
-    "budget_exceeded", "breaker_tripped", "timeout", "kill_switch", "policy_violation", "approval_expired", "agent_disabled",
+    "budget_exceeded", "breaker_tripped", "timeout", "policy_violation", "approval_expired", "agent_disabled",
   ])}),
   CONSTRAINT tasks_fail_reason_check CHECK (fail_reason IS NULL OR ${oneOf("fail_reason", [
     "sandbox_lost", "llm_unavailable", "precondition_failed", "agent_no_change", "agent_unable", "action_failed",
@@ -638,7 +632,7 @@ CREATE TABLE action_intents (
     "tool_error", "unreachable", "auth_required", "precondition_failed", "confirmed_not_delivered",
   ])}),
   CONSTRAINT action_intents_expire_reason_check CHECK (expire_reason IS NULL OR ${oneOf("expire_reason", [
-    "approval_timeout", "superseded", "tool_changed", "task_cancelled", "kill_switch", "task_ended", "rehearsal_end", "policy_changed",
+    "approval_timeout", "superseded", "tool_changed", "task_cancelled", "task_ended", "rehearsal_end", "policy_changed",
   ])}),
   CONSTRAINT action_intents_resolution_check CHECK (resolution IS NULL OR ${oneOf("resolution", ["confirmed_delivered", "confirmed_not_delivered", "retried"])}),
   CONSTRAINT action_intents_presend_attempts_check CHECK (presend_attempts BETWEEN 0 AND 3),

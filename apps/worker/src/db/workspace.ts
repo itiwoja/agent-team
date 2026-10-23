@@ -1,6 +1,6 @@
 // ワークスペースの行（workspace。id = 1 の1行）。packages/db/src/workspace.ts の WorkspaceDO 版。
 // Postgres 版の WsCtx（workspaceId で絞る）は要らない（DO そのものがワークスペース）。人の操作の利用者は引数で渡す。
-// ロックの順（M-21）も要らない（DO の中は1本の流れ）。Kill Switch は同じトランザクションの中で読めば発動と食い違わない
+// ロックの順（M-21）も要らない（DO の中は1本の流れ）
 
 import { appendAuditLog } from "./audit.ts";
 import { CODECS } from "./codecs.ts";
@@ -13,8 +13,7 @@ export const WORKSPACE_DEFAULTS = {
   maxConcurrentTasks: 3,
 } as const;
 
-const WORKSPACE_COLUMNS = `workspace_id, owner_user_id, status, kill_switch_engaged, kill_switch_engaged_at, kill_switch_engaged_by,
-  kill_switch_reason, timezone, max_concurrent_tasks, audit_seq, audit_last_hash, created_at, updated_at`;
+const WORKSPACE_COLUMNS = `workspace_id, owner_user_id, status, timezone, max_concurrent_tasks, audit_seq, audit_last_hash, created_at, updated_at`;
 
 /** ワークスペースの行（init の前は null） */
 export function getWorkspace(db: WsDb): WorkspaceRow | null {

@@ -119,10 +119,6 @@
   font-size: 13px;
   font-weight: 600;
 }
-.banner-danger {
-  background: var(--red-bg);
-  color: var(--red);
-}
 .banner-muted {
   margin-top: 8px;
   background: var(--surface);

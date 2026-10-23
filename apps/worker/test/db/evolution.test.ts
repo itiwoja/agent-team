@@ -135,12 +135,6 @@ describe("成功したタスクの数え方", () => {
       // minTasks を下げると、2件の担当・案の後に2件ある担当も入る（失敗の1件は数えない）
       expect(scanAgentsForSkillLearning(db, NOW, { minTasks: 2, limit: 10 })).toHaveLength(3);
 
-      // Kill Switch の間は対象にしない
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
-      expect(scanAgentsForSkillLearning(db, NOW, { minTasks: 3, limit: 10 })).toEqual([]);
-      expect(scanAgentsForPruning(db, NOW, { limit: 10 })).toEqual([]);
-      run(db, "UPDATE workspace SET kill_switch_engaged = 0, kill_switch_engaged_at = NULL WHERE id = 1");
-
       // 未決定の案（proposed）がある担当は、その後にタスクが増えても対象にしない（人が決めるまで次の案は作らない）
       run(db, "INSERT INTO skill_proposals (id, agent_id, status, name, description, body, created_at) VALUES (?, ?, 'proposed', '案', '説明', '本文', ?)", newId(), many.agentId, ago(10 * DAY));
       expect(scanAgentsForSkillLearning(db, NOW, { minTasks: 3, limit: 10 })).toEqual([]);

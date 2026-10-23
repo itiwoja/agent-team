@@ -17,23 +17,19 @@ import type {
   SandboxTool,
   SkillOrigin,
   Uuid,
-  WorkspaceRow,
 } from "../types.ts";
-import { requireWorkspace } from "../workspace.ts";
 
 // ---- 作業場 ----
 
 /**
  * 作業場のトークン（の SHA-256）から作業場を引く（system/sandbox.ts の WorkspaceDO 版。D-116）。
- * Postgres 版はワークスペースをまたいで引いたが、DO の中ではこのワークスペースの作業場と Kill Switch だけを返す
+ * Postgres 版はワークスペースをまたいで引いたが、DO の中ではこのワークスペースの作業場だけを返す
  */
 export function findSandboxSessionByTokenHash(
   db: WsDb,
   tokenHash: Uint8Array,
-): { session: SandboxSessionRow; workspace: Pick<WorkspaceRow, "kill_switch_engaged"> } | null {
-  const session = one<SandboxSessionRow>(db, CODECS.sandbox_sessions, "SELECT * FROM sandbox_sessions WHERE token_hash = ?", tokenHash);
-  if (session === null) return null;
-  return { session, workspace: { kill_switch_engaged: requireWorkspace(db).kill_switch_engaged } };
+): SandboxSessionRow | null {
+  return one<SandboxSessionRow>(db, CODECS.sandbox_sessions, "SELECT * FROM sandbox_sessions WHERE token_hash = ?", tokenHash);
 }
 
 /** 作業場を開く（starting）。同じタスクに開いた作業場があれば null（一意の索引 sandbox_sessions_task_open_uq） */

@@ -38,7 +38,7 @@ export function targetIdOf(hash: string): string | null {
 }
 
 export function AskPage({ askId }: { askId: string }) {
-  const { killSwitchEngaged, online } = useWorkspace();
+  const { online } = useWorkspace();
   const [detail, setDetail] = useState<AskDetail | null>(null);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   // 送る前の確認だけ取れなかった（区画の位置に知らせて、もう一度を出す）
@@ -171,7 +171,7 @@ export function AskPage({ askId }: { askId: string }) {
       </header>
 
       {/* あなたの番：止まった担当のやり直し・送る前の確認。あれば回答より先に */}
-      {detail.resume && <Resume askId={askId} resume={detail.resume} onDone={() => load()} blocked={killSwitchEngaged || !online} />}
+      {detail.resume && <Resume askId={askId} resume={detail.resume} onDone={() => load()} blocked={!online} />}
 
       {approvalsError ? (
         <section className="block" id="approvals" aria-label="送る前の確認">
@@ -195,7 +195,7 @@ export function AskPage({ askId }: { askId: string }) {
       {ask.status === "failed" ? (
         <FailedCard text={ask.text} reason={ask.failure?.reason ?? null} message={ask.failure?.message ?? "作れませんでした"} />
       ) : (
-        <Conversation detail={detail} approvals={visible.length} onReply={() => load()} blocked={killSwitchEngaged || !online} stopped={detail.resume !== null} />
+        <Conversation detail={detail} approvals={visible.length} onReply={() => load()} blocked={!online} stopped={detail.resume !== null} />
       )}
 
       <Stages detail={detail} messages={messages} stale={Boolean(error) || !online} />

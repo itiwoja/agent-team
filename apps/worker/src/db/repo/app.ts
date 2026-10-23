@@ -2,8 +2,8 @@
 // - 業務の関数は (db: WsDb, …) の同期の関数。workspace_id で絞る代わりに、DO そのものがワークスペース。見つからなければ null（API は 404）
 // - 読んで判断して書く関数は db.transaction(() => …) で包む。トランザクションの中で外部（Gemini・gateway）を呼ばない（G-14）
 // - ロックの順（M-21）・ワークスペースの行のロック・冪等性のキーのアドバイザリロックは要らない（DO の中は1本の流れ）
-// 中身：ワークスペースの今日の費用・Kill Switch（EP-27・28）・SSE の事象（EP-45）・監査ログの一覧（EP-43）・
-//       冪等性のキー（EP-27 ほか）・オーナーの初期投入（G-08）に使う行の読み書き。
+// 中身：ワークスペースの今日の費用・SSE の事象（EP-45）・監査ログの一覧（EP-43）・
+//       冪等性のキー・オーナーの初期投入（G-08）に使う行の読み書き。
 // 所属している利用者（getMemberUser）は D1 の users・memberships なので、ここには移さない（Worker の D1 の側で引く）。
 // SSE の事象の NOTIFY はない（DO が自分の SSE の接続へ配る：第5段）
 
@@ -11,7 +11,6 @@ import { canonicalJson, type Json, type JsonObject } from "@open-team/kernel";
 import { CODECS } from "../codecs.ts";
 import { all, count, newId, one, run, type WsDb } from "../sqlite.ts";
 import {
-  TASK_TERMINAL,
   type AgentJobRow,
   type AgentRow,
   type AgentSnapshotRow,
@@ -29,7 +28,6 @@ import {
   type JobStatus,
   type JobTemplate,
   type MicroUsd,
-  type TaskStatus,
   type ToolClassification,
   type ToolHash,
   type ToolScope,
@@ -37,7 +35,6 @@ import {
   type WorkspaceEventRow,
   type WorkspacePolicyRow,
 } from "../types.ts";
-import { getWorkspace } from "../workspace.ts";
 import { dayRange } from "./costs.ts";
 
 /** 書いた行（RETURNING）。なければ例外 */
@@ -69,135 +66,13 @@ export function getWorkspaceDayCostMicroUsd(db: WsDb, now: Date, timeZone: strin
 }
 
 // =====================================================================
-// Kill Switch（EP-27・28。SO §3.15、AS §3.9、FR-015）
-// =====================================================================
-
-/** Kill Switch で止めたタスク（順番の進め方の入力。previousStatus は止める前の状態） */
-export interface HaltedTask {
-  id: Uuid;
-  jobId: Uuid;
-  agentId: Uuid;
-  askId: Uuid | null;
-  askRunId: Uuid | null;
-  previousStatus: TaskStatus;
-}
-
-export interface KillSwitchEngageResult {
-  /** すでに発動していた（何も変えていない。監査ログも足さない：09_api/policies.md:75） */
-  alreadyEngaged: boolean;
-  engagedAt: Date;
-  haltedTasks: HaltedTask[];
-  expiredApprovalIds: Uuid[];
-  expiredIntentIds: Uuid[];
-}
-
-/**
- * Kill Switch の発動の DB の部分（SO §3.15 の3〜7、AS §3.9 の3）。1つのトランザクションで：
- * 1. 発動中なら何もしない（冪等）
- * 2. kill_switch_engaged・_at・_by・_reason
- * 3. 終了状態でない全タスクを halted（kill_switch）、finished_at、タスクのトークンを失効
- * 4. pending の承認を expired、proposed・pending_approval・approved の Intent を expired（kill_switch）。executing は触らない（完了を待つ）
- * 監査ログ・SSE の事象は呼び出し側が同じトランザクションで足す。ワークスペースの行がなければ（init の前）null
- */
-export function engageKillSwitchTx(db: WsDb, i: { by: Uuid | null; reason: string | null; now: Date }): KillSwitchEngageResult | null {
-  return db.transaction(() => {
-    const ws = getWorkspace(db);
-    if (!ws) return null;
-    const empty = { haltedTasks: [], expiredApprovalIds: [], expiredIntentIds: [] };
-    if (ws.kill_switch_engaged) return { alreadyEngaged: true, engagedAt: ws.kill_switch_engaged_at ?? i.now, ...empty };
-
-    run(
-      db,
-      `UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ?, kill_switch_engaged_by = ?, kill_switch_reason = ?, updated_at = ?
-        WHERE id = 1`,
-      i.now,
-      i.by,
-      i.reason,
-      i.now,
-    );
-    // 止める前の状態を先に読む（UPDATE … RETURNING では前の値を返せない）
-    const tasks = all<{ id: Uuid; job_id: Uuid; agent_id: Uuid; ask_id: Uuid | null; ask_run_id: Uuid | null; status: TaskStatus }>(
-      db,
-      {},
-      "SELECT id, job_id, agent_id, ask_id, ask_run_id, status FROM tasks WHERE status NOT IN (SELECT value FROM json_each(?)) ORDER BY id",
-      TASK_TERMINAL,
-    );
-    run(
-      db,
-      `UPDATE tasks SET status = 'halted', halt_reason = 'kill_switch', finished_at = ?, updated_at = ?,
-                        task_token_hash = NULL, task_token_expires_at = NULL
-        WHERE id IN (SELECT value FROM json_each(?))`,
-      i.now,
-      i.now,
-      tasks.map((t) => t.id),
-    );
-    const approvals = all<{ id: Uuid }>(db, {}, "UPDATE approvals SET status = 'expired', updated_at = ? WHERE status = 'pending' RETURNING id", i.now);
-    const intents = all<{ id: Uuid }>(
-      db,
-      {},
-      `UPDATE action_intents SET status = 'expired', expire_reason = 'kill_switch', updated_at = ?
-        WHERE status IN ('proposed', 'pending_approval', 'approved')
-       RETURNING id`,
-      i.now,
-    );
-    return {
-      alreadyEngaged: false,
-      engagedAt: i.now,
-      haltedTasks: tasks.map(
-        (t): HaltedTask => ({ id: t.id, jobId: t.job_id, agentId: t.agent_id, askId: t.ask_id, askRunId: t.ask_run_id, previousStatus: t.status }),
-      ),
-      expiredApprovalIds: approvals.map((r) => r.id).sort(),
-      expiredIntentIds: intents.map((r) => r.id).sort(),
-    };
-  });
-}
-
-/**
- * Kill Switch の解除の DB の部分（SO §3.15 の解除）。発動中でなければ何もしない（wasEngaged false）。
- * 発動の時刻・人・理由は消す（履歴は監査ログに残る）。止めたタスクは再開しない（BR-17）。ワークスペースの行がなければ null
- */
-export function releaseKillSwitchTx(db: WsDb, now: Date): { wasEngaged: boolean } | null {
-  return db.transaction(() => {
-    if (!getWorkspace(db)) return null;
-    const n = run(
-      db,
-      `UPDATE workspace SET kill_switch_engaged = 0, kill_switch_engaged_at = NULL, kill_switch_engaged_by = NULL,
-              kill_switch_reason = NULL, updated_at = ?
-        WHERE id = 1 AND kill_switch_engaged = 1`,
-      now,
-    );
-    return { wasEngaged: n > 0 };
-  });
-}
-
-/**
- * 動いているタスク（このインスタンスの登録簿）のうち、止まったもの（SO §3.15 の止まり方の3：見回り）。
- * ワークスペースの行がなければ Kill Switch と同じに扱う（全部止める）
- */
-export function findStoppedTasks(db: WsDb, taskIds: readonly Uuid[]): { killSwitchEngaged: boolean; terminalTaskIds: Uuid[] } {
-  const ws = getWorkspace(db);
-  if (!ws) return { killSwitchEngaged: true, terminalTaskIds: [...taskIds] };
-  const terminal =
-    taskIds.length === 0
-      ? []
-      : all<{ id: Uuid }>(
-          db,
-          {},
-          `SELECT id FROM tasks WHERE id IN (SELECT value FROM json_each(?)) AND status IN (SELECT value FROM json_each(?)) ORDER BY id`,
-          taskIds,
-          TASK_TERMINAL,
-        ).map((r) => r.id);
-  return { killSwitchEngaged: ws.kill_switch_engaged, terminalTaskIds: terminal };
-}
-
-// =====================================================================
 // ワークスペースの事象（SSE。EP-45、M-53、AS 8-4）
 // =====================================================================
 
 const EVENT_TYPE_RE = /^[a-z_]+(\.[a-z_]+)*$/;
 
 export interface WorkspaceEventInput {
-  /** AS §2.11 の WorkspaceEvent の type（'killswitch'・'check.upsert' など） */
+  /** AS §2.11 の WorkspaceEvent の type（'check.upsert' など） */
   type: string;
   data: Json;
 }

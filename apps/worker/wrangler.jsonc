@@ -9,14 +9,20 @@
   "durable_objects": {
     "bindings": [{ "name": "WORKSPACE", "class_name": "WorkspaceDO" }]
   },
+  // 依頼の編成（workflows/plan-ask.ts）と担当のタスク（workflows/task-run.ts）
+  "workflows": [
+    { "name": "makase-plan-ask", "binding": "PLAN_ASK", "class_name": "PlanAskWorkflow" },
+    { "name": "makase-task-run", "binding": "TASK_RUN", "class_name": "TaskRunWorkflow" }
+  ],
   "d1_databases": [{ "binding": "DB", "database_name": "makase", "migrations_dir": "migrations" }],
-  // 秘密でない設定。GOOGLE_CLIENT_SECRET は secret（ローカルは .dev.vars）
+  // 秘密でない設定。GOOGLE_CLIENT_SECRET・ANTHROPIC_API_KEY は secret（ローカルは .dev.vars）。CLAUDE_MODEL は設定プランナーと担当が使う Claude のモデル
   "vars": {
     "APP_BASE_URL": "http://localhost:8787",
     "GOOGLE_CLIENT_ID": "",
-    "ALLOWED_EMAILS": ""
+    "ALLOWED_EMAILS": "",
+    "CLAUDE_MODEL": "claude-opus-5-5"
   },
-  "secrets": { "required": ["GOOGLE_CLIENT_SECRET"] },
+  "secrets": { "required": ["GOOGLE_CLIENT_SECRET", "ANTHROPIC_API_KEY"] },
   "exports": {
     "WorkspaceDO": { "type": "durable-object", "storage": "sqlite" }
   }

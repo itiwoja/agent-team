@@ -87,7 +87,7 @@ export const ASK_SHAPES = ["single", "parallel", "aggregate", "chain"] as const;
 export type AskShape = (typeof ASK_SHAPES)[number];
 export const ASK_STATUSES = ["generating", "running", "waiting_input", "done", "failed", "cancelled"] as const;
 export type AskStatus = (typeof ASK_STATUSES)[number];
-export const ASK_FAILURE_REASONS = ["formation_invalid", "timeout", "budget_exceeded", "kill_switch", "agent_limit", "planner_error"] as const;
+export const ASK_FAILURE_REASONS = ["formation_invalid", "timeout", "budget_exceeded", "agent_limit", "planner_error"] as const;
 export type AskFailureReason = (typeof ASK_FAILURE_REASONS)[number];
 /** M-33：initial を足した */
 export const ASK_RUN_TRIGGERS = ["initial", "manual", "schedule", "resume"] as const;
@@ -123,7 +123,6 @@ export const HALT_REASONS = [
   "budget_exceeded",
   "breaker_tripped",
   "timeout",
-  "kill_switch",
   "policy_violation",
   "approval_expired",
   "agent_disabled",
@@ -168,7 +167,6 @@ export const INTENT_EXPIRE_REASONS = [
   "superseded",
   "tool_changed",
   "task_cancelled",
-  "kill_switch",
   "task_ended",
   /** リハーサルの終わり（0024 でリハーサルをやめた。過去の行だけ） */
   "rehearsal_end",
@@ -436,10 +434,6 @@ export interface WorkspaceRow {
   workspace_id: Uuid;
   owner_user_id: Uuid;
   status: WorkspaceStatus;
-  kill_switch_engaged: boolean;
-  kill_switch_engaged_at: Date | null;
-  kill_switch_engaged_by: Uuid | null;
-  kill_switch_reason: string | null;
   timezone: string;
   max_concurrent_tasks: number;
   audit_seq: number;

@@ -108,7 +108,7 @@ export function setAskQuestionAnswer(db: WsDb, askId: Uuid, answer: string, now:
   );
 }
 
-/** 編成ができた：generating → running（CAS。Kill Switch などで先に閉じられていれば null） */
+/** 編成ができた：generating → running（CAS。時間切れ・取り消しなどで先に閉じられていれば null） */
 export function markAskFormed(
   db: WsDb,
   askId: Uuid,
@@ -445,7 +445,7 @@ export function claimQueuedTask(db: WsDb, taskId: Uuid, now: Date): TaskRow | nu
   return one<TaskRow>(db, CODECS.tasks, "UPDATE tasks SET status = 'provisioning', updated_at = ? WHERE id = ? AND status = 'queued' RETURNING *", now, taskId);
 }
 
-/** 依頼の動いているタスク（Kill Switch・取り消しの確認用） */
+/** 依頼の動いているタスク（取り消しの確認用） */
 export function countOpenRunTasks(db: WsDb, runId: Uuid): number {
   return count(
     db,

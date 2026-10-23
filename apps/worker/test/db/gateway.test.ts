@@ -1,7 +1,6 @@
 // gateway（書き込みの唯一の出口）の問い合わせの試験（apps/worker/src/db/repo/gateway.ts）。
 // Postgres 版には試験がなかったので新しく書いた。Intent・承認・タスクの状態の移り変わりの条件を中心に見る
 import { describe, expect, it } from "vitest";
-import { appendAuditLog } from "../../src/db/audit.ts";
 import { CODECS } from "../../src/db/codecs.ts";
 import {
   completeIntent,
@@ -13,7 +12,6 @@ import {
   insertConnectorTool,
   listConnectorTools,
   listKernelDecisionsOfIntent,
-  listKillSwitchEngagedSeqs,
   listTaskAuditEvents,
   locateConnector,
   locateIntent,
@@ -71,7 +69,7 @@ describe("入口の引き直し", () => {
       const { agent, taskId } = setup(db, ws, { status: "running" });
       expect(resolveTaskByToken(db, TOKEN, NOW)).toEqual({
         ok: true,
-        task: { taskId, jobId: agent.jobId, agentId: agent.agentId, status: "running", isDryRun: false, killSwitchEngaged: false },
+        task: { taskId, jobId: agent.jobId, agentId: agent.agentId, status: "running", isDryRun: false },
       });
       for (const bad of [null, undefined, "", "   ", "x".repeat(TASK_TOKEN_MAX_LENGTH + 1), "unknown-token"]) {
         expect(resolveTaskByToken(db, bad, NOW)).toEqual({ ok: false, error: "UNAUTHORIZED" });
@@ -85,14 +83,12 @@ describe("入口の引き直し", () => {
     });
   });
 
-  it("Kill Switch は kill_switch、終了状態は task_terminated の TASK_HALTED（Kill Switch が先）", async () => {
+  it("終了状態は task_terminated の TASK_HALTED", async () => {
     await inWorkspace((db, ws) => {
       const { taskId } = setup(db, ws, { status: "running" });
       run(db, "UPDATE tasks SET status = 'failed', fail_reason = 'agent_unable', finished_at = ? WHERE id = ?", NOW, taskId);
       const terminated = resolveTaskByToken(db, TOKEN, NOW);
       expect(terminated).toMatchObject({ ok: false, error: "TASK_HALTED", haltReason: "task_terminated", task: { taskId, status: "failed" } });
-      run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
-      expect(resolveTaskByToken(db, TOKEN, NOW)).toMatchObject({ ok: false, error: "TASK_HALTED", haltReason: "kill_switch", task: { killSwitchEngaged: true } });
     });
   });
 
@@ -401,18 +397,13 @@ describe("gateway の判定の記録と承認の出どころ", () => {
     });
   });
 
-  it("承認の行・監査ログの Kill Switch の seq を読む", async () => {
+  it("承認の行を読む", async () => {
     await inWorkspace((db, ws) => {
       const { taskId, intent } = setup(db, ws);
       const id = intent();
       expect(getApprovalOfIntent(db, id)).toBeNull();
       const { approvalId } = fxApproval(db, ws, { taskId, intentId: id });
       expect(getApprovalOfIntent(db, id)).toMatchObject({ id: approvalId, status: "pending", approver_ids: [ws.userId] });
-      expect(listKillSwitchEngagedSeqs(db)).toEqual([]);
-      const a = appendAuditLog(db, { eventType: "killswitch.engaged", actorType: "user", actorId: ws.userId, payload: {} }, NOW);
-      appendAuditLog(db, { eventType: "killswitch.released", actorType: "user", actorId: ws.userId, payload: {} }, NOW);
-      const b = appendAuditLog(db, { eventType: "killswitch.engaged", actorType: "user", actorId: ws.userId, payload: {} }, LATER);
-      expect(listKillSwitchEngagedSeqs(db)).toEqual([a.seq, b.seq]);
     });
   });
 });

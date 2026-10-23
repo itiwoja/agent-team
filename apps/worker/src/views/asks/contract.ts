@@ -2,8 +2,10 @@
 // フロント（apps/web）は今の JSON の形のまま使う。サーバーは routes/v1.ts がここのスキーマで入力を検証し、出力はここの型で組む。
 // 約束：日時は ISO 8601（UTC）、ID は小文字の uuid。文言のうち「固定の文」（形の1行・段の状態・手が要るもの・汚染の印）は
 // サーバーが作って返す（LLM に書かせない。画面はそのまま出す）。
-// 書き込み（POST /asks・answer・resume・reply・質問への答え）の入出力と SSE の事象は写していない（生成・実行と一緒に第4段で移す）。
+// 書き込みは受け付け（POST /asks・answer）の入出力と SSE の事象を写した。resume・reply・質問への答えは実行と一緒に第4段で移す。
 // パスは /api/v1 からの相対：
+//   POST /asks                   API-072 依頼を作る（201）
+//   POST /asks/:id/answer        API-073 生成中の質問に答える
 //   GET  /asks/:id               API-075 依頼のページ（SCR-021）の表示用ビュー
 //   GET  /asks/:id/messages      API-076 連絡板（FR-064。Should）
 //   GET  /asks                   入口（SCR-020）の一覧
@@ -19,7 +21,7 @@ export const AskStatusSchema = z.enum(ASK_STATUSES);
 export type AskStatus = z.infer<typeof AskStatusSchema>;
 
 /** 生成に失敗した理由（asks.failure_reason）と、画面に出す1行は message */
-export const ASK_FAILURE_REASONS = ["formation_invalid", "timeout", "budget_exceeded", "kill_switch", "agent_limit", "planner_error"] as const;
+export const ASK_FAILURE_REASONS = ["formation_invalid", "timeout", "budget_exceeded", "agent_limit", "planner_error"] as const;
 export const AskFailureReasonSchema = z.enum(ASK_FAILURE_REASONS);
 export type AskFailureReason = z.infer<typeof AskFailureReasonSchema>;
 
@@ -27,6 +29,24 @@ const Uuid = z.guid();
 const Iso = z.string();
 
 // ---- 入力 ----
+
+/** API-072。mention は「@仕入れ係」で担当を指定したとき（担当の ID か名前。先頭の @ は付けても付けなくてもよい） */
+export const CreateAskBodySchema = z.strictObject({
+  text: z.string().trim().min(1).max(2000),
+  mention: z.string().trim().min(1).max(100).optional(),
+  /** パックの作業場（/packs/:packId）から出した依頼のとき、そのパックの id。入っているパックだけ（ほかは 400 VALIDATION_ERROR の packId）。設定プランナーはパックの担当を優先して使い回す */
+  packId: z.string().trim().min(1).max(100).optional(),
+});
+export type CreateAskBody = z.infer<typeof CreateAskBodySchema>;
+
+/** API-073。選択肢の id か、自分で書いた文のどちらか一方（選択肢が出ていないときの自由記述は allowFreeText のときだけ） */
+export const AnswerAskBodySchema = z
+  .strictObject({
+    choiceId: z.string().min(1).max(64).optional(),
+    text: z.string().trim().min(1).max(2000).optional(),
+  })
+  .refine((b) => (b.choiceId === undefined) !== (b.text === undefined), { message: "choiceId か text のどちらか一方を指定してください", path: ["choiceId"] });
+export type AnswerAskBody = z.infer<typeof AnswerAskBodySchema>;
 
 export const ListAsksQuerySchema = z.strictObject({
   limit: z.coerce.number().int().min(1).max(50).default(20),
@@ -297,6 +317,14 @@ export type AskDetailResponse = z.infer<typeof AskDetailResponseSchema>;
 export const ListAsksResponseSchema = z.object({ asks: z.array(AskSummarySchema) });
 export type ListAsksResponse = z.infer<typeof ListAsksResponseSchema>;
 
+/** API-072（201）・073（200）・077（202）の応答：依頼。生成・実行の結果は SSE で届く */
+export const AskAcceptedResponseSchema = z.object({
+  ask: AskSummarySchema,
+  /** API-077 のみ：動いている間の返事は順番待ちになった（true）。終わると自動で始まる */
+  queued: z.boolean().optional(),
+});
+export type AskAcceptedResponse = z.infer<typeof AskAcceptedResponseSchema>;
+
 // ---- 連絡板（FR-064。Should） ----
 
 export const AskMessageViewSchema = z.object({
@@ -314,3 +342,39 @@ export const AskMessageViewSchema = z.object({
 export type AskMessageView = z.infer<typeof AskMessageViewSchema>;
 export const ListAskMessagesResponseSchema = z.object({ messages: z.array(AskMessageViewSchema) });
 export type ListAskMessagesResponse = z.infer<typeof ListAskMessagesResponseSchema>;
+
+// ---- SSE の事象（workspace_events。type は ask.* ） ----
+// data の形はすべて askId を持つ。画面は askId で該当の依頼を引き直す（GET /asks/:id）か、data をそのまま使う。
+
+export const ASK_EVENT_TYPES = [
+  "ask.created",
+  "ask.question",
+  "ask.formed",
+  "ask.failed",
+  "ask.status",
+  "ask.step.started",
+  "ask.step.finished",
+  "ask.answered",
+  "ask.answer.updated",
+  "ask.message.posted",
+  "ask.agent_question",
+  "ask.reply.queue",
+] as const;
+export type AskEventType = (typeof ASK_EVENT_TYPES)[number];
+
+export type AskEventData =
+  | { type: "ask.created"; askId: string; text: string; status: "generating" }
+  | { type: "ask.question"; askId: string; question: AskQuestionView }
+  /** 編成ができた。SCR-020 は members を1行ずつ出して shapeLine を最後に出す */
+  | { type: "ask.formed"; askId: string; formation: FormationView; trigger: AskTriggerView | null }
+  | { type: "ask.failed"; askId: string; reason: AskFailureReason; message: string }
+  | { type: "ask.status"; askId: string; status: AskStatus }
+  | { type: "ask.step.started"; askId: string; runId: string; memberId: string; agentName: string; taskId: string; position: number | null }
+  | { type: "ask.step.finished"; askId: string; runId: string; memberId: string; agentName: string; taskId: string; state: StageState; stateText: string }
+  | { type: "ask.answered"; askId: string; runId: string; answer: AskAnswerView }
+  | { type: "ask.answer.updated"; askId: string; runId: string; answer: AskAnswerView }
+  | { type: "ask.message.posted"; askId: string; message: AskMessageView }
+  /** 担当からの質問が出た（posted）・答えた（answered）・待ちを終えた（expired） */
+  | { type: "ask.agent_question"; askId: string; questionId: string; status: "posted" | "answered" | "expired" }
+  /** 順番待ちの返事が入った（queued）・始まった（started）。画面は取り直して会話の末尾を直す */
+  | { type: "ask.reply.queue"; askId: string; replyId: string; status: "queued" | "started" };

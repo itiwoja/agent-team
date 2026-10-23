@@ -1,5 +1,5 @@
 // alarm の走査の試験（packages/db/src/system/scans.test.ts の WorkspaceDO 版。DB §4.1 の2・§4.12、IA §3.13・3.15）。
-// 自分の DO の中だけを走査する。Kill Switch のワークスペースを除く試験は「発動中は何も返さない」に置き換えた
+// 自分の DO の中だけを走査する
 import { describe, expect, it } from "vitest";
 import {
   markAskRunsScanned,
@@ -12,12 +12,11 @@ import {
   scanStuckExecutingIntents,
   scanStuckGeneratingAsks,
 } from "../../src/db/repo/scans.ts";
-import { newId, run, type WsDb } from "../../src/db/sqlite.ts";
+import { newId, run } from "../../src/db/sqlite.ts";
 import type { Uuid } from "../../src/db/types.ts";
 import { fxAgent, fxApproval, fxAsk, fxAskRun, fxConnector, fxIntent, fxTask, inWorkspace } from "./fixtures.ts";
 
 const NOW = new Date("2026-10-12T09:00:00.000Z");
-const engage = (db: WsDb) => run(db, "UPDATE workspace SET kill_switch_engaged = 1, kill_switch_engaged_at = ? WHERE id = 1", NOW);
 
 describe("走査（候補を返すだけ）", () => {
   it("定期の依頼：next_run_at <= now を古い順に", async () => {
@@ -57,7 +56,7 @@ describe("走査（候補を返すだけ）", () => {
     });
   });
 
-  it("queued のタスク：古い順。Kill Switch の発動中は何も返さない", async () => {
+  it("queued のタスク：古い順", async () => {
     await inWorkspace((db, ws) => {
       const agent = fxAgent(db);
       const t2 = fxTask(db, ws, agent, { status: "queued", now: new Date(NOW.getTime() + 10) });
@@ -65,8 +64,6 @@ describe("走査（候補を返すだけ）", () => {
       fxTask(db, ws, agent, { status: "running" });
       expect(scanQueuedTasks(db).map((h) => h.id)).toEqual([t1.taskId, t2.taskId]);
       expect(scanQueuedTasks(db)[0]?.queuedAt).toEqual(NOW);
-      engage(db);
-      expect(scanQueuedTasks(db)).toEqual([]);
     });
   });
 
@@ -85,8 +82,6 @@ describe("走査（候補を返すだけ）", () => {
       expect(scanActiveAskRuns(db, 1).map((h) => h.id)).toEqual([runs[2]]);
       markAskRunsScanned(db, [runs[2]!], new Date(NOW.getTime() + 2000));
       expect(scanActiveAskRuns(db, 1).map((h) => h.id)).toEqual([runs[0]]);
-      engage(db);
-      expect(scanActiveAskRuns(db, 10)).toEqual([]);
     });
   });
 
@@ -107,12 +102,10 @@ describe("走査（候補を返すだけ）", () => {
         { id: done, askId: done },
         { id: running, askId: running },
       ]);
-      engage(db);
-      expect(scanAsksWithPendingReplies(db)).toEqual([]);
     });
   });
 
-  it("ハートビートの途絶えた本番のタスク（provisioning・running）：承認の待ちは除く。Kill Switch の発動中は何も返さない", async () => {
+  it("ハートビートの途絶えた本番のタスク（provisioning・running）：承認の待ちは除く", async () => {
     await inWorkspace((db, ws) => {
       const agent = fxAgent(db);
       const at = (m: number) => new Date(NOW.getTime() - m * 60_000);
@@ -129,8 +122,6 @@ describe("走査（候補を返すだけ）", () => {
       const hits = scanStaleLiveTasks(db, at(10));
       expect(hits.map((h) => h.id)).toEqual([stale, provisioningNoBeat]);
       expect(hits[0]).toEqual({ id: stale, askId: null });
-      engage(db);
-      expect(scanStaleLiveTasks(db, at(10))).toEqual([]);
     });
   });
 

@@ -39,9 +39,8 @@ describe("1行の要約", () => {
   it("llm.called：モデル・トークン・費用", () => {
     expect(sum("llm.called", { model: "claude-sonnet-5-5", inputTokens: 12000, outputTokens: 900, costUsd: "0.050000" })).toBe("claude-sonnet-5-5 · 12k/900 · $0.05");
   });
-  it("task.status_changed・killswitch", () => {
+  it("task.status_changed", () => {
     expect(sum("task.status_changed", { from: "running", to: "halted" })).toBe("仕事の状態：実行中 → 停止");
-    expect(sum("killswitch.engaged", { reason: null, affectedTaskIds: ["a", "b"] })).toBe("全部止めた · 止めた仕事 2件");
   });
   it("知らない種類は主なキーを3つまで（長いハッシュは省く）", () => {
     expect(sum("x.y", { a: 1, hash: "a".repeat(64), b: "foo", c: true, d: "more" })).toBe("a: 1 · b: foo · c: true");

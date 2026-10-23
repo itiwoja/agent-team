@@ -212,7 +212,7 @@ function Toast({ n, onOpen, onClose }: { n: Notice; onOpen: () => void; onClose:
 }
 
 function NoticeSheet({ n, onClose }: { n: Notice; onClose: () => void }) {
-  const { killSwitchEngaged, online, refreshCounts } = useWorkspace();
+  const { online, refreshCounts } = useWorkspace();
   const titleId = useId();
   const sheetRef = useRef<HTMLDivElement>(null);
   const firstRef = useRef<HTMLButtonElement>(null);
@@ -311,7 +311,7 @@ function NoticeSheet({ n, onClose }: { n: Notice; onClose: () => void }) {
           <button type="button" className="btn" ref={firstRef} onClick={() => detail()}>
             くわしく
           </button>
-          <button type="button" className="btn btn-primary" disabled={busy || killSwitchEngaged || !online} onClick={() => void check()}>
+          <button type="button" className="btn btn-primary" disabled={busy || !online} onClick={() => void check()}>
             {busy ? "片づけています…" : "見た"}
           </button>
         </div>
