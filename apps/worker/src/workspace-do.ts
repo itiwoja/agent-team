@@ -166,10 +166,25 @@ export class WorkspaceDO extends DurableObject<Env> {
     idem: IdemRequest | null;
     now: Date;
   }): WriteResult<CreateAgentResponse> {
-    const r = runIdempotent(this.db, i.idem, 201, i.now, () => saveNewAgent(this.db, i));
+    let r: WriteResult<CreateAgentResponse>;
+    try {
+      r = runIdempotent(this.db, i.idem, 201, i.now, () => saveNewAgent(this.db, i));
+    } catch (e) {
+      // 保存が例外で戻った（トランザクションごと費用も消えた）：使った費用は持ち主なしで別に残す
+      this.recordUnownedCreateUsage(i.usage, i.now);
+      throw e;
+    }
+    // 保存を断られた（上限の競合など。トランザクションごと費用も消えた）：使った費用は持ち主なしで別に残す
+    if (!r.ok) this.recordUnownedCreateUsage(i.usage, i.now);
     // 同時に同じキーで2回来て、先に保存されていた：費用は使っているので、先のエージェントの分として残す
     if (r.ok && r.replayed === true) this.db.transaction(() => recordCreateUsage(this.db, r.body.agent.agentId, i.usage, i.now));
     return r;
+  }
+
+  /** エージェントを作れなかったときの LLM の費用を、持ち主なし（agent_id NULL）で残す。日ごとの上限に数えるため。usage が空なら何もしない */
+  recordUnownedCreateUsage(usage: Parameters<typeof recordCreateUsage>[2], now: Date): void {
+    if (usage.length === 0) return;
+    this.db.transaction(() => recordCreateUsage(this.db, null, usage, now));
   }
 
   /** API-081：エージェントを削除する（200。動いていれば 409 AGENT_BUSY） */

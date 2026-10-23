@@ -154,7 +154,31 @@ describe("POST /agents", () => {
     expect(res.status).toBe(502);
     expect(await errorOf(res)).toMatchObject({ code: "LLM_UPSTREAM_ERROR" });
     expect(llm.requests).toHaveLength(2);
-    await inNamedWorkspace(who.ws, (db) => expect(count(db, "SELECT count(*) FROM agents")).toBe(0));
+    await inNamedWorkspace(who.ws, (db) => {
+      expect(count(db, "SELECT count(*) FROM agents")).toBe(0);
+      // 呼んだ2回分の費用は、エージェントを作れなくても持ち主なしで残す（日ごとの上限に数える）
+      expect(count(db, "SELECT count(*) FROM usage_records WHERE agent_id IS NULL AND task_id IS NULL AND ask_id IS NULL AND phase = 'planner'")).toBe(2);
+    });
+  });
+
+  it("保存で断られたら（上限の競合）、LLM の費用は持ち主なしで残り、エージェントは増えない", async () => {
+    const who = await signIn("agent-save-denied");
+    // prepare のあと save の前に20体になる：LLM の台本の中で埋める
+    useLlm([
+      async () => {
+        await inNamedWorkspace(who.ws, (db) => {
+          for (let i = 0; i < 20; i += 1) fxAgent(db, { name: `担当${i}`, jobSlug: "j-one" });
+        });
+        return jsonReply(draft());
+      },
+    ]);
+    const res = await send("POST", "/agents", who, { text: "調べて" });
+    expect(res.status).toBe(422);
+    expect(await errorOf(res)).toMatchObject({ code: "AGENT_LIMIT_REACHED" });
+    await inNamedWorkspace(who.ws, (db) => {
+      expect(count(db, "SELECT count(*) FROM agents")).toBe(20);
+      expect(count(db, "SELECT count(*) FROM usage_records WHERE agent_id IS NULL AND phase = 'planner'")).toBe(1);
+    });
   });
 
   it("LLM の呼び出しが失敗したら 502", async () => {
@@ -167,6 +191,10 @@ describe("POST /agents", () => {
     const res = await send("POST", "/agents", who, { text: "調べて" });
     expect(res.status).toBe(502);
     expect(await errorOf(res)).toMatchObject({ code: "LLM_UPSTREAM_ERROR" });
+    // 送れたか分からない失敗の見積もりも持ち主なしで残る
+    await inNamedWorkspace(who.ws, (db) => {
+      expect(count(db, "SELECT count(*) FROM usage_records WHERE agent_id IS NULL AND phase = 'planner'")).toBeGreaterThanOrEqual(1);
+    });
   });
 
   it("今日の費用の上限を超えていれば 429（LLM は呼ばない）", async () => {
