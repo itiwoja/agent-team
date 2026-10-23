@@ -57,6 +57,16 @@ export function describeError(e: unknown): string {
       return "見つかりませんでした";
     case "WORKSPACE_IN_USE":
       return "このエージェントはいま作業場で動いています。終わってからもう一度試してください";
+    case "AGENT_BUSY":
+      return "このエージェントはいま動いています。終わってから削除してください";
+    case "AGENT_LIMIT_REACHED":
+      return "エージェントは20人までです。使っていないエージェントを削除してから作ってください";
+    case "DAILY_BUDGET_EXCEEDED":
+      return "今日の使える量に達しました。明日またお試しください";
+    case "LLM_UPSTREAM_ERROR":
+      return "AI の呼び出しがうまくいきませんでした。もう一度試してください";
+    case "VALIDATION_ERROR":
+      return "入力した内容を確かめてください";
     default:
       if (e.status === 404) return "見つかりませんでした";
       return e.status >= 500 ? "サーバーでうまくいきませんでした。時間をおいて試してください" : "うまくいきませんでした。もう一度試してください";
@@ -187,6 +197,15 @@ export interface Me {
 
 // ---------------------------------------------------------------------------
 // 依頼（SCR-020・021）。契約：apps/app/src/asks/contract.ts（型は手で写した。ここだけ合わせ直せばよい）
+
+export interface CreateAgentResponse {
+  agent: { agentId: string; name: string; role: string | null; summary: string };
+}
+export interface DeleteAgentResponse {
+  agentId: string;
+  /** 定期を止めた依頼の数 */
+  stoppedAsks: number;
+}
 
 export type AskShape = "single" | "parallel" | "aggregate" | "chain";
 export type AskStatus = "generating" | "running" | "waiting_input" | "done" | "failed" | "cancelled";
@@ -854,6 +873,10 @@ export const api = {
   // エージェントの一覧（agents/contract.ts）
   /** 生成した担当のライブラリ（SCR-014） */
   agents: () => request<AgentLibraryResponse>("GET", "/agents"),
+  /** API-080：したいことの文からエージェントを1体作る（201）。作ったら SSE の agent.created が届く */
+  createAgent: (text: string, idempotencyKey?: string) => request<CreateAgentResponse>("POST", "/agents", { body: { text }, idempotencyKey }),
+  /** API-081：エージェントを削除する（履歴は残る。動いていれば 409 AGENT_BUSY）。定期の依頼は止まる */
+  deleteAgent: (agentId: string) => request<DeleteAgentResponse>("DELETE", `/agents/${encodeURIComponent(agentId)}`),
   /** 担当の作業場を最初に戻す（作業場が動いている間は 409 WORKSPACE_IN_USE） */
   resetAgentWorkspace: (agentId: string) => request<ResetAgentWorkspaceResponse>("POST", `/agents/${encodeURIComponent(agentId)}/workspace/reset`, { body: {} }),
   /** 依頼の一覧（新しい順。最大 50 件：asks/contract.ts の ListAsksQuerySchema） */
