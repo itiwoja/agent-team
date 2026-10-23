@@ -3,7 +3,7 @@
 // 「生成した担当」は依頼（asks）の編成で作られたもの（ask_members に並ぶ）と、用意した依頼の担当。removed は出さない（画面の約束：06 agents.md）
 
 import { CODECS } from "../codecs.ts";
-import { all, type WsDb } from "../sqlite.ts";
+import { all, count, run, type WsDb } from "../sqlite.ts";
 import type { AgentRow, AskStatus, JobKind, JobStatus, JobTemplate, Uuid } from "../types.ts";
 
 /** 一覧の1行：担当の行 ＋ 仕事の数 ＋ 関わった依頼の数 ＋ 本番のタスクの数と最後に動いた時刻 */
@@ -151,4 +151,53 @@ export function listAgentJobs(db: WsDb, agentIds: readonly Uuid[]): AgentJobSumm
       ORDER BY agent_id, created_at, id`,
     agentIds,
   );
+}
+
+// ---- 作る・削除する（API-080・081） ----
+
+/** 生きている（removed でない）エージェントの数 */
+export function countLivingAgents(db: WsDb): number {
+  return count(db, "SELECT count(*) FROM agents WHERE status <> 'removed'");
+}
+
+/**
+ * いま動いているか（削除を断る条件）：終わっていないタスクがある、または
+ * 生成中・入力待ちの依頼の編成に入っている、または定期でない実行中の依頼の編成に入っている。
+ * 定期の依頼は実行のあとも status = running のまま次を待つので、タスクが動いていなければ止めて削除してよい
+ */
+export function isAgentBusy(db: WsDb, agentId: Uuid): boolean {
+  return (
+    count(
+      db,
+      `SELECT (
+         EXISTS (SELECT 1 FROM tasks t WHERE t.agent_id = ?1
+                  AND t.status NOT IN ('succeeded','completed','rejected','failed','cancelled','halted'))
+         OR EXISTS (SELECT 1 FROM ask_members m JOIN asks k ON k.id = m.ask_id
+                     WHERE m.agent_id = ?1
+                       AND (k.status IN ('generating','waiting_input') OR (k.status = 'running' AND k."trigger" IS NULL)))
+       )`,
+      agentId,
+    ) > 0
+  );
+}
+
+/** 定期が動いている依頼（trigger があり next_run_at が入っている）のうち、この担当が編成に入っているもの */
+export function listScheduledAskIdsOf(db: WsDb, agentId: Uuid): Uuid[] {
+  return all<{ ask_id: Uuid }>(
+    db,
+    {},
+    `SELECT DISTINCT m.ask_id FROM ask_members m JOIN asks k ON k.id = m.ask_id
+      WHERE m.agent_id = ? AND k."trigger" IS NOT NULL AND k.next_run_at IS NOT NULL ORDER BY m.ask_id`,
+    agentId,
+  ).map((r) => r.ask_id);
+}
+
+/** 担当の終わっていない仕事（status <> 'done'）の ID */
+export function listOpenJobIds(db: WsDb, agentId: Uuid): Uuid[] {
+  return all<{ id: Uuid }>(db, {}, "SELECT id FROM agent_jobs WHERE agent_id = ? AND status <> 'done' ORDER BY created_at, id", agentId).map((r) => r.id);
+}
+
+/** 論理削除（status = removed）。生きている担当だけ。変えたら true */
+export function markAgentRemoved(db: WsDb, agentId: Uuid, now: Date): boolean {
+  return run(db, "UPDATE agents SET status = 'removed', updated_at = ? WHERE id = ? AND status <> 'removed'", now, agentId) > 0;
 }

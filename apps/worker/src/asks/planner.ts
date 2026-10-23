@@ -387,7 +387,7 @@ interface Converted {
   proposal: { shape: Shape; members: ProposedMember[]; aggregator: ProposedMember | null };
 }
 
-function normalizeGrants(
+export function normalizeGrants(
   draft: MemberDraftT["grants"],
   connectors: readonly PlannerConnector[],
   notes: string[],

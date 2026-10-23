@@ -32,6 +32,7 @@ export const ERROR_STATUS = {
   TOOL_CHANGED: 409,
   PACK_ALREADY_INSTALLED: 409, // パック（D-116）は1つのワークスペースに1回だけ
   WORKSPACE_IN_USE: 409, // 担当の作業場を最初に戻す操作：その担当の動いているタスクが作業場を開いている
+  AGENT_BUSY: 409, // エージェントの削除：動いているタスクか、生成中・実行中・入力待ちの依頼の編成に入っている
   PAYLOAD_TOO_LARGE: 413,
   UNSUPPORTED_MEDIA_TYPE: 415,
   RULE_NOT_ALLOWED: 422, // details { failedConditions?, reason? }
@@ -80,6 +81,7 @@ export const DEFAULT_ERROR_MESSAGES: Record<ApiErrorCode, string> = {
   TOOL_CHANGED: "ツールの定義が変わりました",
   PACK_ALREADY_INSTALLED: "このパックはもう入っています",
   WORKSPACE_IN_USE: "この担当の作業場は動いているタスクが使っています",
+  AGENT_BUSY: "このエージェントはいま動いています。終わってから削除してください",
   PAYLOAD_TOO_LARGE: "本文が大きすぎます",
   UNSUPPORTED_MEDIA_TYPE: "本文は application/json で送ってください",
   RULE_NOT_ALLOWED: "このルールは作れません",
