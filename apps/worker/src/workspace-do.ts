@@ -11,15 +11,15 @@ import type { LlmMessagesResponse, LlmPhase, RunTaskEnd, TaskContext, ToolCallRe
 import { acceptAsk, answerAskQuestion } from "./asks/accept.ts";
 import { takeStartableTasks } from "./asks/drive.ts";
 import { advanceTx } from "./asks/run.ts";
-import { loadPlannerMaterials } from "./asks/generate.ts";
+import { failGeneration, loadPlannerMaterials } from "./asks/generate.ts";
 import { savePlanResult, type PlanSaveOutcome, type PlanStepResult } from "./asks/plan-steps.ts";
 import type { PlannerInput } from "./asks/planner.ts";
 import { appendAuditLog } from "./db/audit.ts";
 import { insertWorkspacePolicyIfMissing } from "./db/repo/app.ts";
 import { bumpPlannerAttempts, getAsk, getAskRun } from "./db/repo/asks.ts";
-import type { UsageRecordInput } from "./db/repo/edge.ts";
+import { getTask, type UsageRecordInput } from "./db/repo/edge.ts";
 import { MIGRATIONS } from "./db/schema.ts";
-import { wsDbOf, type WsDb } from "./db/sqlite.ts";
+import { count, wsDbOf, type WsDb } from "./db/sqlite.ts";
 import { getWorkspace, initWorkspace } from "./db/workspace.ts";
 import { captureEdge, type EdgeOutcome } from "./edge/fault.ts";
 import { llmGate, llmRecord, type LlmGate } from "./edge/llm-call.ts";
@@ -159,7 +159,15 @@ export class WorkspaceDO extends DurableObject<Env> {
     const id = `plan-${askId}-${phase}`;
     const workspaceId = getWorkspace(this.db)?.workspace_id;
     if (workspaceId === undefined) return;
-    await this.env.PLAN_ASK.create({ id, params: { workspaceId, askId, userId } });
+    try {
+      await this.env.PLAN_ASK.create({ id, params: { workspaceId, askId, userId } });
+    } catch (e) {
+      // 依頼と冪等性の記録はもう確定しているので、同じキーで送り直しても記録した応答が返るだけで、編成は始まらない。
+      // generating のまま残さず、生成の失敗として閉じる（画面は「もう一度送ってください」。応答の本文は受け付けた時点の generating のまま）
+      const detail = e instanceof Error ? e.message : String(e);
+      console.error("ask.plan_start_failed", { askId, error: detail });
+      failGeneration(this.db, { askId, reason: "planner_error", detail: `編成の Workflow を起動できなかった：${detail}`, now: new Date(), secrets: this.secrets() });
+    }
   }
 
   // ---- 編成の Workflow（workflows/plan-ask.ts）から呼ぶ ----
@@ -194,6 +202,7 @@ export class WorkspaceDO extends DurableObject<Env> {
       const now = new Date();
       const r = takeStartableTasks(this.db, now);
       for (const runId of r.haltedRunIds) this.advanceRun(runId, now);
+      let startFailed = false;
       for (const t of r.started) {
         try {
           await this.env.TASK_RUN.create({ id: `task-${t.id}`, params: { workspaceId, taskId: t.id } });
@@ -201,9 +210,11 @@ export class WorkspaceDO extends DurableObject<Env> {
           console.error("task.start_failed", { taskId: t.id, error: e instanceof Error ? e.message : String(e) });
           const after = finishTaskRun(this.db, t.id, "error", new Date());
           if (after?.ask_run_id) this.advanceRun(after.ask_run_id, new Date());
+          startFailed = true;
         }
       }
-      if (r.haltedRunIds.length === 0) return;
+      // 止めた・起動できなかったタスクの後始末で、次の段のタスクが queued になったり枠が空いたりする。もう一度見る
+      if (r.haltedRunIds.length === 0 && !startFailed) return;
     }
   }
 
@@ -218,7 +229,10 @@ export class WorkspaceDO extends DurableObject<Env> {
   /** TaskWorkflow の終わり：後始末 → 1歩進める → 次のタスクを起動 */
   async taskFinished(taskId: string, ended: RunTaskEnd | "error"): Promise<void> {
     const now = new Date();
-    const after = finishTaskRun(this.db, taskId, ended, now);
+    // Workflow が finish の歩みをやり直したとき（記録のあと RPC の戻りで落ちた）、段の終わりの事象を二重に出さない。
+    // 1歩進める・次を起動するのは何度呼んでも同じ結果になるので、続けて行う
+    const done = count(this.db, "SELECT count(*) FROM workspace_events WHERE type = 'ask.step.finished' AND json_extract(data, '$.taskId') = ?", taskId) > 0;
+    const after = done ? getTask(this.db, taskId) : finishTaskRun(this.db, taskId, ended, now);
     if (after?.ask_run_id) this.advanceRun(after.ask_run_id, now);
     await this.startTasks();
   }

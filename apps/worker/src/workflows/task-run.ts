@@ -9,7 +9,7 @@
 
 import type { LlmRequest, LlmResponse } from "@open-team/llm";
 import type { EdgePort, LlmMessagesResponse, LlmPhase, RunTaskEnd, TaskContext, ToolCallResult } from "@open-team/runner";
-import { runTask } from "@open-team/runner";
+import { EdgeError, runTask } from "@open-team/runner";
 import { WorkflowEntrypoint, type WorkflowEvent, type WorkflowStep, type WorkflowStepConfig } from "cloudflare:workers";
 import { unwrapEdge, type EdgeOutcome } from "../edge/fault.ts";
 import { generateWithRetry, LlmCallError, LlmGenerateFailure, prepareLlmCall, usageProviderOf, type LlmCallErrorKind, type LlmCallUsage } from "../edge/llm-call.ts";
@@ -22,6 +22,12 @@ export interface TaskRunParams {
 }
 
 const NO_RETRY: WorkflowStepConfig = { retries: { limit: 0, delay: 1_000 } };
+
+/**
+ * LLM の1回（やり直しを含む）の打ち切り。歩みはやり直さないので、ここで切らないと Claude が詰まったときに歩みが長く止まり、
+ * 落ちると費用が記録されない。切れたときは中断（aborted）として、その回の見積もりを費用に数えて閉じる（edgeLlmFail）
+ */
+const LLM_TURN_TIMEOUT_MS = 10 * 60_000;
 
 /**
  * 歩み（step.do）。結果は JSON にできる値だが、step.do の Serializable の型は unknown を含む型（LlmMessagesResponse・TaskContext など）を通さないので、
@@ -72,7 +78,7 @@ async function llmTurn(env: Env, ws: TaskEdgeRpc, taskId: string, rawReq: unknow
   const begun = await ws.edgeLlmBegin(taskId, { budgetEstimateMicroUsd: prepared.budgetEstimateMicroUsd, model: llmReq.model, phase });
   if (!begun.ok) return begun;
   try {
-    const { response, usage } = await generateWithRetry(client, llmReq, prepared);
+    const { response, usage } = await generateWithRetry(client, llmReq, prepared, { signal: AbortSignal.timeout(LLM_TURN_TIMEOUT_MS) });
     return await ws.edgeLlmSettle(taskId, { llmReq, phase, usage, response, provider });
   } catch (e) {
     if (e instanceof LlmGenerateFailure) return fail(e.error.kind, e.error.message, e.error.llmError?.status ?? null, e.usage);
@@ -89,7 +95,17 @@ export class TaskRunWorkflow extends WorkflowEntrypoint<Env, TaskRunParams> {
     const edge: EdgePort = {
       getTaskContext: async () => unwrapEdge(await stepDo(step, "context", {}, async () => ws().edgeTaskContext(taskId))),
       llmMessages: async (_token, req) => unwrapEdge(await stepDo(step, `llm-${++n}`, NO_RETRY, async () => llmTurn(this.env, ws(), taskId, req))),
-      postEvents: async (_token, events) => unwrapEdge(await stepDo(step, `events-${++n}`, {}, async () => ws().edgePostEvents(taskId, events))),
+      // 進み具合の記録はやり直さない（DO が記録してから RPC の戻りで落ちると、やり直しで二重に入る）。落ちたら捨てた分として続ける
+      postEvents: async (_token, events) => {
+        const name = `events-${++n}`;
+        try {
+          return unwrapEdge(await stepDo(step, name, NO_RETRY, async () => ws().edgePostEvents(taskId, events)));
+        } catch (e) {
+          if (e instanceof EdgeError) throw e;
+          console.warn("task.events_dropped", { taskId, step: name, error: e instanceof Error ? e.message : String(e) });
+          return { accepted: 0, dropped: Array.isArray(events) ? events.length : 0 };
+        }
+      },
       callTool: async (_token, toolCallId) => unwrapEdge(await stepDo(step, `tool-${++n}`, NO_RETRY, async () => ws().edgeCallTool(taskId, toolCallId))),
     };
     let ended: RunTaskEnd | "error" = "error";
