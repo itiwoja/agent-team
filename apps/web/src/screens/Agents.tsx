@@ -1,5 +1,5 @@
 // SCR-014：担当（`/agents`）。頼むと生まれた担当のライブラリ。名前・役割・いまの様子・関わった依頼・仕事を、最後に動いた順に並べる
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { api, describeError, type AgentLibraryItem, type AgentLibraryResponse } from "../api";
 import { Avatar } from "../components/Avatar";
 import { LoadError } from "../components/LoadError";
@@ -9,7 +9,10 @@ import { Link, useLocationHash } from "../lib/router";
 import { useWorkspaceEvent } from "../workspace";
 import type { AvatarMood } from "../lib/avatar";
 import { ASK_STATUS_TEXT } from "../lib/askList";
+import { trapTab } from "../ui/trapTab";
 import { Chevron } from "../ui/icons";
+import { AgentBirth, type BirthAgent } from "../components/AgentBirth";
+import { NewAgentSheet } from "../components/NewAgentSheet";
 import { AgentSkills, restorableCount } from "../components/AgentSkills";
 
 /** いまの様子 → 表情 */
@@ -33,11 +36,23 @@ export function metaLineOf(a: Pick<AgentLibraryItem, "askCount" | "jobCount" | "
   return parts.join(" · ");
 }
 
+/** 作成の冪等キー（送るたびに新しく。使えない環境では付けない） */
+function newKey(): string | undefined {
+  return typeof crypto !== "undefined" && typeof crypto.randomUUID === "function" ? crypto.randomUUID() : undefined;
+}
+
 export function Agents() {
   const [data, setData] = useState<AgentLibraryResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const seq = useRef(0);
+  // 新しいエージェントを作る：入力欄（開いているか・書いた文・失敗）、作っている間のたまご、できた名前
+  const [sheetOpen, setSheetOpen] = useState(false);
+  const [newText, setNewText] = useState("");
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [born, setBorn] = useState<BirthAgent[] | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const my = ++seq.current;
@@ -60,11 +75,41 @@ export function Agents() {
   // 編成ができた・担当が動いた・終わったら取り直す（事象は取りこぼしてもよい。まとめて 400ms 後に1回）
   useWorkspaceEvent((type) => {
     if (type === "reset") return void load();
+    if (type === "agent.created" || type === "agent.removed") {
+      clearTimeout(timer.current);
+      timer.current = setTimeout(() => void load(), 400);
+      return;
+    }
     // スキルの案が届いた・整理で外した・戻した
     if (!type.startsWith("ask.") && type !== "agent.skill_proposed" && !type.startsWith("agent.evolution.")) return;
     clearTimeout(timer.current);
     timer.current = setTimeout(() => void load(), 400);
   });
+
+  const create = (text: string) => {
+    setCreateError(null);
+    setCreating(true);
+    api
+      .createAgent(text, newKey())
+      .then(({ agent }) => setBorn([{ name: agent.name, summary: agent.summary }]))
+      .catch((e: unknown) => {
+        setCreateError(describeError(e));
+        setCreating(false);
+      });
+  };
+  // 生まれたところを見せ終わったら一覧に戻り、取り直す
+  const birthDone = () => {
+    setCreating(false);
+    setBorn(null);
+    setSheetOpen(false);
+    setNewText("");
+    void load();
+  };
+  const removed = (agentId: string, stoppedAsks: number) => {
+    setData((d) => (d ? { ...d, items: d.items.filter((x) => x.id !== agentId), count: Math.max(0, d.count - 1) } : d));
+    setNotice(stoppedAsks > 0 ? `削除しました。定期の依頼を ${stoppedAsks}件 止めました` : "削除しました");
+    void load();
+  };
 
   if (error && !data)
     return (
@@ -88,6 +133,16 @@ export function Agents() {
       <p className="muted agents-lead">
         頼むと生まれたエージェントです。似た依頼は同じエージェントが引き受け、許可したルールを引き継ぎます。<Link to="/packs">パック</Link>からまとめて入れることもできます。
       </p>
+      <div className="agents-actions">
+        <button type="button" className="btn btn-primary" disabled={data.count >= data.limit} onClick={() => setSheetOpen(true)}>
+          新しいエージェントを作る
+        </button>
+      </div>
+      {notice && (
+        <p className="small agents-notice" role="status">
+          {notice}
+        </p>
+      )}
       {error && (
         <p className="error small" role="status">
           {error}
@@ -103,16 +158,18 @@ export function Agents() {
       ) : (
         <ul className="rows agents-list" aria-label="エージェント">
           {data.items.map((a) => (
-            <AgentCard key={a.id} agent={a} onChanged={load} />
+            <AgentCard key={a.id} agent={a} onChanged={load} onRemoved={removed} />
           ))}
         </ul>
       )}
       {data.count >= data.limit && <p className="muted small agents-limit">エージェントは {data.limit} 人までです。これ以上は新しく作れません</p>}
+      {sheetOpen && !creating && <NewAgentSheet text={newText} onText={setNewText} error={createError} onSubmit={create} onClose={() => setSheetOpen(false)} />}
+      {creating && <AgentBirth agents={born} onDone={birthDone} />}
     </div>
   );
 }
 
-function AgentCard({ agent: a, onChanged }: { agent: AgentLibraryItem; onChanged: () => void }) {
+function AgentCard({ agent: a, onChanged, onRemoved }: { agent: AgentLibraryItem; onChanged: () => void; onRemoved: (agentId: string, stoppedAsks: number) => void }) {
   // /agents#<agentId> で開いたら、この担当のカードを開き、見える位置まで動かして目立たせる
   const hash = useLocationHash();
   const targeted = hash === `#${a.id}`;
@@ -146,6 +203,7 @@ function AgentCard({ agent: a, onChanged }: { agent: AgentLibraryItem; onChanged
           <Chevron open={open} />
         </span>
       </button>
+      <RemoveAgent agent={a} onRemoved={onRemoved} />
       {open && (
         <div id={panelId} className="agent-detail">
           <section>
@@ -192,6 +250,77 @@ function AgentCard({ agent: a, onChanged }: { agent: AgentLibraryItem; onChanged
         </div>
       )}
     </li>
+  );
+}
+
+/** 「削除」：確かめてから削除する（履歴は残る）。いま動いていれば 409 AGENT_BUSY で断られる */
+function RemoveAgent({ agent: a, onRemoved }: { agent: AgentLibraryItem; onRemoved: (agentId: string, stoppedAsks: number) => void }) {
+  const titleId = useId();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const close = () => {
+    if (!busy) setConfirming(false);
+  };
+  const closeRef = useRef(close);
+  closeRef.current = close;
+  useEffect(() => {
+    if (!confirming) return;
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeRef.current();
+        return;
+      }
+      trapTab(e, dialogRef.current);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [confirming]);
+  const remove = () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    api
+      .deleteAgent(a.id)
+      .then((r) => onRemoved(a.id, r.stoppedAsks))
+      .catch((e: unknown) => {
+        setError(describeError(e));
+        setBusy(false);
+      });
+  };
+  return (
+    <>
+      <button type="button" className="btn btn-ghost agent-remove" onClick={() => setConfirming(true)} aria-label={`${a.name}を削除`}>
+        削除
+      </button>
+      {confirming && (
+        <div className="agent-modal" onMouseDown={(e) => e.target === e.currentTarget && close()}>
+          <div className="agent-modal-card" role="dialog" aria-modal="true" aria-labelledby={titleId} ref={dialogRef}>
+            <h2 className="agent-modal-title" id={titleId}>
+              {a.name}を削除しますか
+            </h2>
+            <p className="muted small">履歴は残ります。定期の依頼にこのエージェントが入っていれば、その定期は止まります。</p>
+            {error && (
+              <p className="error small" role="alert">
+                {error}
+              </p>
+            )}
+            <div className="agent-modal-actions">
+              <button type="button" ref={cancelRef} className="btn" disabled={busy} onClick={close}>
+                やめる
+              </button>
+              <button type="button" className="btn btn-primary" disabled={busy} onClick={remove}>
+                {busy ? "削除しています…" : "削除する"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

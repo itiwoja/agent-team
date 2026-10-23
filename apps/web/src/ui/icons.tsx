@@ -17,8 +17,8 @@ export const TasksIcon = ({ size = 20 }: P) => svg(size, <><path d="M9 6h11" /><
 /* エージェント（まるい体に光る目：Avatar と同じ顔の線画） */
 export const PacksIcon = ({ size = 20 }: P) => svg(size, <><path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5v-7Z" /><path d="M4 8.5 12 13l8-4.5M12 13v7" /></>);
 export const AgentsIcon = ({ size = 20 }: P) => svg(size, <><path d="M12 4c4.4 0 7 2.9 7 6.6S16.4 17 12 17s-7-2.7-7-6.4S7.6 4 12 4Z" /><path d="M9.5 10.5v.01M14.5 10.5v.01" strokeWidth={2.6} /><path d="M9 17v3M15 17v3" /></>)
-/* 新しく頼む（紙に鉛筆） */
-export const ComposeIcon = ({ size = 20 }: P) => svg(size, <><path d="M11 4.5H6.5a2 2 0 0 0-2 2v11a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V13" /><path d="M17.6 3.9a1.9 1.9 0 0 1 2.7 2.7L12.5 14.4 9 15.2l.8-3.5 7.8-7.8Z" /></>)
+/* チャット（吹き出し） */
+export const ChatIcon = ({ size = 20 }: P) => svg(size, <><path d="M12 4.5c4.7 0 8 3 8 6.8s-3.3 6.7-8 6.7c-1 0-2-.1-2.9-.4L5 19.5l1.1-3.6C4.8 14.7 4 13.1 4 11.3 4 7.5 7.3 4.5 12 4.5Z" /></>)
 export const CalendarIcon = ({ size = 20 }: P) => svg(size, <><rect x="4" y="5.5" width="16" height="14" rx="2.5" /><path d="M4 10h16M8.5 3.5v4M15.5 3.5v4" /></>)
 export const CheckIcon = ({ size = 20 }: P) => svg(size, <><circle cx="12" cy="12" r="9" /><path d="m8 12 3 3 5-6" /></>)
 export const StopIcon = ({ size = 18 }: P) => (

@@ -9,7 +9,7 @@ import { apiRouter, type ApiDeps } from "./router.ts";
 
 export function v1Routes(app: Hono<AppEnv>, deps: ApiDeps): void {
   const r = apiRouter(app);
-  agentRoutes(r);
+  agentRoutes(r, deps);
   askRoutes(r, deps);
   app.all("/api/v1/*", (c) => errorResponse(c, "NOT_FOUND"));
 }

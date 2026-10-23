@@ -3,6 +3,7 @@
 // 依頼ごとの細かいこと（エージェントの動き・送る前の確認・ファイル）は「詳しく」から依頼のページ（/asks/:id）で見る
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type RefObject } from "react";
 import { api, describeError, type AskDetail, type AskSummary, type AskTurnView } from "../api";
+import { AgentBirth } from "../components/AgentBirth";
 import { Avatar } from "../components/Avatar";
 import { Egg, GenFormation } from "../components/GenStage";
 import { LoadError } from "../components/LoadError";
@@ -92,13 +93,17 @@ export function Chat() {
   }, [anyLive, load]);
 
   // 生まれたエージェントを少し見せてから、会話の中の依頼に置き換える（ページは移らない）
+  // 新しく作ったエージェントがいれば全画面の生成画面（AgentBirth）で見せる。使い回しだけのときはここで見せる
+  const newcomers = state.phase === "shown" ? state.members.filter((m) => m.isNew) : [];
+  const birth = newcomers.length > 0;
   useEffect(() => {
-    if (state.phase !== "shown") return;
+    if (state.phase !== "shown" || birth) return;
     const id = setTimeout(() => {
       void load().then(reset);
     }, enterAskDelay(state.members.length));
     return () => clearTimeout(id);
-  }, [state.phase, state.members.length, load, reset]);
+  }, [state.phase, state.members.length, birth, load, reset]);
+  const birthDone = useCallback(() => void load().then(reset), [load, reset]);
 
   // 書きかけの文はほかの画面へ移っても残す（lib/draft.ts。送ったら消える）
   const [text, setText] = useState(readDraft);
@@ -196,9 +201,10 @@ export function Chat() {
         {shown.map((a) => (
           <ChatAsk key={a.id} summary={a} detail={details[a.id] ?? null} last={a.id === lastId} onChanged={load} blocked={!online} />
         ))}
-        {!idle && <ChatGen state={state} onAnswer={gen.answer} />}
+        {!idle && !birth && <ChatGen state={state} onAnswer={gen.answer} />}
         {loadError && <p className="error small" role="status">{loadError}</p>}
       </div>
+      {birth && <AgentBirth key={state.askId ?? "birth"} agents={newcomers.map((m) => ({ name: m.agentName, summary: m.summary }))} onDone={birthDone} eyebrow="依頼のエージェント" />}
       <div className="dock">
         {connectNote && (
           <p className={`entrance-note connect-note${connectNote.error ? " error" : " muted"}`} role="status">

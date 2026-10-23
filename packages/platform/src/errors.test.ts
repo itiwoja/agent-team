@@ -45,6 +45,7 @@ const TABLE: Record<number, string[]> = {
     "TOOL_CHANGED",
     "PACK_ALREADY_INSTALLED",
     "WORKSPACE_IN_USE",
+    "AGENT_BUSY",
   ],
   413: ["PAYLOAD_TOO_LARGE"],
   415: ["UNSUPPORTED_MEDIA_TYPE"],

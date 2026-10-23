@@ -19,7 +19,7 @@ import { getAsk, insertGeneratingAsk, insertLiveRun, listMembers, markAskFormed,
 import { all, count, run, type WsDb } from "../../src/db/sqlite.ts";
 import type { Uuid } from "../../src/db/types.ts";
 import { FIXED_NOW, fxAgent, fxConnector, inWorkspace, type FxWorkspace } from "../db/fixtures.ts";
-import { auditTypes, draftMember, events, fxPolicy, jsonReply } from "./helpers.ts";
+import { auditTypes, draftMember, events, formAsk, fxPolicy, jsonReply } from "./helpers.ts";
 
 const NOW = FIXED_NOW;
 const SECRET = "sk-test-secret-0123456789abcdef";
@@ -217,5 +217,27 @@ describe("編成のあと実行を始められなかったとき（closeFailedSt
       closeFailedStart(db, { askId: started, error: new Error("一時的な失敗"), now: NOW, secrets: [] });
       expect(getAsk(db, started)).toMatchObject({ status: "running" });
       expect(statuses(db)).toHaveLength(0);
+    }));
+});
+
+describe("仕事の空き（A-81）", () => {
+  it("仕事が10個になったら、終わった1回きりの仕事を古い順に外して受け続ける", () =>
+    inWorkspace(async (db, ws) => {
+      fxPolicy(db, NOW);
+      const first = await formAsk(db, ws.userId, NOW, { shape: "single", members: [draftMember({ newName: "調べ屋" })] });
+      run(db, "UPDATE asks SET status = 'done' WHERE id = ?", first.askId);
+      const agentId = all<{ agent_id: string }>(db, {}, "SELECT agent_id FROM ask_members WHERE ask_id = ?", first.askId)[0]!.agent_id;
+      for (let k = 0; k < 10; k += 1) {
+        const { askId } = await formAsk(db, ws.userId, NOW, { shape: "single", members: [draftMember({ agentId })] });
+        run(db, "UPDATE asks SET status = 'done' WHERE id = ?", askId);
+      }
+      const jobs = all<{ status: string }>(db, {}, "SELECT status FROM agent_jobs WHERE agent_id = ?", agentId);
+      expect(jobs).toHaveLength(11);
+      expect(jobs.filter((j) => j.status === "done")).toHaveLength(1);
+      const def = all<{ definition: string }>(db, {}, "SELECT s.definition FROM agents a JOIN agent_snapshots s ON s.id = a.current_snapshot_id WHERE a.id = ?", agentId)[0]!;
+      expect((JSON.parse(def.definition) as { jobs: unknown[] }).jobs).toHaveLength(10);
+      // 終わった仕事は数えない
+      const askId = generating(db, ws, "次");
+      expect(loadPlannerMaterials(db, askId)?.input.agents.find((a) => a.agentId === agentId)?.jobCount).toBe(0);
     }));
 });

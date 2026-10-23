@@ -148,3 +148,22 @@ export const AgentLibraryResponseSchema = z.object({
   count: z.number().int(),
 });
 export type AgentLibraryResponse = z.infer<typeof AgentLibraryResponseSchema>;
+
+// ---- 書き込み（API-080・081） ----
+//   POST   /agents             したいことの文からエージェントを1体作る（201。Idempotency-Key を受ける）
+//   DELETE /agents/:agentId    エージェントを削除する（論理削除。200）
+
+export const CreateAgentBodySchema = z.object({ text: z.string().trim().min(1).max(2000) });
+export type CreateAgentBody = z.infer<typeof CreateAgentBodySchema>;
+
+export const CreateAgentResponseSchema = z.object({
+  agent: z.object({ agentId: Uuid, name: z.string(), role: z.string().nullable(), summary: z.string() }),
+});
+export type CreateAgentResponse = z.infer<typeof CreateAgentResponseSchema>;
+
+export const DeleteAgentResponseSchema = z.object({
+  agentId: Uuid,
+  /** 定期を止めた依頼の数 */
+  stoppedAsks: z.number().int(),
+});
+export type DeleteAgentResponse = z.infer<typeof DeleteAgentResponseSchema>;

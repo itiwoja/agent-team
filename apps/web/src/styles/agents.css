@@ -204,3 +204,77 @@
   margin-top: 4px;
   flex-wrap: wrap;
 }
+
+/* エージェントが生まれる全画面（components/AgentBirth.tsx。見た目は pack-ceremony.css の cer-* を使い回す） */
+.cer-overlay:focus {
+  outline: none;
+}
+.birth-egg {
+  display: grid;
+  place-items: center;
+  padding: 12px 0;
+}
+.birth-egg .gen-egg svg {
+  width: 96px;
+  height: 108px;
+}
+
+/* 新しいエージェントを作る・削除する（一覧の上の操作と、ダイアログ） */
+.agents-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 12px 0;
+}
+.agents-notice {
+  margin: 0 0 12px;
+}
+.agent-remove {
+  margin-top: 4px;
+}
+.agent-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--gutter);
+  background: rgb(0 0 0 / 0.38);
+  overscroll-behavior: contain;
+}
+.agent-modal-card {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 520px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding: 20px;
+  border-radius: var(--radius);
+  background: var(--elevated);
+  box-shadow: var(--shadow);
+}
+.agent-modal-title {
+  margin: 0;
+  font-size: 18px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+.agent-modal-card textarea {
+  width: 100%;
+  min-height: 112px;
+  resize: vertical;
+}
+.agent-modal-count {
+  margin: 0;
+  text-align: right;
+}
+.agent-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}

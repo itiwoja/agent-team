@@ -8,7 +8,7 @@ import { trapTab } from "../ui/trapTab";
 import { connectHref } from "./GoogleCalendarLine";
 import { GithubMenuSection } from "./GithubLine";
 import { CheckSheet } from "./CheckSheet";
-import { AgentsIcon, BackIcon, CalendarIcon, CheckIcon, Chevron, CloseIcon, ComposeIcon, MenuIcon, PacksIcon } from "../ui/icons";
+import { AgentsIcon, BackIcon, CalendarIcon, ChatIcon, CheckIcon, Chevron, CloseIcon, MenuIcon, PacksIcon } from "../ui/icons";
 import { useWorkspace } from "../workspace";
 
 export function AppHeader({ back }: { back: { to: string; label: string } | null }) {
@@ -195,7 +195,7 @@ function MenuBody({ attention, onClose }: { attention: number; onClose?: () => v
       </div>
       <nav className="drawer-nav" aria-label="画面">
         <Link to="/" className={"drawer-item" + (route.name === "home" ? " is-current" : "")} aria-current={cur("home")} onClick={onClose}>
-          <ComposeIcon />
+          <ChatIcon />
           <span>チャット</span>
         </Link>
         <Link to="/check" className={"drawer-item" + (route.name === "check" ? " is-current" : "")} aria-current={cur("check")} onClick={onClose}>

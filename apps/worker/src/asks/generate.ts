@@ -28,8 +28,10 @@ import {
   getAsk,
   getLatestLiveRun,
   listAgentsForPlanner,
+  listFinishedOnceJobs,
   listMembers,
   markAskFormed,
+  markJobsDone,
   markAskGenerationFailed,
   setAskQuestion,
   transitionAsk,
@@ -197,6 +199,24 @@ export function withJob(
 }
 
 /**
+ * 仕事は1体10個まで（A-81）。いっぱいなら、外してよい仕事（1回きりで依頼が終わったもの。古い順）を定義から外して空きを1つ作る。
+ * 外した仕事は agent_jobs を done にする（数えない）。過去の定義は前のスナップショットに残る。空きが作れなければそのまま（検証で落ちる）
+ */
+function makeRoomForJob(db: WsDb, agentId: Uuid, def: AgentDefinitionInput, now: Date): AgentDefinitionInput {
+  const jobs = def.jobs ?? [];
+  const over = jobs.length + 1 - FORMATION_LIMITS.maxJobsPerAgent;
+  if (over <= 0) return def;
+  const slugs = new Set(jobs.map((j) => j.id));
+  const drop = listFinishedOnceJobs(db, agentId)
+    .filter((j) => slugs.has(j.slug))
+    .slice(0, over);
+  if (drop.length === 0) return def;
+  markJobsDone(db, drop.map((j) => j.id), now);
+  const dropped = new Set(drop.map((j) => j.slug));
+  return { ...def, jobs: jobs.filter((j) => !dropped.has(j.id)) };
+}
+
+/**
  * 編成を保存して依頼を動かせる状態（running）にする（1つのトランザクション）。
  * 新しい担当：最初の境界＋付与（つながっていて使えるものだけ）＋この依頼の仕事。使い回す担当：この依頼の仕事を足した新しいスナップショット（権限は広げない）。
  * generating でなくなっていれば（時間切れ・取り消しで先に閉じた）null。
@@ -230,7 +250,7 @@ export function materializeFormation(
         if (agent === null || (agent.status !== "active" && agent.status !== "idle")) throw new AskPlanError("formation_invalid", "使い回す担当が見つからない");
         const def = agent.current_snapshot_id === null ? null : (getAgentSnapshotRow(db, agent.current_snapshot_id)?.definition ?? null);
         if (def === null) throw new AskPlanError("planner_error", `担当「${agent.name}」の定義を読めない`);
-        const built = withJob(normalizeAgentDefinition(def as unknown as AgentDefinitionInput), job, m, agent.name);
+        const built = withJob(makeRoomForJob(db, agent.id, normalizeAgentDefinition(def as unknown as AgentDefinitionInput), now), job, m, agent.name);
         const snapshot = appendAgentSnapshot(db, {
           agentId: agent.id,
           definition: built.definition as unknown as JsonObject,

@@ -8,6 +8,8 @@ import { knownSecretsFromEnv } from "@open-team/platform";
 import { DurableObject } from "cloudflare:workers";
 import type { LlmRequest } from "@open-team/llm";
 import type { LlmMessagesResponse, LlmPhase, RunTaskEnd, TaskContext, ToolCallResult } from "@open-team/runner";
+import { prepareAgentCreate, recordCreateUsage, saveNewAgent, type AgentCreatePrep, type AgentDraft } from "./agents/create.ts";
+import { removeAgent } from "./agents/remove.ts";
 import { acceptAsk, answerAskQuestion } from "./asks/accept.ts";
 import { takeStartableTasks } from "./asks/drive.ts";
 import { advanceTx } from "./asks/run.ts";
@@ -37,7 +39,7 @@ import {
 } from "./edge/task-edge.ts";
 import { llmOf } from "./llm.ts";
 import { runIdempotent, type IdemRequest } from "./idempotency.ts";
-import type { AgentLibraryResponse } from "./views/agents/contract.ts";
+import type { AgentLibraryResponse, CreateAgentResponse, DeleteAgentResponse } from "./views/agents/contract.ts";
 import { buildAgentLibrary } from "./views/agents/view.ts";
 import type {
   AnswerAskBody,
@@ -49,7 +51,7 @@ import type {
   ListAsksResponse,
 } from "./views/asks/contract.ts";
 import { buildAskDetail, listAskSummaries, listMessages } from "./views/asks/view.ts";
-import type { WriteResult } from "./write.ts";
+import { captureAppError, type WriteResult } from "./write.ts";
 
 export { MIGRATIONS };
 
@@ -149,6 +151,30 @@ export class WorkspaceDO extends DurableObject<Env> {
     const r = runIdempotent(this.db, i.idem, 200, i.now, () => answerAskQuestion(this.db, { ...i, secrets: this.secrets() }));
     if (r.ok && r.replayed !== true) await this.startPlan(i.askId, i.userId, "answered");
     return r;
+  }
+
+  /** API-080 の1段目：同じキーの記録・上限（422）・LLM に渡す材料。LLM は呼ばない（呼ぶのは Worker の側：agents/create.ts） */
+  prepareAgentCreate(i: { idem: IdemRequest | null; now: Date }): WriteResult<AgentCreatePrep> {
+    return captureAppError(() => ({ status: 201, body: prepareAgentCreate(this.db, i) }));
+  }
+
+  /** API-080 の3段目：LLM の下書きを検証して保存する（201）。LLM の費用の記録にできたエージェントの ID を付けて残す */
+  saveCreatedAgent(i: {
+    userId: string;
+    draft: AgentDraft;
+    usage: Parameters<typeof recordCreateUsage>[2];
+    idem: IdemRequest | null;
+    now: Date;
+  }): WriteResult<CreateAgentResponse> {
+    const r = runIdempotent(this.db, i.idem, 201, i.now, () => saveNewAgent(this.db, i));
+    // 同時に同じキーで2回来て、先に保存されていた：費用は使っているので、先のエージェントの分として残す
+    if (r.ok && r.replayed === true) this.db.transaction(() => recordCreateUsage(this.db, r.body.agent.agentId, i.usage, i.now));
+    return r;
+  }
+
+  /** API-081：エージェントを削除する（200。動いていれば 409 AGENT_BUSY） */
+  removeAgent(i: { userId: string; agentId: string; now: Date }): WriteResult<DeleteAgentResponse> {
+    return captureAppError(() => ({ status: 200, body: this.db.transaction(() => removeAgent(this.db, i)) }));
   }
 
   /**
