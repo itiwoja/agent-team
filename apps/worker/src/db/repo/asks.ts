@@ -8,6 +8,7 @@ import type { Hex64, Json, JsonObject, TaintState } from "@open-team/kernel";
 import { CODECS } from "../codecs.ts";
 import { all, count, newId, one, run, type WsDb } from "../sqlite.ts";
 import type {
+  AgentJobRow,
   AgentQuestionRow,
   AgentRow,
   AgentSnapshotRow,
@@ -176,19 +177,41 @@ export interface PlannerAgentRow {
 const AGENT_COLS_A = `a.id, a.slug, a.name, a.name_source, a.role, a.appearance, a.status, a.current_snapshot_id, a.disabled_by,
   a.disabled_reason, a.disabled_at, a.created_at, a.updated_at`;
 
-/** ワークスペースのエージェントと、仕事の数・今のスナップショットの定義（removed も含む：名前の重なりを見るため） */
+/**
+ * 外してよい仕事（j）の条件：1回きりの仕事で、その依頼が終わった（done・failed・cancelled）もの。
+ * 担当の仕事は10個まで（A-81）なので、仕事を足すときにこれを古い順に外して空きを作る（外した仕事は status = done）
+ */
+const FINISHED_ONCE_JOB = `j.kind = 'once' AND EXISTS (
+  SELECT 1 FROM ask_members fm JOIN asks fk ON fk.id = fm.ask_id WHERE fm.job_id = j.id AND fk.status IN ('done', 'failed', 'cancelled'))`;
+
+/** ワークスペースのエージェントと、仕事の数（外した・外してよい仕事は数えない）・今のスナップショットの定義（removed も含む：名前の重なりを見るため） */
 export function listAgentsForPlanner(db: WsDb): PlannerAgentRow[] {
   const rows = all<AgentRow & { job_count: number; definition: JsonObject | null }>(
     db,
     { ...CODECS.agents, definition: "json" },
     `SELECT ${AGENT_COLS_A},
-            (SELECT count(*) FROM agent_jobs j WHERE j.agent_id = a.id) AS job_count,
+            (SELECT count(*) FROM agent_jobs j WHERE j.agent_id = a.id AND j.status <> 'done' AND NOT (${FINISHED_ONCE_JOB})) AS job_count,
             s.definition
        FROM agents a
        LEFT JOIN agent_snapshots s ON s.id = a.current_snapshot_id
       ORDER BY a.created_at, a.id`,
   );
   return rows.map(({ job_count, definition, ...agent }) => ({ agent, jobCount: job_count, definition }));
+}
+
+/** 担当の外してよい仕事（まだ外していないもの。古い順） */
+export function listFinishedOnceJobs(db: WsDb, agentId: Uuid): AgentJobRow[] {
+  return all<AgentJobRow>(
+    db,
+    CODECS.agent_jobs,
+    `SELECT j.* FROM agent_jobs j WHERE j.agent_id = ? AND j.status <> 'done' AND ${FINISHED_ONCE_JOB} ORDER BY j.created_at, j.id`,
+    agentId,
+  );
+}
+
+/** 仕事を外した印を付ける（status = done） */
+export function markJobsDone(db: WsDb, jobIds: readonly Uuid[], now: Date): void {
+  for (const id of jobIds) run(db, "UPDATE agent_jobs SET status = 'done', updated_at = ? WHERE id = ?", now, id);
 }
 
 /** 担当を名前か ID で引く（removed を除く） */
