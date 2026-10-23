@@ -127,4 +127,5 @@ Postgres の書き方の置き換え：
 - Kill Switch は歩みのたびに DO で確かめ、発動したら動いている Workflow を止める（LLM に問い合わせている最中の1回は切れない）
 - 書き込みの RPC は AppError を値（`write.ts` の WriteResult）にして返し、Worker で投げ直す（RPC をまたぐと code・details が落ちるため）
 - edge の失敗（EdgeError）も同じく値（`edge/fault.ts` の EdgeOutcome）で返し、TaskWorkflow の歩みの外で投げ直す（歩みの中で投げると Workflow のやり直しにかかるため）
-- Workflow の歩みの上限は Workers Paid で 10,000（設定で 25,000 まで。`step.sleep` は数えない）。担当1人は最大 200 ターンで、1ターンは LLM の1歩と道具の歩みなので収まる。Workers Free は 1,024 なので、長いタスクは途中で止まる
+- Workflow の歩みの上限は1つの Workflow で Workers Paid が 10,000（設定で 25,000 まで）、Workers Free が 1,024（`step.sleep` は数えない）。担当1人は最大 200 ターンで、1ターンはおよそ LLM の1歩と道具の1〜2歩なので、Free でもふつうは収まる
+- Workers Free で使うときの制限（2026-10 時点）：歩みは1日 3,000 まで（依頼1件でおよそ数十歩なので、1日に数十件）、CPU は1回の呼び出しで 10ms まで（LLM の応答の待ちは数えない）。CPU が足りるかは本番で測る（第6段）
