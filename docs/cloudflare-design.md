@@ -1,5 +1,7 @@
 # Cloudflare への移行の設計（案）
 
+> **2026-10-23：この設計はいったん保留**。置き先を Linux ホストに変えた（[design/adr/ADR-041](design/adr/ADR-041-linux-host.md)）。今の設計は [design/README.md](design/README.md)。
+
 Makase を Cloudflare だけで動かす。PostgreSQL と Node のプロセスをやめ、Workers・Durable Objects・Workflows に載せ替える。
 あわせて、Google アカウントでログインした人がそれぞれ自分のチーム（ワークスペース）を持てるようにする。
 
