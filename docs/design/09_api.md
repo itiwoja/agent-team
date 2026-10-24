@@ -1,5 +1,5 @@
 # 09. API設計
-- プロジェクト：Agent-Team-Open ／ 版数：v0.4（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[06_ux_design](06_ux_design.md)、`apps/worker/src/routes`
+- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[06_ux_design](06_ux_design.md)、`apps/worker/src/routes`
 
 > **3行で**
 > 1. 画面向けの API は `/api/v1`。今の依頼・エージェントの API は旧 ID のまま移し、VM・確認・パック・設定・引っ越しの API を足す。
@@ -74,7 +74,7 @@ flowchart LR
 | ID | メソッド | パス | 概要 | 関連FR/SCR |
 |---|---|---|---|---|
 | API-082 | GET | `/api/health` | `ok` と版だけ（確かめなし） | FR-083 |
-| API-111 | GET | `/api/v1/host` | ホストの状態（版・DB・box-manager・VM の数・空きメモリ・空きディスク） | FR-083 / SCR-023 |
+| API-111 | GET | `/api/v1/host` | ホストの状態（版・DB・box-manager・VM の数・空きメモリ・空きディスク・`llm: { provider, model }`） | FR-083, FR-087 / SCR-023 |
 | API-083 | GET | `/api/v1/session` | 持ち主のログイン名・表示名 | FR-073 / 全画面 |
 | API-085 | GET | `/api/v1/events` | SSE（依頼・タスク・VM・確認の変化） | FR-018 / SCR-020, 021, 022 |
 | API-100 | GET | `/api/v1/counts` | 確認待ちなどの件数 | FR-018 / SCR-020 |

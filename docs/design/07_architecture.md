@@ -1,5 +1,5 @@
 # 07. システムアーキテクチャ
-- プロジェクト：Agent-Team-Open ／ 版数：v0.4（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[05_non_functional](05_non_functional.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[05_non_functional](05_non_functional.md)
 
 > **3行で**
 > 1. 1台の Linux ホストの上で、Docker Compose で6種類のコンテナを動かす：Tailscale・本体・box-manager・Docker の中継・egress・VM（タスクごと）。
@@ -116,7 +116,7 @@ flowchart TB
 | DB | SQLite（`better-sqlite3`）、WAL | DO の同期の repo の関数をそのまま使える | PostgreSQL（ラズパイには重い） |
 | 長い実行 | 本体の中の実行役＋歩みの記録（TBL-038） | Workflows の「やり直し・再開」を最小で置き換える | ジョブキューのライブラリ（依存が増える） |
 | 認証 | Tailscale の身元（`tailscale serve` のヘッダー） | ログイン画面が要らない | パスキー・合言葉（ADR-046） |
-| LLM | Claude（公式 SDK、computer use ツール。既定 `claude-opus-5-5`） | 2026-10-23 の決定 | — |
+| LLM | Claude（公式 SDK、computer use ツール。既定 `claude-opus-5-5`）。接続先は `.env` で Anthropic 直・Bedrock（`@anthropic-ai/bedrock-sdk`）・Vertex（`@anthropic-ai/vertex-sdk`）を選ぶ（FR-087） | 2026-10-23 の決定。企業導入で AWS・GCP の契約を使えるようにする（ADR-056） | 他社の LLM（computer use の前提が崩れる） |
 | VM | Docker のコンテナ（Debian slim・Xvfb・Chromium） | ラズパイ・WSL2 でそのまま動く | microVM・QEMU（ADR-043） |
 | 外への中継 | 小さな HTTP(S) プロキシ（CONNECT を受け、名前を引いてからアドレスを確かめる） | 家の LAN と tailnet を確実に外せる | iptables の規則（ホストの設定が環境ごとに違う） |
 | 配り方 | Docker Compose v2、イメージは arm64・amd64 の両方 | どの Linux でも同じ手順 | 本体は systemd（ADR-049） |
@@ -159,7 +159,7 @@ flowchart TB
 ### 外部連携
 | 相手 | 使い方 | 通る道 |
 |---|---|---|
-| Claude API | Messages API・computer use ツール | 本体から直接 |
+| Claude API（Anthropic 直・Bedrock・Vertex のいずれか） | Messages API・computer use ツール。接続先で使えない道具は出さない（FR-087） | 本体から直接（core-out） |
 | Google カレンダー | OAuth（戻り先は ts.net の URL）・予定の作成と削除 | 本体の gateway から |
 | GitHub | GitHub App のインストールのトークン | 本体の gateway から |
 | Web サイト | VM の Chromium・`web_fetch` | VM は egress 経由。`web_fetch` は本体から（今の汚染のルールのまま。egress と同じアドレスの判定をかけ、リダイレクト先も判定し直す：D-164） |

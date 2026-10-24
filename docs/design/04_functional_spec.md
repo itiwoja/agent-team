@@ -1,8 +1,8 @@
 # 04. 機能仕様
-- プロジェクト：Agent-Team-Open ／ 版数：v0.4（2026-10-24） ／ インプット：[03_use_cases](03_use_cases.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[03_use_cases](03_use_cases.md)
 
 > **3行で**
-> 1. 新しく足す機能は、VM（FR-074）・コンピューターユース（FR-075）・こわい操作の見分けと確認（FR-076・077）・交代（FR-078）・プロフィール（FR-079）・持ち主の確かめ（FR-073）・引っ越し（FR-082）・状態（FR-083）・再開（FR-084）・パック（FR-085）・VM のターミナル（FR-086）。
+> 1. 新しく足す機能は、VM（FR-074）・コンピューターユース（FR-075）・こわい操作の見分けと確認（FR-076・077）・交代（FR-078）・プロフィール（FR-079）・持ち主の確かめ（FR-073）・引っ越し（FR-082）・状態（FR-083）・再開（FR-084）・パック（FR-085）・VM のターミナル（FR-086）・LLM の接続先（FR-087、Should）。
 > 2. こわい操作は、Kernel の決定論の関数が「申告あり・合図に当たった・操作の先が分からない」ときに確認に回す。それ以外の操作は確認しない。`type` の文字列の改行と、確認するドメインへの `open_url` も同じ判定にかける（D-157・D-158）。
 > 3. パックは用途ごとのエージェント集（FR-085）。VM のターミナルは中のコマンドを判定せず、外に効くものだけ確認する（FR-086）。引き継ぐ機能は、どこから移すか（Cloudflare 版・旧 Node 版・新規）を[移植元の表](#移植元)に書く。
 
@@ -63,6 +63,7 @@ flowchart TD
 | FR-084 | 再起動から続ける | 歩みの記録で、動いていたタスクを続ける | UC-042, UC-046 | Must |
 | FR-085 | パック | 用途ごとのエージェント集を入れる・更新・外す。依頼を用途で振り分ける | UC-052, UC-044 | Must |
 | FR-086 | VM のターミナル | VM の中でコマンドを実行し、リポジトリを動かして直す | UC-053 | Must |
+| FR-087 | LLM の接続先 | `.env` で Anthropic 直・Bedrock・Vertex を選ぶ。接続先で使えない道具は宣言から外す | UC-042 | Should |
 
 ### 機能詳細
 
@@ -224,6 +225,17 @@ flowchart TD
  | 定義が形式に合わない | 422 | `PACK_INVALID` |
  | 外すとき、パックのエージェントが動いている | 409 | `AGENT_BUSY` |
  | 同じ版がすでに入っている | 409 | `PACK_ALREADY_INSTALLED` |
+- 標準パック（イメージに同梱。最初の 1 つは D-186）：
+ | 項目 | `announcement-page`（告知ページ制作パック） |
+ |---|---|
+ | `name` | 告知ページ制作 |
+ | `purpose` | イベントや募集の告知ページ（HTML 1 枚）を、条件を聞いて作り、点検して、リポジトリに PR として出す |
+ | `examples` | 「11/15 の文化祭の告知ページを作って」「サークルの新歓のページ。日時・場所・申込先はこれ」「この告知のスマホ表示を直して」 |
+ | `agents[]` | 1 人（告知ページ制作係）。使う道具：VM のターミナル（HTML を書く・開く）、VM のブラウザ（できたページを 1280×800 と 360px 幅で開いて点検）、GitHub（PR） |
+ | `skills[]` | 手順書 4 本：①設計（日時・会場・料金・対象・申込先を聞き切り、構成を決める）②制作（HTML・CSS を 1 ファイルで書く）③点検（必須項目の抜け・誤字・リンク・スマホ表示を VM のブラウザで確かめる）④仕上げ（配色・余白・見出しを整える）。デモの 4 人（設計士・職人・レビュー番長・配色の番人）はこの 4 本に対応する（1 件 1 人は ADR-050） |
+ | `browser` | 確認するドメイン：なし。決まった言葉の追加分：「公開」「Publish」 |
+ | 成果物の届け方 | VM の中に書いた HTML を tar で取り出し（API-118）、持ち主が指定したリポジトリへ PR の Intent にする（確認つき。FR-081・FR-086）。公開（GitHub Pages など）は PR の先で人がする（BR-10）。回答へのファイル添付は次の版（01 §7） |
+ | 申込フォーム | 作らない。申込先はリンクか連絡先の文にする（個人情報を受け取らない） |
 - 補足：手で書いたスキル（`agent_skills`）は残す。`origin` は `pack` だけ使い、`learned` は使わない（D-177）。方針は D-176・ADR-053
 
 ### FR-086：VM のターミナル
@@ -257,6 +269,28 @@ flowchart TD
  | 回数の上限 | タスクを halted（`budget_exceeded`） | — |
 - 補足：再開は [FR-084](#fr-084再起動から続ける)。方針は D-178・ADR-054
 
+### FR-087：LLM の接続先
+- 入力：`.env` の `LLM_PROVIDER`（`anthropic`｜`bedrock`｜`vertex`。既定 `anthropic`）と、接続先ごとの資格（[11 §10](11_tech_spec.md#10-環境設定)）。起動時に読む。画面からは変えない（SCR-023 には表示だけ）
+- 処理：
+ 1. クライアントの作成（`llm/claude.ts`）：接続先ごとの公式クライアントを作る。`anthropic` は `@anthropic-ai/sdk`、`bedrock` は `@anthropic-ai/bedrock-sdk` の `AnthropicBedrockMantle`（`awsRegion`）、`vertex` は `@anthropic-ai/vertex-sdk` の `AnthropicVertex`（`projectId`・`region`）。会話の形（Messages API・道具・画像）は共通
+ 2. モデル名：`CLAUDE_MODEL` の値を接続先の形にする。`anthropic`・`vertex` は `claude-opus-5-5` のまま、`bedrock` は `anthropic.` を前に付ける
+ 3. 道具の宣言の切り替え：接続先で使えない道具は Claude に出さない
+ | 道具 | `anthropic` | `vertex` | `bedrock` |
+ |---|---|---|---|
+ | コンピューターユース（FR-075） | `computer_toolset_20260801` | `computer_toolset_20260801` | `computer_20251124` |
+ | `web_search`（FR-080。Claude の Web 検索ツール） | 最新版 | 基本版（`web_search_20250305`） | 出さない（Bedrock にはない）。`web_fetch` と VM のブラウザで調べる |
+ | `web_fetch`（FR-080。本体の実装） | 使える | 使える | 使える |
+ 4. 費用の見積もりと精算（FR-013）は Anthropic 直の単価で行う。Bedrock・Vertex の請求は各事業者の単価なので、設定画面の「ホスト」欄と手順書に「見積もりは目安」と書く
+ 5. 起動の確かめ（FR-083）：`LLM_PROVIDER` ごとの必須の値が足りなければ、足りない値の名前を出して止まる（UC-042 E2）。`GET /api/v1/host`（API-111）に `llm.provider`・`llm.model` を足す
+ 6. Anthropic 直にしかない機能（サーバー側のフォールバック、Fast mode、Priority Tier など）は使わない
+- エラー：
+ | 条件 | 挙動 | code |
+ |---|---|---|
+ | `LLM_PROVIDER` が 3 つ以外 | 起動時に止まる | — |
+ | 接続先の資格が足りない | 起動時に足りない名前を出して止まる | — |
+ | 接続先の認証が通らない（401・403） | タスクを failed にし、理由を知らせる。歩みの記録は残す | `LLM_AUTH_FAILED` |
+- 補足：方針は D-185・[ADR-056](adr/ADR-056-llm-provider.md)
+
 ### 移植元
 | FR | 移す元 | 足りないもの・差分 |
 |---|---|---|
@@ -266,7 +300,8 @@ flowchart TD
 | FR-018 | Cloudflare 版の SSE の設計（第5段で予定） | 本体のプロセスから流す（API-085）。VM・交代の事象 |
 | FR-061・063 | Cloudflare 版 `asks/`・`workflows/plan-ask.ts` | 編成は作らない（[ADR-050](adr/ADR-050-one-agent-per-ask.md)）。返事（API-077）は旧 Node 版から |
 | FR-072 | Cloudflare 版 `agents/` | 削除のときにプロフィールも消す |
-| FR-080 | 新規（Cloudflare 版は 4f で予定だった） | `web_search` は Claude の Web 検索ツール、`web_fetch` は旧 Node 版の edge と汚染のルール（`edge/web-seen.ts`） |
+| FR-080 | 新規（Cloudflare 版は 4f で予定だった） | `web_search` は Claude の Web 検索ツール（接続先で版が違う・Bedrock では出さない：FR-087）、`web_fetch` は旧 Node 版の edge と汚染のルール（`edge/web-seen.ts`） |
+| FR-087 | 新規 | `llm/claude.ts` のクライアントの作成を接続先で分ける。道具の宣言の切り替え |
 | FR-081 | 旧 Node 版の gateway・gcal・github・connectors | 本体の中の部品にする（[ADR-051](adr/ADR-051-gateway-in-core.md)）。確認の一覧・○ / × の API も旧 Node 版から |
 | FR-085 | Cloudflare 版 `pack_installs`・`asks.pack_id`・planner の pack の節 | 用途（`purpose`・`examples`）で振り分ける。定義はファイルで持つ |
 | FR-086 | 旧 Node 版 sandbox（`packages/sandbox` の tar・executor、`edge/sandbox-command.ts` の道具名） | 判定は使わない |
@@ -314,4 +349,5 @@ flowchart TD
 - [ADR-052](adr/ADR-052-browser-checks-table.md)：ブラウザの確認は別の表
 - [ADR-053](adr/ADR-053-pack-by-purpose.md)：パックは「用途」の単位
 - [ADR-054](adr/ADR-054-terminal-in-vm.md)：ターミナルは VM の中。確認は VM の外に効くものだけ
-- D-141〜D-144、D-150〜D-153、D-157〜D-163、D-165〜D-168、D-171、D-173・D-174・D-176・D-178・D-179・D-180・D-181（[00 決定事項ログ](00_overview.md#決定事項ログ)）
+- [ADR-056](adr/ADR-056-llm-provider.md)：LLM の接続先に Bedrock・Vertex を足す
+- D-141〜D-144、D-150〜D-153、D-157〜D-163、D-165〜D-168、D-171、D-173・D-174・D-176・D-178・D-179・D-180・D-181・D-185・D-186・D-187（[00 決定事項ログ](00_overview.md#決定事項ログ)）

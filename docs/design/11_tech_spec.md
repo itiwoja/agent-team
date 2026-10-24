@@ -1,5 +1,5 @@
 # 11. 技術仕様書
-- プロジェクト：Agent-Team-Open ／ 版数：v0.4（2026-10-24） ／ インプット：[01](01_requirements.md)〜[10](10_diagrams.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[01](01_requirements.md)〜[10](10_diagrams.md)
 
 > **3行で**
 > 1. Linux ホスト1台の上で Docker Compose の6種類のコンテナ（Tailscale・本体・box-manager・Docker の中継・egress・VM）を動かし、持ち主1人が PC とスマホから使う。
@@ -34,17 +34,18 @@ flowchart LR
 
 ### 1. 概要
 - 目的：API・MCP のないページもエージェントに任せる。置き先を選ばない（[01](01_requirements.md)）
-- スコープ：REQ-076〜094。Won't は [01 §7](01_requirements.md#7-スコープ外wont)
-- 読む人：本体・VM・画面を作る開発者（持ち主）
+- スコープ：REQ-076〜095。Won't は [01 §7](01_requirements.md#7-スコープ外wont)
+- 読む人：本体・VM・画面を作る開発者（持ち主）と、OSS として自分の機械に置く開発者
+- ライセンス：AGPL-3.0（`AGPL-3.0-only`）。リポジトリ直下の `LICENSE`。依存ライブラリは AGPL と両立するものだけ（[ADR-055](adr/ADR-055-agpl-license.md)）
 
 ### 2. システム全体像
 - コンテナ図は [07 レベル2](07_architecture.md#レベル2コンテナ図)、本体の部品は [07 レベル3](07_architecture.md#レベル3本体のコンポーネント図)
-- 技術：Node 24・Hono・`better-sqlite3`・React＋Vite・Claude（computer use）・Docker Compose・Tailscale・Xvfb・Chromium・x11vnc・noVNC
+- 技術：Node 24・Hono・`better-sqlite3`・React＋Vite・Claude（computer use。`@anthropic-ai/sdk`、接続先に応じて `@anthropic-ai/bedrock-sdk`・`@anthropic-ai/vertex-sdk`）・Docker Compose・Tailscale・Xvfb・Chromium・x11vnc・noVNC
 
 ### 3. 機能概要
 | 区分 | FR |
 |---|---|
-| 新しい | FR-073・074・075・076・077・078・079・082・083・084・085・086 |
+| 新しい | FR-073・074・075・076・077・078・079・082・083・084・085・086、FR-087（Should） |
 | 引き継ぎ（差分あり） | FR-013・016・018・061・063・072・080・081。どこから移すかは [04 移植元](04_functional_spec.md#移植元) |
 | 次の版 | FR-017（通知。D-179） |
 
@@ -54,7 +55,7 @@ flowchart LR
 ### 5. インターフェース
 - 画面向け：[09 エンドポイント一覧](09_api.md#エンドポイント一覧)。パックは API-114〜116
 - 内部：box-manager の API-101〜109・113、VM のコマンド（API-117）とファイルの出し入れ（API-118）
-- 外部：Claude Messages API（computer use ツール）、Google カレンダー API、GitHub API、Tailscale
+- 外部：Claude Messages API（computer use ツール。接続先は Anthropic 直・Bedrock・Vertex：FR-087）、Google カレンダー API、GitHub API、Tailscale
 
 ### 6. 画面構成
 - [06 の画面遷移図](06_ux_design.md#全体図)。新しい画面は SCR-022（VM の画面）・SCR-023（設定）・SCR-024（パック）
@@ -96,8 +97,11 @@ flowchart LR
 
 | 名前 | 必須 | 中身 |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | はい | Claude の API キー |
-| `CLAUDE_MODEL` | いいえ | 既定 `claude-opus-5-5` |
+| `LLM_PROVIDER` | いいえ | `anthropic`（既定）・`bedrock`・`vertex`（FR-087） |
+| `ANTHROPIC_API_KEY` | `anthropic` のとき | Claude の API キー |
+| `AWS_REGION` | `bedrock` のとき | Bedrock のリージョン。資格情報は AWS の標準の順（`AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`、または `AWS_PROFILE`）で読む |
+| `CLOUD_ML_REGION`・`ANTHROPIC_VERTEX_PROJECT_ID` | `vertex` のとき | Vertex のリージョン（`global` を推奨）と GCP のプロジェクト。資格は ADC（`GOOGLE_APPLICATION_CREDENTIALS` のサービスアカウントの鍵） |
+| `CLAUDE_MODEL` | いいえ | 既定 `claude-opus-5-5`。`bedrock` では本体が `anthropic.` を前に付ける |
 | `OWNER_LOGIN` | はい | 持ち主の Tailscale のログイン名 |
 | `OWNER_LOGIN_REPLACE` | いいえ | `1` のとき、違っていても `workspace.owner_login` を `OWNER_LOGIN` で上書きして起動する（D-170） |
 | `TS_AUTHKEY` | はい（初回） | Tailscale の認証キー |
@@ -115,7 +119,7 @@ flowchart LR
 ### 11. テスト方針
 | レベル | 観点 |
 |---|---|
-| 単体 | `judgeBrowserAction` の合図（申告・T-1〜T-6、キーと修飾キー・押すと離す）、中身のハッシュ、`pending → executing` の1回だけ、歩みの記録のなぞり、再開の表（FR-084）のすべての行、費用の予約と精算、`type` の改行の判定（D-157）、`open_url` のスキームと T-2（D-158）、スクショの枚数の制限（D-161）、秘密の欄の塗りつぶし（D-162）、`paused_ms` の計算（D-174）、`clickable` の T-3（D-173）、パックの JSON の検証 |
+| 単体 | `judgeBrowserAction` の合図（申告・T-1〜T-6、キーと修飾キー・押すと離す）、中身のハッシュ、`pending → executing` の1回だけ、歩みの記録のなぞり、再開の表（FR-084）のすべての行、費用の予約と精算、`type` の改行の判定（D-157）、`open_url` のスキームと T-2（D-158）、スクショの枚数の制限（D-161）、秘密の欄の塗りつぶし（D-162）、`paused_ms` の計算（D-174）、`clickable` の T-3（D-173）、パックの JSON の検証、接続先ごとの道具の宣言の切り替えとモデル名の形（FR-087） |
 | 結合 | 本体＋偽の box-manager で UC-046〜048 を通す。LLM は今の ScriptedLlm。二重の ○、交代と動いている呼び出しの重なり、承認のあとの画面の変化、実行の途中での再起動。UC-052（パックを入れる・外す）・UC-053（VM のターミナルで仕事をする） |
 | VM | 実の VM に決まった試験ページ（パスワード欄・購入ボタン・同じ出どころとほかの出どころの iframe・canvas・JS のダイアログ・新しいタブ）を開かせ、確かめた先と実行した先が同じであることを確かめる |
 | 隔離 | VM から、ほかの VM・本体・box-manager の口・ホストのブリッジのアドレス・192.168.x・100.64.x・`::1`・IPv4 を入れた IPv6 に届かないこと。名前を引き直す仕掛け（DNS rebinding）で抜けないこと。egress の断りが記録されること。`web_fetch` からも同じアドレスに届かないこと（D-164）。ターミナルから許可リスト外のホスト・LAN に届かないこと |
@@ -134,10 +138,12 @@ flowchart LR
 | R-83 | 自動の操作を禁じるサイトがある | 持ち主の責任。確認するドメインで止められる |
 | R-84 | VM の中のコマンドが暴走する | 資源の上限・タイムアウト（NFR-080）・使い捨ての VM |
 | R-85 | パックの更新で持ち主の手直しが消える | 更新の前に知らせを出す（SCR-024） |
+| R-86 | レビューで評価された「4 人の工程の受け渡し」が、この設計では 1 人のエージェントの手順書 4 本（D-186）になり、工程の見え方が弱くなる | 歩みの記録を工程（設計・制作・点検・仕上げ）ごとに SCR-021 で見せる。手順書を工程ごとに分け、点検の結果を次の手順書に渡す。1 件 1 人（ADR-050）は変えない |
+| R-87 | Bedrock・Vertex では費用の見積もりが実際の請求とずれる。Bedrock では Web 検索の道具がない | 設定画面と手順書に「見積もりは目安」と書く。Bedrock では `web_fetch` と VM のブラウザで調べる（FR-087） |
 
 ### 13. 未決事項・Claude判断で決めた項目
-- 未決：なし（Q-114〜123 は 2026-10-24 に決着。[00 決定事項ログ](00_overview.md#決定事項ログ) の D-172〜D-182）
-- Claude判断：[00 決定事項ログ](00_overview.md#決定事項ログ) の D-136〜D-146・D-151〜D-171
+- 未決：なし（Q-114〜123 は 2026-10-24 に決着。[00 決定事項ログ](00_overview.md#決定事項ログ) の D-172〜D-182。OSS と事業の方針は D-183〜D-189）
+- Claude判断：[00 決定事項ログ](00_overview.md#決定事項ログ) の D-136〜D-146・D-151〜D-171・D-187〜D-189
 
 ### 14. 参照ドキュメント
 - [00](00_overview.md)〜[10](10_diagrams.md)、[adr/](adr/)
