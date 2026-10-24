@@ -1,5 +1,5 @@
 # 09. API設計：VM・確認・設定の API（v0.6 から引き継ぐ API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ 親：[09 API設計](README.md)
 
 > **3行で**
 > 1. VM は 1 台なので、画面向けの VM の API は `/api/v1/vm/*` になった（v0.6 の `/boxes/:boxId`）。控え・戻す・作り直す（API-133〜135）と、v1.2 で掃除のための起動（API-145）を足した。
@@ -62,6 +62,7 @@
 
 ### API-087：GET /api/v1/check
 - 概要：確認待ちのもの。今の書き込みのカードに、`kind: "browser"`・`kind: "takeover"`・`kind: "routine"`（ルーチンの提案：API-142）を足す。ブラウザのカードには `taskId`・`taskTitle`・オートレビューが止めた理由（`reviewReason`）を入れる
+- メインのターンから来た書き込みのカードとルーチンの提案のカードには `summaryTainted` を入れる。そのターンの `turns.context_snapshot_id` がメインの今の先頭のままで、先頭が `tainted = 1` かつ `untainted_at` が空のときだけ `true`。画面はカードに「メインの記憶の要約に外の内容が入っているため確認しています」と SCR-025 の要約の欄へのリンクを出す。タスクから来たカードとブラウザ・交代のカードには入れない（D-311）
 - レスポンス（200）：
 <details>
 <summary>例</summary>
@@ -85,7 +86,7 @@
    "expiresAt": "2026-10-23T10:30:00Z"
   },
   { "kind": "takeover", "boxId": "0193...", "taskId": "0193...", "reason": "ログインしてください", "requestedAt": "2026-10-23T10:00:00Z" },
-  { "kind": "routine", "proposalId": "0193...", "name": "週次の PR のまとめ", "schedule": "0 9 * * 1", "scheduleText": "毎週月曜 9:00", "prompt": "先週の PR を…", "expiresAt": "2026-10-31T10:00:00Z" }
+  { "kind": "routine", "proposalId": "0193...", "name": "週次の PR のまとめ", "schedule": "0 9 * * 1", "scheduleText": "毎週月曜 9:00", "prompt": "先週の PR を…", "summaryTainted": false, "expiresAt": "2026-10-31T10:00:00Z" }
  ]
 }
 ```
@@ -104,7 +105,7 @@
 
 ### API-096：GET・PATCH /api/v1/settings
 - PATCH のボディ：`{ "budget": {...}, "browser": { "confirmDomains": [...], "skipUnresolvedDomains": [...], "humanWords": [...], "confirmWords": [...], "autoReview": { "enabled": true } }, "maxTasks": 3 }`（部分）
-- 副作用：ポリシーの新しい版を作る（`workspace_policies`）。効くのは次のタスク・ターンから（動いているものは始まるときのポリシーのまま）
+- 副作用：ポリシーの新しい版を作る（`workspace_policies`）。効くのは次のタスク・ターンから（動いているものは始まるときのポリシーのまま）。ただし日次の上限か `reserve_chat_usd` が変わったら、同じ処理の後にルーターが待っているきっかけを今すぐ評価し直す。上げて届けば、待っていたメインのターンをすぐ始める。下げたときも同じ規則で評価する（D-312）
 
 ### API-097・098：書き出し・取り込み
 - 書き出しの形：`{ "formatVersion": 2, "exportedAt": "...", "agents": [...], "skills": [...], "policy": { "budget": {...}, "browser": {...}, "terminal": {...} }, "memoryFacts": [...], "routines": [...] }`（D-239。`formatVersion` 1 も取り込める）
@@ -146,7 +147,7 @@
 
 | ID | メソッド | パス | 概要 |
 |---|---|---|---|
-| API-101 | POST | `/internal/v1/boxes` | 起こす。`{ boxId, mode }`（`normal`・`cleanup`）だけを受ける（イメージ・上限・ネットワーク・ホームのボリュームは固定）。戻し・作り直しの印ファイルがある（`failed` を含む）・控えを書いている間は 409 `VM_BUSY`（D-294・D-295）。ホストへの入りが断られていなければ 503 `HOST_ISOLATION_MISSING`（D-293）。ホストの空きが 3GB 未満なら 507 `DISK_LOW`（`cleanup` は除く） |
+| API-101 | POST | `/internal/v1/boxes` | 起こす。`{ boxId, mode }`（`normal`・`cleanup`）だけを受ける（イメージ・上限・ネットワーク・ホームのボリュームは固定）。戻し・作り直しの印ファイルがある（`failed` を含む）・控えを書いている間は 409 `VM_BUSY`（D-294・D-295）。ホストへの入りが断られていなければ 503 `HOST_ISOLATION_MISSING`（D-293）。Docker が別の VM にある置き先（Docker Desktop・OrbStack・Colima）で `isolated` モードが使えないときも同じ（手順書の「Docker Engine に入れ替える」節を知らせる：D-314）。ホストの空きが 3GB 未満なら 507 `DISK_LOW`（`cleanup` は除く） |
 | API-102 | DELETE | `/internal/v1/boxes/:boxId` | 止める（ホームのボリュームは残す） |
 | API-103 | POST・GET | `/internal/v1/boxes/:boxId/actions`・`/internal/v1/boxes/:boxId/actions/:actionId` | POST：操作を1つ、確かめてから実行する。GET：その `actionId` を実行したかだけを答える（`executed`・`not_executed`・`unknown`。実行はしない。本体の再開で使う：D-302） |
 | API-104 | POST | `/internal/v1/boxes/:boxId/inspect` | 確かめだけ（確認カードを作るとき） |

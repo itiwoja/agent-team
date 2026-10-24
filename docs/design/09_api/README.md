@@ -1,5 +1,5 @@
 # 09. API設計
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
+- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
 
 > **3行で**
 > 1. 画面向けの API は `/api/v1`（:8080・tailnet だけ）。依頼の API（API-072〜077・084）はやめ、チャット・タスク・きっかけ・記憶・VM・通知の API を足した。詳細は [resident.md](resident.md)（新しい API）と [vm.md](vm.md)（引き継ぐ API）。
@@ -83,7 +83,7 @@ flowchart LR
 | `TURN_RUNNING` | 409 | メインのターンが動いている間に要約の印を消そうとした（API-147。D-310） |
 | `SNAPSHOT_NOT_CURRENT` | 409 | 今の先頭ではない要約の印を消そうとした（API-147） |
 | `NOT_TAINTED` | 409 | 印のない要約の印を消そうとした（API-147） |
-| `HOST_ISOLATION_MISSING` | 503 | （内部）box ネットワークからホストへの入りが断られていない。VM を起こさない（D-293） |
+| `HOST_ISOLATION_MISSING` | 503 | （内部）box ネットワークからホストへの入りが断られていない。Docker が別の VM にある置き先（Docker Desktop・OrbStack・Colima）で `isolated` モードの box ネットワークを作れないときも返す。VM を起こさない（D-293・D-314） |
 | `DISK_LOW` | 507 | ホストの空きディスクが足りない（3GB 未満。D-265） |
 | `STALE_CONTROL` | 409 | （内部）VM の世代が古い操作・コマンド、`control_epoch` が古い画面の操作（コマンドは `control_epoch` を見ない：D-296） |
 | `CONTENT_CHANGED` | 409 | （内部）承認した中身と今の画面が違う |
@@ -101,7 +101,7 @@ flowchart LR
 | API-085 | GET | `/api/v1/events` | SSE（変化の合図。通し番号つき：D-196） | FR-018 / 全画面 | [下](#api-085sse-は合図d-196) |
 | API-100 | GET | `/api/v1/counts` | 確認待ち・動いているタスクの件数 | FR-018 / SCR-020 | — |
 | API-119 | POST | `/api/v1/messages` | メインに送る | FR-090 / SCR-020 | [resident](resident.md#api-119post-apiv1messages) |
-| API-120 | GET | `/api/v1/messages` | チャットを読む | FR-093 / SCR-020 | [resident](resident.md#api-120get-apiv1messages) |
+| API-120 | GET | `/api/v1/messages` | チャットを読む。`mainState` と `summaryTainted`（メインの今の要約に外の印があるか。D-311） | FR-093 / SCR-020 | [resident](resident.md#api-120get-apiv1messages) |
 | API-121 | POST | `/api/v1/presence` | 入力中・画面が見えているかの合図（前に出ている間は 30 秒ごと） | FR-098, FR-017 / SCR-020 | [resident](resident.md#api-121post-apiv1presence) |
 | API-122 | GET | `/api/v1/tasks` | タスクの一覧（`?status=active\|done`） | FR-092 / SCR-020 | [resident](resident.md#api-122get-apiv1tasks) |
 | API-123 | GET | `/api/v1/tasks/:taskId` | タスクの中身（`brief`・歩み・ブラウザ・ターミナル・オートレビュー・報告） | FR-092 / SCR-021 | [resident](resident.md#api-123get-apiv1taskstaskid) |
@@ -110,8 +110,8 @@ flowchart LR
 | API-041 | GET | `/api/v1/agents` | エージェントの一覧（メインを先頭に。`kind`・`description`・`createdBy` を足す） | FR-072 / SCR-014 | — |
 | API-080 | POST | `/api/v1/agents` | したいことから1人作る | FR-072 / SCR-014 | — |
 | API-081 | DELETE | `/api/v1/agents/:agentId` | 論理削除（メインは 409 `MAIN_AGENT`） | FR-072 / SCR-014 | — |
-| API-087 | GET | `/api/v1/check` | 確認の一覧（API の書き込み・ブラウザ・交代の頼み・ルーチンの提案） | FR-077, FR-078, FR-081, FR-094 / SCR-019 | [vm](vm.md#api-087get-apiv1check) |
-| API-019 | POST | `/api/v1/approvals/:approvalId/decision` | API の書き込みの ○ / ×。`turn_id` を持つ Intent は、× なら決めたのと、○ なら実行の結果を書くのと同じトランザクションで `approval_done` を入れる（D-248・D-275） | FR-081 / SCR-019 | — |
+| API-087 | GET | `/api/v1/check` | 確認の一覧（API の書き込み・ブラウザ・交代の頼み・ルーチンの提案）。メインのターンから来た書き込み・ルーチンのカードに `summaryTainted`（D-311） | FR-077, FR-078, FR-081, FR-094 / SCR-019 | [vm](vm.md#api-087get-apiv1check) |
+| API-019 | POST | `/api/v1/approvals/:approvalId/decision` | API の書き込みの ○ / ×。`turn_id` を持つ Intent は、× なら決めたのと、○ なら実行の結果を書くのと同じトランザクションで `approval_done` を入れる（D-248・D-275）。API-087 のカードの `summaryTainted` は、メインのターンの汚染が今の要約の印から来ているとき `true`（D-311） | FR-081 / SCR-019 | — |
 | API-110 | POST | `/api/v1/browser-checks/:checkId/decision` | ブラウザの確認の ○ / × | FR-077 / SCR-019 | [vm](vm.md#api-110post-apiv1browser-checkscheckiddecision) |
 | API-142 | POST | `/api/v1/routine-proposals/:proposalId/decision` | ルーチンの提案の ○ / × | FR-094 / SCR-019 | [resident](resident.md#api-142post-apiv1routine-proposalsproposaliddecision) |
 | API-088 | GET | `/api/v1/vm` | VM の状態・世代・画面の番・操作する人・交代の頼み・最新のスクショ・ホームの大きさ | FR-074, FR-078 / SCR-022, 023 | [vm](vm.md#api-088get-apiv1vm) |
@@ -146,7 +146,7 @@ flowchart LR
 | API-094 | GET | `/api/v1/connect/:kind/start` | つなぎ始める | FR-081 / SCR-023 | [vm](vm.md#api-094095つなぐ) |
 | API-095 | GET | `/api/v1/connect/:kind/callback` | 戻り先 | FR-081 | [vm](vm.md#api-094095つなぐ) |
 | API-107 | DELETE | `/api/v1/connect/:kind` | つながりを外す | FR-081 / SCR-023 | — |
-| API-096 | GET・PATCH | `/api/v1/settings` | `budget`・`browser`・`terminal` 欄・裏のタスクの同時数 | FR-013, FR-076, FR-099 / SCR-023 | [vm](vm.md#api-096getpatch-apiv1settings) |
+| API-096 | GET・PATCH | `/api/v1/settings` | `budget`・`browser`・`terminal` 欄・裏のタスクの同時数。日次の上限（`reserve_chat_usd` も）を変えたら、ルーターが待っているきっかけを今すぐ評価し直す（D-312） | FR-013, FR-076, FR-099 / SCR-023 | [vm](vm.md#api-096getpatch-apiv1settings) |
 | API-097 | GET | `/api/v1/export` | 書き出し（JSON のファイル） | FR-082 / SCR-023 | [vm](vm.md#api-097098書き出し取り込み) |
 | API-098 | POST | `/api/v1/import` | 取り込み | FR-082 / SCR-023 | [vm](vm.md#api-097098書き出し取り込み) |
 | API-114 | GET | `/api/v1/packs` | パックの一覧 | FR-085 / SCR-024 | [vm](vm.md#api-114get-apiv1packs) |
@@ -164,4 +164,4 @@ flowchart LR
 
 
 ## このドキュメントで決まったこと
-- D-148、D-151、D-156、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-196、D-207、D-208、D-212、D-221〜D-223、D-229、D-233〜D-235、D-239、D-275（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-148、D-151、D-156、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-196、D-207、D-208、D-212、D-221〜D-223、D-229、D-233〜D-235、D-239、D-275、D-311、D-312（[00 決定事項ログ](../00_overview.md#決定事項ログ)）

@@ -1,5 +1,5 @@
 # 07. システムアーキテクチャ
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec/README.md)、[05_non_functional](05_non_functional.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec/README.md)、[05_non_functional](05_non_functional.md)
 
 > **3行で**
 > 1. 1台の Linux ホストの上で、Docker Compose で 6 種類のコンテナを動かす：Tailscale・本体・box-manager・Docker の中継・egress・VM（持ち主に 1 台。止めても残るホームのボリュームつき）。
@@ -83,6 +83,8 @@ flowchart LR
   - Docker のブリッジのゲートウェイの `isolated` モードが使える版ならそれを Compose に書く。使えなければ、手順書のホスト側の手順で規則を入れる（box ネットワークのブリッジから入るものを捨てる）。box-manager は自分のコンテナの中にいて、ホストの規則（ホストのネットワーク名前空間と `NET_ADMIN` が要る）は入れられないため
   - 規則の置き場所：ホスト自身のアドレスへの入りは FORWARD を通らず INPUT の鎖に入るので、DOCKER-USER（FORWARD の中）だけでは止まらないかもしれない（たぶん）。手順書では DOCKER-USER と INPUT の両方に入れ、実装のときに確かめる
   - box-manager の確かめ：起動のときと、VM を起こす前（直近 10 分に確かめていなければ）に、自分の box ネットワークの口から、ゲートウェイのアドレスの決まったポートに TCP でつなぐ。断られずに時間切れ（捨てられた）なら入っている、つながった・RST が返ったなら入っていないとみなし、VM を起こさない（API-101 は 503 `HOST_ISOLATION_MISSING`。持ち主に手順書の節を知らせる）
+  - Docker が別の VM にあるとき（D-314）：Docker Desktop（WSL2 の Windows 側）・OrbStack・Colima は Docker が別の VM で動く。ホスト側の手順で入れた規則はそちらの Docker のネットワークに効かないので、規則を入れる手順は取らない。`isolated` モードが使えて box-manager がそれで box ネットワークを作れたときだけ VM を起こせる。使えなければ VM を起こさず 503 `HOST_ISOLATION_MISSING` を返し、手順書の「Docker Engine に入れ替える」節を知らせる
+  - box-manager は Docker が別の VM にあるかを `docker info` の項目などで見分ける（どの項目かは実装のときに確かめる）。見分けられないときは、上の確かめ（規則が入っているか）だけで決める
   - どちらの形でも隔離の試験（11 §11）で確かめる
 - 本体の :8080 の待ち受けは front ネットワークでのアドレスに結びつける。:8081 には `POST /hooks/:hookId` だけを置き、ほかは 404。ctl では待ち受けない
 - docker-socket-proxy は API の種類を絞るだけで、作るコンテナの中身（イメージ・マウント・権限）は絞れない。中身を固定するのは box-manager のコード（[ADR-044](adr/ADR-044-box-manager.md)）
@@ -125,7 +127,7 @@ flowchart TB
 | 起動役（`box-init`） | VM の最初のプロセス。root で始まり、capability は `CAP_SETUID`・`CAP_SETGID` だけを持つ（ほかは box-manager が外す）。決まった子を決まった利用者で起こす：Xvfb・x11vnc・box-agent（利用者 `boxagent`）、ブラウザの実行役（利用者 `browser`。Chromium を起こす・起こし直す・プロフィールを消す）、コマンドの実行役（利用者 `agent`。box-agent からパイプでコマンドを受け、自分の子として動かし・止める）。子を起こし終えたら capability をすべて手放し、子を見張るだけになる（子が落ちたら VM ごと落とし、box-manager が `failed` にする）。外からの入力は受けない。トークン・X の鍵・資格は box-manager から受け取り、自分の環境から消してから、子に fd で渡す（D-291） |
 | Xvfb | 1280×800 の仮想画面。`-nolisten tcp -nolisten local`（TCP と抽象名前空間のソケットで待ち受けない）・`-auth`（Xauthority の鍵は `/home/browser` の下・700）。届くのはファイルのソケットと鍵を持つものだけ（D-290） |
 | 軽いウィンドウマネージャ | Chromium を全画面にする |
-| Chromium | 利用者 `browser` で動く。キオスクの形（アドレスバー・タブの帯・メニューなし）で、画面いっぱいに1枚。表示の倍率は 1、ページの拡大は 100% に固定。ユーザーデータは `/home/browser/profile`（700。D-216）。起動のときに、ロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから起こす（D-171）。プロキシは egress。WebRTC・QUIC は切る。開発者ツール・ダウンロード・権限の求め（位置・カメラなど）は切る。リモートデバッグは TCP では開かず、box-agent が Chromium を起こすときのパイプ（`--remote-debugging-pipe`）だけ（D-252）。`--proxy-bypass-list` は `<-loopback>` と `127.0.0.1:8000`〜`127.0.0.1:8099` の 100 個を並べ、この範囲だけ egress を通さない（VM の中で作ったページの点検：D-266。範囲の書き方は効かず、ループバックはもともとプロキシを通らないため（たぶん）：D-303。試験で確かめる）。egress の資格は box-agent が CDP（`Fetch.authRequired`）で答えて渡す（D-292）。サンドボックスは利用者名前空間で動かす（`--no-sandbox` は使わない：D-272）。そのための専用の seccomp と AppArmor のプロファイルは下の「Chromium のサンドボックス」（D-304） |
+| Chromium | 利用者 `browser` で動く。キオスクの形（アドレスバー・タブの帯・メニューなし）で、画面いっぱいに1枚。表示の倍率は 1、ページの拡大は 100% に固定。ユーザーデータは `/home/browser/profile`（700。D-216）。HTTP キャッシュはホームの外の `/tmp/chromium-cache`（利用者 `browser`・700）に置き、`--disk-cache-dir` と `--disk-cache-size`（512MB）で大きさを抑える（D-313。効き方は実装のときに確かめる）。起動のときに、ロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから起こす（D-171）。プロキシは egress。WebRTC・QUIC は切る。開発者ツール・ダウンロード・権限の求め（位置・カメラなど）は切る。リモートデバッグは TCP では開かず、box-agent が Chromium を起こすときのパイプ（`--remote-debugging-pipe`）だけ（D-252）。`--proxy-bypass-list` は `<-loopback>` と `127.0.0.1:8000`〜`127.0.0.1:8099` の 100 個を並べ、この範囲だけ egress を通さない（VM の中で作ったページの点検：D-266。範囲の書き方は効かず、ループバックはもともとプロキシを通らないため（たぶん）：D-303。試験で確かめる）。egress の資格は box-agent が CDP（`Fetch.authRequired`）で答えて渡す（D-292）。サンドボックスは利用者名前空間で動かす（`--no-sandbox` は使わない：D-272）。そのための専用の seccomp と AppArmor のプロファイルは下の「Chromium のサンドボックス」（D-304） |
 | x11vnc＋websockify | 画面の配信（VNC over WebSocket）。見るだけ・操作の2つの口。box ネットワークのアドレスにだけ結び、世代ごとのトークンで確かめる（127.0.0.1 では待ち受けない）。X の鍵とトークンは起動役から fd で受け取る（D-252・D-290） |
 | シェル（bash）・git・Node・Python・よく使う CLI | ターミナル。コマンドは利用者 `agent` で、コマンドの実行役が動かす（D-178・D-216・D-291）。入れたツールは `/home/agent` に残る（`apt` は使えない：D-272）。コマンドの環境にトークン・鍵は渡さない。`/proc` の `hidepid` には頼らない（capability がないので付けられない。ほかの利用者のプロセスの環境・fd・メモリはもともと読めない。引数は誰でも読めるので秘密を載せない：D-291） |
 | box-agent | 利用者 `boxagent`。操作の実行（xdotool）・スクショ・操作の先の確かめ（CDP）・`open_url`（CDP の `Page.navigate`。`http`・`https` だけ）。操作は1つずつ実行し、操作 ID と `control_epoch` を確かめる（`screen_epoch` は本体が確かめる：D-299）。box ネットワークのアドレスにだけ結ぶ。コマンドの実行（API-117。同時に 2 本まで。コマンドの実行役に渡す）・tar の出し入れ（API-118。コマンドの実行役が利用者 `agent` で作る：D-306）。コマンドのプロセスには egress のターミナル用の資格を環境変数（`HTTPS_PROXY`）で渡す（コマンドから見えてよい資格。Chromium 用の資格は渡さない：D-292） |
@@ -135,7 +137,7 @@ flowchart TB
 - `DOM.getNodeForLocation` で一番上のフレームの要素を引く。同じ出どころの iframe は中へたどる。ほかの出どころの iframe は、そのフレームに CDP をつないでたどる。たどれなければ「分からない」（T-6）
 - JS のダイアログ（alert・confirm・beforeunload）は CDP で拾い、Claude に文で知らせる。ダイアログへの操作は「分からない」（T-6）として確認に回す
 
-起こすときの決まり（box-manager が固定で付ける。本体からは変えられない）：起動役だけ root で `CAP_SETUID`・`CAP_SETGID` を残し、ほかの capability はすべて外す（起動役は子を起こしたら手放す。ほかのプロセスは権限なしの利用者：D-291）・`no-new-privileges`・ルートは読み取りだけ（`/home` と `/tmp` だけ書ける）・`/dev/shm` 512MB・メモリ 1.5GB・CPU 1.5・プロセス 512・box ネットワークだけ・DNS は持たせない（名前は egress が引く）・専用の seccomp と AppArmor のプロファイル（下）。ホームは `makase-vm-home` のボリュームで、4GB を超えたら box-manager が VM を止める（Docker のボリュームには容量の上限がないので、box-manager が毎分測る：D-265・D-300・D-309）。
+起こすときの決まり（box-manager が固定で付ける。本体からは変えられない）：起動役だけ root で `CAP_SETUID`・`CAP_SETGID` を残し、ほかの capability はすべて外す（起動役は子を起こしたら手放す。ほかのプロセスは権限なしの利用者：D-291）・`no-new-privileges`・ルートは読み取りだけ（`/home` と `/tmp` だけ書ける。`/tmp` は VM 専用の名前なしボリュームで、ホストのディスクに置く。tmpfs にしないので、メモリ 1.5GB には数えない。VM のコンテナを消すときに一緒に消え、控えにも入らない：D-313）・`/dev/shm` 512MB・メモリ 1.5GB・CPU 1.5・プロセス 512・box ネットワークだけ・DNS は持たせない（名前は egress が引く）・専用の seccomp と AppArmor のプロファイル（下）。ホームは `makase-vm-home` のボリュームで、4GB を超えたら box-manager が VM を止める（Docker のボリュームには容量の上限がないので、box-manager が毎分測る：D-265・D-300・D-309）。Chromium の HTTP キャッシュはホームに入れないのでこの測りにも控えにも入らない。キャッシュの外に出せないプロフィールの中の大きなもの（Service Worker の CacheStorage・IndexedDB など）はホームの測りと「掃除のための起動」・「ブラウザのデータを消す」で扱う（D-301・D-313）。
 
 Chromium のサンドボックス（D-272 を D-304 で詳しくした。ホストの挙動に頼るので、実装のときに確かめる）：
 - Chromium は利用者名前空間（`CLONE_NEWUSER`）でサンドボックスを作る。Docker の既定の seccomp は capability なしでは `unshare`・`clone` の `CLONE_NEWUSER` を断る（たぶん）。そこで既定の seccomp に「`clone`・`unshare` の `CLONE_NEWUSER` を許す」だけを足した専用のプロファイル（`makase-box.json`。リポジトリに置く）を box-manager が付ける。`clone3` は既定どおり（glibc が `clone` に戻る）
@@ -185,8 +187,8 @@ Chromium のサンドボックス（D-272 を D-304 で詳しくした。ホス�
 | ホスト | Linux | Docker |
 |---|---|---|
 | ラズパイ 4/5 | Raspberry Pi OS 64bit | Docker Engine |
-| Win ノート | WSL2（Ubuntu）。WSL を自動で止めない設定 | WSL の中の Docker Engine か Docker Desktop |
-| Mac | OrbStack か Colima の Linux | その中の Docker |
+| Win ノート | WSL2（Ubuntu）。WSL を自動で止めない設定 | WSL のディストリの中に入れた Docker Engine（手順書の正。確かめる構成はこれだけ：D-314） |
+| Mac | OrbStack か Colima | Docker は別の VM の中。下の「Docker が別の VM にあるとき」と同じ扱い（D-314） |
 | Linux PC | そのまま | Docker Engine |
 
 webhook を使うときは、tailnet の ACL で `makase` に `funnel` の属性を許す（手順書の任意の節）。公開するのは 8443 番だけで、受け口の URL は `https://makase.<tailnet>.ts.net:8443/hooks/<hookId>`（D-241）。8443 番は `/` ごと :8081 に流し、:8081 が `POST /hooks/:hookId` 以外を 404 にする（D-305。手順書で `curl` を送り、:8081 に `/hooks/<hookId>` のまま届くことを確かめる）。
@@ -194,7 +196,7 @@ webhook を使うときは、tailnet の ACL で `makase` に `funnel` の属性
 ホスト側の手順（手順書に書く。box-manager はできないので人がする：D-293・D-304）：
 | 手順 | 中身 | 確かめ |
 |---|---|---|
-| ホストへの入りを断る | Docker が `isolated` モードを使えないとき、box ネットワークのブリッジから入るものを捨てる規則を INPUT と DOCKER-USER に入れる（再起動しても残る形で） | box-manager が起動のたびに確かめ、なければ VM を起こさない |
+| ホストへの入りを断る | Docker が `isolated` モードを使えないとき、box ネットワークのブリッジから入るものを捨てる規則を INPUT と DOCKER-USER に入れる（再起動しても残る形で）。Docker が別の VM にある置き先（Docker Desktop・OrbStack・Colima）では入れられないので、`isolated` モードを使うか、WSL の中の Docker Engine に入れ替える（D-314） | box-manager が起動のたびに確かめ、なければ VM を起こさない |
 | AppArmor のプロファイル | AppArmor のあるホストだけ、`makase-box` を読み込む | box-agent が Chromium のサンドボックスを確かめる |
 | 利用者名前空間 | `user.max_user_namespaces` などの前提を満たす | 同上 |
 

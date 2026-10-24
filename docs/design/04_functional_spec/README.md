@@ -1,5 +1,5 @@
 # 04. 機能仕様
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ インプット：[03_use_cases](../03_use_cases.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ インプット：[03_use_cases](../03_use_cases.md)
 
 > **3行で**
 > 1. v1.0 で足したのは常駐の仕組み：受付とルーター（FR-090）・メインのターン（FR-091）・振り分けと報告（FR-092）・`send_to_owner`（FR-093）・ルーチン（FR-094）・予約した確認（FR-095）・webhook（FR-096）・記憶（FR-097）・文脈の組み方（FR-098）・Web Push（FR-017）。詳細は [resident.md](resident.md)。

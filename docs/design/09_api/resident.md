@@ -1,5 +1,5 @@
 # 09. API設計：常駐の API（v1.0 で足す API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ 親：[09 API設計](README.md)
 
 > **3行で**
 > 1. チャットは送る（API-119）・読む（API-120）の 2 つ。送ったメッセージはきっかけになり、返事があるかはメインが決めるので、API-119 は受けたことだけを返す。
@@ -39,13 +39,14 @@
   { "id": "0193...", "role": "main", "kind": "file", "body": { "name": "店の比較.html", "url": "/api/v1/files/0193.../店の比較.html", "sizeBytes": 12034 }, "createdAt": "..." }
  ],
  "mainState": "sleeping",
+ "summaryTainted": false,
  "nextBefore": "0193..."
 }
 ```
 
 </details>
 
-- `reaction` の行は単独では返さず、先のメッセージの `reactions` に入れる。`mainState` は `sleeping`・`running`
+- `reaction` の行は単独では返さず、先のメッセージの `reactions` に入れる。`mainState` は `sleeping`・`running`。`summaryTainted` はメインの今の先頭（`context_snapshots`）が `tainted = 1` で `untainted_at` が空のとき `true`。画面は「外の印あり」を出し、押すと SCR-025 の要約の欄へ行く（D-311）。確認のカード（API-087・019 の応答の `summaryTainted`）も同じ規則で、そのターンの先頭が今の先頭のままのときだけ `true`
 
 ### API-121：POST /api/v1/presence
 - リクエスト：`{ "deviceId": "...", "visible": true, "typing": true }`（`deviceId` は PWA が初回に作って持つ UUID。ほかは任意）
@@ -138,4 +139,4 @@
 - どれも監査ログ `memory.changed` を残し、SSE の `memory.updated` を出す。持ち主が変えた記憶は、次の要約まで先頭（④）を変えず、メインの次の `user` メッセージに「（本体から：持ち主が記憶を直した：…）」の枠で足す（FR-098・D-286）
 
 ## このドキュメントで決まったこと
-- D-196、D-212、D-220〜D-225、D-233、D-234、D-261、D-286、D-310（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-196、D-212、D-220〜D-225、D-233、D-234、D-261、D-286、D-310、D-311（[00 決定事項ログ](../00_overview.md#決定事項ログ)）

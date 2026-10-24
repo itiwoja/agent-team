@@ -1,5 +1,5 @@
 # 04. 機能仕様：VM とこわい操作
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[04 機能仕様](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ 親：[04 機能仕様](README.md)
 
 > **3行で**
 > 1. VM は持ち主に 1 台。道具を使うときに起き、10 分使わなければ眠る（FR-074）。画面は 1 つで、画面を使うタスクは番を取る。ファイルとログインはホームに残り、控えから戻せる（FR-079・FR-100）。
@@ -33,9 +33,9 @@ flowchart TD
  1. VM の操作は 1 つずつ（D-251）：`workspace.vm_op` が `none` のときだけ、同じトランザクションで `vm_op = 'starting'` にして `boxes` に `starting` の行（新しい世代）を入れる。止まっていない世代は 1 つだけ（部分 UNIQUE）。`vm_op` がほかの値（止めている・控えを取っている・戻している・作り直している）の間は、タスクは `waiting_vm` で待つ。`vm_op` の遷移は [10 states](../10_diagrams/states.md#workspacevm_op)
  1a. ホストの空きディスクが 3GB を切っていれば起こさず、タスクに「ディスクが足りない」を返して持ち主に知らせる（D-265）
  1b. ホームの状態（`workspace.vm_home_state`）が `ok` のときだけ、タスクのために起こす。`over_quota`（容量超え）のときは掃除のための起動（下）だけ、`broken`（戻し・作り直しに失敗した）のときは戻す・作り直すだけを受ける。タスクには「VM のホームが容量を超えている・壊れている」を返して持ち主に知らせる（D-294・D-301）
- 2. box-manager は、決まったイメージ・決まった資源の上限・VM のネットワーク・ホームのボリュームで VM を起こす（中身は [07](../07_architecture.md#vm-の中身)）。起こす前に、box ネットワークからホストへの入りが断られているかを確かめ、断られていなければ起こさない（503 `HOST_ISOLATION_MISSING`。D-293）
+ 2. box-manager は、決まったイメージ・決まった資源の上限・VM のネットワーク・ホームのボリュームで VM を起こす（中身は [07](../07_architecture.md#vm-の中身)）。起こす前に、box ネットワークからホストへの入りが断られているかを確かめ、断られていなければ起こさない（503 `HOST_ISOLATION_MISSING`。D-293）。Docker が別の VM にある置き先（Docker Desktop・OrbStack・Colima）は、`isolated` モードで box ネットワークを作れたときだけ起こす。作れなければ起こさず `HOST_ISOLATION_MISSING` を返し、手順書の「Docker Engine に入れ替える」節を知らせる。別の VM かどうかを見分けられないときは規則の確かめだけで決める（D-314）
  3. box-agent が応答したら running にし、`vm_op = 'none'` に戻す。60秒応答がなければ failed（`vm_op` も戻す）。Chromium のサンドボックスが使えない（ホストの前提が足りない）ときは `--no-sandbox` に逃げず failed（`stop_reason = 'sandbox_unavailable'`）にして、手順書の確かめ方を持ち主に知らせる（D-304）
- 4. box-agent は起動時に、Chrome のロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから Chromium を起こす（D-171）。VM の中のプロセスの起こし方（起動役・利用者）は [07](../07_architecture.md#vm-の中身)（D-291）
+ 4. box-agent は起動時に、Chrome のロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから Chromium を起こす（D-171）。起こすとき、HTTP キャッシュはホームの外の `/tmp/chromium-cache`（利用者 `browser`・700）にして、`--disk-cache-dir`・`--disk-cache-size`（512MB）を付ける。VM を止めると消えてよい（D-313）。VM の中のプロセスの起こし方（起動役・利用者）は [07](../07_architecture.md#vm-の中身)（D-291）
 - 画面の番（D-205・D-217）：
  1. 画面を使う道具の前に、`boxes.screen_task_id` を条件つきの UPDATE（`WHERE screen_task_id IS NULL`）で取る。取れなければタスクは `waiting_screen` で待ち、空いたら待った順に渡す
  2. 返すとき（D-258）：タスクが終わった・取り消された・3 分画面の操作がない。3 分は通常の実行中だけ数え、LLM の呼び出し中・確認待ち・オートレビュー中・交代の頼み・交代中は数えない。確認が期限切れ・× になったら、その時点から数え始める。ターミナルは番なしで動く
@@ -44,7 +44,7 @@ flowchart TD
 - `boxes` の1行が「VM の世代」。起こし直すと新しい行（新しい世代）になる。承認・交代・操作は世代に結びつく
 - 眠る（止める）：タイマーが毎分、`last_activity_at` から 10 分たち、画面の番・交代・動いているコマンドがない世代を止める（`vm_op = 'stopping'`、`stop_reason = 'idle'`。D-214）。ほかに：持ち主が止めた（API-099）・控えに戻す・作り直す（FR-100）・落ちた・ホームが容量を超えた・ホストの空きが足りない
 - 容量（D-265 を D-300・D-309 で直した）：
- 1. 測るのは box-manager だけ。VM が動いている間、毎分ホームの大きさと、ホストの空き（ボリュームのあるファイルシステム）を測る。本体のタイマーは毎分 API-109 で結果を読むだけで、自分では測らない
+ 1. 測るのは box-manager だけ。VM が動いている間、毎分ホームの大きさと、ホストの空き（ボリュームのあるファイルシステム）を測る。Chromium の HTTP キャッシュ（`/tmp/chromium-cache`・上限 512MB）はホームの外なので、ホームの測りにも控えにも入らない（D-313）。本体のタイマーは毎分 API-109 で結果を読むだけで、自分では測らない
  2. ホームが 4GB を超えたら、box-manager が動いているコマンドを止めて VM を止める（`stop_reason = 'disk_quota'`）。本体は次の API-109 で知り、`vm_home_state = 'over_quota'` にして持ち主に知らせる。戻り方は、控えに戻す・作り直す（FR-100）・掃除のための起動（下）
  3. 動いている間にホストの空きが 3GB を切ったら、box-manager が同じく VM を止める（`stop_reason = 'disk_low'`）。空きが 3GB 以上に戻るまで起こさない
  4. box-manager が自分で止めるのは安全のため（本体の `vm_op` を待たない）。止めたあとの `boxes` の行は本体が API-109 で閉じる
@@ -59,6 +59,8 @@ flowchart TD
 - Chrome のプロフィールは VM のホームの `/home/browser/profile` に 1 つ（全エージェントで共通。D-205）。フォルダは利用者 `browser` だけが読める（700。D-216）
 - 消す：持ち主が設定の VM の欄で「ブラウザのデータを消す」（API-138）。画面の番が使われている間は 409 `SCREEN_IN_USE`。VM が動いていれば box-agent が Chromium を止めてプロフィールを消し、起こし直す
 - プロフィールの大きさを VM が止まるときに測る（`boxes.profile_bytes`）。1GB を超えたら設定画面に知らせを出す
+- プロフィールの中に残る大きなもの（Service Worker の CacheStorage・IndexedDB など）はフラグでは外に出せない。この大きさは上のホームの測りと、「掃除のための起動」・「ブラウザのデータを消す」で扱う（D-301・D-313）
+- HTTP キャッシュはプロフィールに入れない（`/tmp/chromium-cache`。VM を止めると消える。D-313）。code cache などもフラグで一緒に移るかは実装のときに確かめる
 - エージェントを消しても消えない（BR-07）
 
 ### FR-075：コンピューターユースの操作

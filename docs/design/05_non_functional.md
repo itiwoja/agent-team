@@ -1,5 +1,5 @@
 # 05. 非機能要件
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ インプット：[01_requirements](01_requirements.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ インプット：[01_requirements](01_requirements.md)
 
 > **3行で**
 > 1. いちばん小さいホストは「64bit・メモリ 4GB・空き 32GB」（ラズパイ 4/5 の 4GB。SD・SSD は 64GB 以上）。このホストで VM 1 台と裏のタスク 3 つが回ることを基準にする。
@@ -45,11 +45,11 @@ flowchart LR
 | ID | カテゴリ | 要件 | 目標値 | 根拠 |
 |---|---|---|---|---|
 | NFR-061 | 拡張性 | VM の数と画面 | VM は 1 台（ADR-060）。画面の番は 1 つ。ターミナルは同時に 2 本 | VM1つで Chromium がおよそ 0.8〜1.5GB を使う |
-| NFR-062 | 移植性 | 最低のホスト | 64bit Linux（arm64・amd64）、メモリ 4GB、空きディスク 32GB（D-240 の 20GB を D-300 で直した）。推奨 8GB・64GB。VM のホームは 4GB まで（D-265 の 8GB を D-300 で直した）。控えは 3 世代。空きが 3GB を切ったら VM の起動と控えをやめ、動いている VM も止めて知らせる（D-265・D-300） | 本体＋ VM1つ＋OS が 4GB に入る。空き 32GB の内訳（圧縮が効かないときの最大）：イメージ 4GB（更新の間は新旧が並ぶ）・本体のデータ 3.5GB（SQLite・バックアップ 7 世代・スクショ 7 日・成果物）・ログ 0.5GB・下限 3GB・ホーム 4GB・控え 4 個 × 4GB（3 世代＋書きかけの 1 つ）＝ 31GB |
+| NFR-062 | 移植性 | 最低のホスト | 64bit Linux（arm64・amd64）、メモリ 4GB、空きディスク 32GB（D-240 の 20GB を D-300 で直した）。推奨 8GB・64GB。VM のホームは 4GB まで（D-265 の 8GB を D-300 で直した）。控えは 3 世代。空きが 3GB を切ったら VM の起動と控えをやめ、動いている VM も止めて知らせる（D-265・D-300） | 本体＋ VM1つ＋OS が 4GB に入る。空き 32GB の内訳（圧縮が効かないときの最大）：イメージ 4GB（更新の間は新旧が並ぶ）・本体のデータ 3.5GB（SQLite・バックアップ 7 世代・スクショ 7 日・成果物）・ログ 0.5GB・下限 3GB・ホーム 4GB・控え 4 個 × 4GB（3 世代＋書きかけの 1 つ）・VM の `/tmp`（Chromium の HTTP キャッシュ上限 512MB。D-313）＝ 31.5GB |
 | NFR-063 | 性能 | VM の画面の大きさ | 1280×800・24bit | computer use の推奨の範囲。スクショの費用を抑える |
 | NFR-064 | セキュリティ | 公開の範囲 | ホストのポートは開けない。画面と API の入口は Tailscale の HTTPS（`tailscale serve`）だけ。受け口があるときだけ、`tailscale funnel` で 8443 番を公開し `/hooks/` を webhook の口（:8081）に流す。443 番は Funnel にしない（Funnel の公開はポート単位。ADR-065・D-241） | REQ-077。公開の攻撃面を最小にする |
 | NFR-065 | セキュリティ | CSRF | GET 以外は Origin と `X-Makase-Request` を確かめる。WebSocket は Origin を確かめる | Tailscale の身元は、ほかのサイトからのリクエストにも自動で付く |
-| NFR-066 | セキュリティ | VM の隔離 | 権限なしの利用者・capability なし・ルートは読み取りだけ（ホームと `/tmp` だけ書ける）・メモリ 1.5GB・CPU 1.5・プロセス 512。ネットワークは VM 専用の 1 つ（`internal: true`）で、外へは egress だけ。家の LAN・tailnet・本体・ホストのブリッジのアドレスには届かない（ADR-045）。egress は資格のない通信を断り、ターミナルの外向き通信は egress の許可リスト（`terminal.allow_hosts`）だけ（D-292）。Chrome は利用者 `browser`、コマンドは利用者 `agent`、プロフィールのフォルダは 700（D-216）。利用者を分けるため、起動役だけが `CAP_SETUID`・`CAP_SETGID` を持ち、子を起こしたら手放す（D-291）。Chrome の操作口はパイプだけ、X（抽象名前空間のソケットも）・VNC・box-agent にはコマンドから届かない（D-252・D-290）。ホストのブリッジのアドレスへの入りも断り、断られていなければ VM を起こさない（D-253・D-293） | VM は信用しないページを開き、残り続ける |
+| NFR-066 | セキュリティ | VM の隔離 | 権限なしの利用者・capability なし・ルートは読み取りだけ（ホームと `/tmp` だけ書ける。`/tmp` は tmpfs にせずメモリに数えない。Chromium の HTTP キャッシュはここで 512MB まで：D-313）・メモリ 1.5GB・CPU 1.5・プロセス 512。ネットワークは VM 専用の 1 つ（`internal: true`）で、外へは egress だけ。家の LAN・tailnet・本体・ホストのブリッジのアドレスには届かない（ADR-045）。egress は資格のない通信を断り、ターミナルの外向き通信は egress の許可リスト（`terminal.allow_hosts`）だけ（D-292）。Chrome は利用者 `browser`、コマンドは利用者 `agent`、プロフィールのフォルダは 700（D-216）。利用者を分けるため、起動役だけが `CAP_SETUID`・`CAP_SETGID` を持ち、子を起こしたら手放す（D-291）。Chrome の操作口はパイプだけ、X（抽象名前空間のソケットも）・VNC・box-agent にはコマンドから届かない（D-252・D-290）。ホストのブリッジのアドレスへの入りも断り、断られていなければ VM を起こさない（D-253・D-293） | VM は信用しないページを開き、残り続ける |
 | NFR-067 | 性能 | VM の起き上がり | 止まった VM の起動から box-agent の応答まで p95 15秒以内（ラズパイ 5）、8秒以内（amd64 の PC） | 眠った VM を道具のたびに起こす |
 | NFR-068 | 性能 | 1歩の本体側の処理（LLM を除く：確かめ・判定・実行・スクショ） | p95 300ms 以内（PC）、600ms 以内（ラズパイ 5） | 1タスクで数百歩ある |
 | NFR-069 | 性能 | 画面の配信の遅れ | 人の操作が画面に出るまで 1秒以内（同じ国の中の Tailscale 経由） | 交代でログインを打てる速さ |
@@ -58,7 +58,7 @@ flowchart LR
 | NFR-072 | セキュリティ | 秘密 | API キー・Tailscale の認証キー・VAPID の秘密鍵は `.env`（権限 600）だけ。カレンダーの refresh token と受け口の署名の秘密は暗号化して SQLite に。ログには出さない。VM には資格情報を置かない | 今の決めごとを引き継ぐ |
 | NFR-073 | 運用 | スクショの保持 | 画像は 7日で消す。操作の記録の行は残す | ラズパイのディスクは小さい |
 | NFR-074 | ユーザビリティ | 対応端末 | iOS Safari（Web Push は「ホーム画面に追加」した PWA だけ）・Android Chrome・PC の Chrome / Edge / Firefox / Safari の最新2版。画面の幅 360px から。交代中の文字入力は PC だけ（D-181） | スマホで頼む・見る・確認する・タップするまでできる |
-| NFR-075 | 移植性 | 動く土台 | Linux カーネル 5.10 以上、Docker Engine 24 以上（ゲートウェイの `isolated` モードを使うならその版以上：D-253）、Compose v2。WSL2（Win）・OrbStack か Colima（Mac）・Raspberry Pi OS 64bit を確かめる。ホストの前提（D-304。手順書に確かめ方を書く）：利用者名前空間が使える（`user.max_user_namespaces` が 0 でない。古い Debian は `kernel.unprivileged_userns_clone=1`）。AppArmor のあるホスト（Ubuntu 23.10 以降の `apparmor_restrict_unprivileged_userns` など）は専用のプロファイル `makase-box` を読み込む。`isolated` モードがなければホストへの入りを断る規則を入れる（D-293）。どれも足りなければ VM は起きず、理由を知らせる | REQ-076 |
+| NFR-075 | 移植性 | 動く土台 | Linux カーネル 5.10 以上、Docker Engine 24 以上（ゲートウェイの `isolated` モードを使うならその版以上：D-253）、Compose v2。WSL2（Win。WSL のディストリの中の Docker Engine だけ）・OrbStack か Colima（Mac）・Raspberry Pi OS 64bit を確かめる。Docker Desktop・OrbStack・Colima のように Docker が別の VM にある置き先は、ホスト側の規則が効かないので、`isolated` モードが使えて box ネットワークを作れたときだけ VM を起こす。使えなければ起こさず、「Docker Engine に入れ替える」節を知らせる（D-314）。ホストの前提（D-304。手順書に確かめ方を書く）：利用者名前空間が使える（`user.max_user_namespaces` が 0 でない。古い Debian は `kernel.unprivileged_userns_clone=1`）。AppArmor のあるホスト（Ubuntu 23.10 以降の `apparmor_restrict_unprivileged_userns` など）は専用のプロファイル `makase-box` を読み込む。`isolated` モードがなければホストへの入りを断る規則を入れる（D-293。Docker が別の VM にある置き先は除く：D-314）。どれも足りなければ VM は起きず、理由を知らせる | REQ-076 |
 | NFR-076 | コスト | 費用の上限 | 1タスク $3・メインの 1 ターン $1・日次 $10（設定で変えられる。D-230） | 常駐型は放っておいても動く |
 | NFR-077 | 運用 | 更新 | イメージを入れ替えて `docker compose up -d`。DB のマイグレーションは起動のときに自動。VM のホームはそのまま使う | 手順を1つにする |
 | NFR-078 | セキュリティ | 監査ログ | ハッシュの鎖つき・追記だけ・保持は無期限 | 今の決めごとを引き継ぐ |
