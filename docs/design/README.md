@@ -1,71 +1,111 @@
-# Agent-Team-Open 設計書
-> **3行で**：持ち主1人が、自分の Linux ホスト（ラズパイ・WSL2 の Win ノート・Mac の Linux VM など）に置いた Agent-Team-Open に、PC やスマホから Tailscale 経由で仕事を任せる。エージェントは VM（実体は Docker コンテナ）のブラウザをコンピューターユースで自由に操作し、ターミナルでコードを動かし、こわい操作だけ人が確認する。OSS（AGPL-3.0）で、LLM は Claude だけ（接続先は Anthropic 直・Bedrock・Vertex） ／ 最初の版：チャット・エージェントの作成と削除・用途ごとのパック（標準は「告知ページ制作」）・VM（ブラウザ＋ターミナル）・確認・交代（PC が先）・Web・カレンダー・GitHub ／ やらない：Cloudflare・複数人・同期・編成・育つ仕組み・Web Push 通知・非エンジニアの一般向けの配布
+# Agent-Team-Open 設計書（v1.1：常駐型）
+> **3行で**：持ち主1人が自分の Linux ホストに置いた Agent-Team-Open に、PC やスマホから Tailscale 経由で 1 本のチャットで話しかける。相手は**メイン**のエージェントで、小さな質問に自分で答え、重い仕事は用途に合うエージェントへ裏で振り分ける。チャット・ルーチン・予約した確認・webhook・裏の作業の完了で起き、用がなければ眠り、記憶（4 層）を持ち、伝える価値があるときだけ話しかける（Web Push） ／ 最初の版：常駐の仕組み・振り分け・持ち主に 1 台の VM（ブラウザ＋ターミナル。残り続け、控えから戻せる）・こわい操作の確認（合図 → オートレビュー → 人）・交代・パック・Web・カレンダー・GitHub ／ やらない：Cloudflare・複数人・エージェントごとの会話・Slack やメールの窓口・声・支払いの代行・スキルが育つ仕組み・一般向けの配布
 
 ## 🧭 判断してほしいこと（全ドキュメントから集約）
-未決は Q-124 の 1 つ（MS-1 の実測のあとに決めればよく、今は何も止めない）。Q-114〜Q-123 は 2026-10-24 にすべて決着し、[00 の決定事項ログ](00_overview.md#決定事項ログ) の D-172〜D-182 に書いた。OSS と事業の方針（D-183〜D-189、ADR-055・056）も同日に決めた。ほかはリスクだけ。
+未決はなし（v0.6 の Q-124 は D-201 で決着）。v1.0 で Claude が決めた項目（D-212〜D-240）と、Fable 5.1・Astra のレビューを受けて v1.1 で決めた項目（D-241〜D-274。D-248 だけはユーザー）は[下の一覧](#claude判断で決めたこと見直してほしいもの)で見直してほしい。ほかはリスクだけ。
 
-| # | 種類 | 論点 | おすすめ | 決まらないと止まるもの | 詳細 |
-|---|---|---|---|---|---|
-| Q-124 | 未決 | 画面の操作を子の文脈にし、親には短い報告だけ返すか（ADR-057） | MS-1 で費用を測ってから。$3 に収まらない仕事が多ければ採用 | MS-3 の runner の作り | [ADR-057](adr/ADR-057-screen-work-in-child-context.md) |
-| R-76 | リスク | ページの仕掛けでプロフィールを悪用される | 合図・汚染・記録で抑え、残りは受け入れる | — | [04](04_functional_spec.md#-判断してほしいこと) |
-| R-77 | リスク | ラズパイで遅い | VM1つ・実機で測る | — | [05](05_non_functional.md#-判断してほしいこと) |
-| R-78 | リスク | WSL2・ノートが止まる | 歩みの記録で再開 | — | [05](05_non_functional.md#-判断してほしいこと) |
-| R-79 | リスク | box-manager がホストを握られる | 決まった操作だけ・ソケットの中継 | — | [07](07_architecture.md#-判断してほしいこと) |
-| R-80 | リスク | Tailscale のヘッダーの偽装 | 本体のポートを出さない | — | [07](07_architecture.md#-判断してほしいこと) |
-| R-81 | リスク | プロフィールがディスクから漏れる | ディスクの暗号化を勧める | — | [08](08_database.md#-判断してほしいこと) |
-| R-82 | リスク | スクショで費用がかさむ | 回数・時間・費用の上限 | — | [11](11_tech_spec.md#12-リスクと対策) |
-| R-83 | リスク | 自動の操作を禁じるサイト | 確認するドメインで止める | — | [11](11_tech_spec.md#12-リスクと対策) |
-| R-84 | リスク | VM の中のコマンドが暴走する | 資源の上限・タイムアウト・使い捨て | — | [11](11_tech_spec.md#12-リスクと対策) |
-| R-85 | リスク | パックの更新で持ち主の手直しが消える | 更新の前に知らせる | — | [11](11_tech_spec.md#12-リスクと対策) |
-| R-86 | リスク | レビューで評価された「4 人の工程の受け渡し」が 1 人の手順書 4 本になり、工程の見え方が弱くなる | 歩みの記録を工程ごとに見せる。1 件 1 人は変えない | — | [11](11_tech_spec.md#12-リスクと対策) |
-| R-87 | リスク | Bedrock・Vertex で費用の見積もりがずれる。Bedrock に Web 検索の道具がない | 「見積もりは目安」と書く。`web_fetch` と VM のブラウザで調べる | — | [11](11_tech_spec.md#12-リスクと対策) |
+| # | 種類 | 論点 | おすすめ | 詳細 |
+|---|---|---|---|---|
+| R-76 | リスク | ページの仕掛けでログイン済みのブラウザを悪用される | 合図・汚染・記録・オートレビューに会話を渡さない | [04](04_functional_spec/README.md#-判断してほしいこと) |
+| R-77・78 | リスク | ラズパイで遅い／WSL2・ノートが止まる | VM1つ・実機で測る／歩みの記録で再開 | [05](05_non_functional.md#-判断してほしいこと) |
+| R-79・80 | リスク | box-manager がホストを握られる／ヘッダーの偽装 | 決まった操作だけ／口を分ける | [07](07_architecture.md#-判断してほしいこと) |
+| R-81 | リスク | VM のホームと控えがディスクから漏れる | ディスクの暗号化を勧める | [08](08_database/README.md#-判断してほしいこと) |
+| R-82〜87 | リスク | スクショの費用・自動操作の禁止・コマンドの暴走・パックの更新・工程の見え方・接続先の差 | 上限・振り分け先の文脈・控え・知らせ | [11](11_tech_spec.md#12-リスクと対策) |
+| R-88・89 | リスク | 前のタスクの残りに仕掛け／Funnel の公開口への攻撃 | 汚染・控えから戻す／署名・上限・別の口 | [07](07_architecture.md#-判断してほしいこと) |
+| R-90・91 | リスク | オートレビューがだまされる／記憶が汚染される | 必ず人の分類・会話を渡さない／材料を限る | [04](04_functional_spec/README.md#-判断してほしいこと) |
+| R-92 | リスク | ルーチン・webhook で日次の上限を使い切る | 持ち主のチャットの分を取っておく | [05](05_non_functional.md#-判断してほしいこと) |
+| R-93・94 | リスク | キャッシュの外れ／画面の番の待ち | 外れを記録して直す／3 分で返す | [11](11_tech_spec.md#12-リスクと対策) |
 
 ## 全体図（C4 レベル1：コンテキスト）
 ```mermaid
 flowchart LR
- O(["持ち主<br/>PC・スマホ"]) -->|"Tailscale"| S["Agent-Team-Open<br/>Linux ホスト・Docker Compose"]
- S -->|"コンピューターユース・コマンド"| W(["Web サイト<br/>API のないものも・パッケージのレジストリ"])
+ O(["持ち主<br/>PC・スマホ"]) -->|"Tailscale<br/>1 本のチャット"| S["Agent-Team-Open<br/>Linux ホスト・Docker Compose<br/>メイン・エージェント・VM"]
+ GH(["GitHub"]) -->|"webhook（Funnel）"| S
+ S -->|"コンピューターユース・コマンド"| W(["Web サイト<br/>API のないものも"])
  S --> C[["Claude API"]]
- S --> G(["Google カレンダー"])
- S --> H(["GitHub"])
+ S --> G(["Google カレンダー・GitHub API"])
+ S -->|"Web Push"| O
 ```
 
 ## 読む順番
 | 目的 | 読むもの | 所要 |
 |---|---|---|
-| 全体像だけ知りたい | この README → [11_tech_spec](11_tech_spec.md) の要約層 | 5分 |
+| 全体像だけ知りたい | この README → [11](11_tech_spec.md) の要約層 | 5分 |
+| 何が変わったか知りたい（v0.6 から） | [変更レポート](changes/2026-10-24-resident-v1.md) → [ADR-058〜067](adr/) | 10分 |
 | 何を作るか判断したい | [01](01_requirements.md) → [02](02_user_stories.md) の要約層 | 10分 |
-| VM とこわい操作を知りたい | [04 FR-074〜079](04_functional_spec.md#機能詳細) → [10 シーケンス図](10_diagrams.md#シーケンス図) | 15分 |
-| パックとターミナルを知りたい | [04 FR-085・086](04_functional_spec.md#機能詳細) → [ADR-053](adr/ADR-053-pack-by-purpose.md)・[ADR-054](adr/ADR-054-terminal-in-vm.md) | 10分 |
+| 常駐の仕組みを知りたい | [04 resident](04_functional_spec/resident.md) → [10 シーケンス図](10_diagrams/sequences.md#uc-054055きっかけからターン振り分け報告まで) | 15分 |
+| VM とこわい操作を知りたい | [04 vm](04_functional_spec/vm.md) → [10 シーケンス図](10_diagrams/sequences.md) | 15分 |
 | OSS と事業の方針を知りたい | [../oss-and-business.md](../oss-and-business.md) → [ADR-055](adr/ADR-055-agpl-license.md)・[ADR-056](adr/ADR-056-llm-provider.md) | 10分 |
-| 実装する | [12](12_implementation_order.md) で順番を見て → [07](07_architecture.md) → [08](08_database.md) → [09](09_api.md) → [10](10_diagrams.md) | — |
+| 実装する | [07](07_architecture.md) → [08](08_database/README.md) → [09](09_api/README.md) → [10](10_diagrams/README.md) | — |
 
 ## 主要な設計判断（ADR）
 | ADR | 決定 | 状態 |
 |---|---|---|
-| [ADR-041](adr/ADR-041-linux-host.md) | 置き先は Linux ホスト。Cloudflare はいったん外す | 承認 |
-| [ADR-042](adr/ADR-042-node-sqlite.md) | 本体は Node＋SQLite、Workflows は歩みの記録に | 承認 |
-| [ADR-043](adr/ADR-043-box-container.md) | VM はコンテナ＋仮想画面＋VNC | 承認 |
-| [ADR-044](adr/ADR-044-box-manager.md) | VM を起こせるのは box-manager だけ | 承認（2026-10-24） |
-| [ADR-045](adr/ADR-045-egress.md) | VM は1つずつ別のネットワーク、外への通信は egress だけ | 承認（2026-10-24） |
-| [ADR-046](adr/ADR-046-tailscale-identity.md) | つなぎ方とログインは Tailscale | 承認 |
-| [ADR-047](adr/ADR-047-risky-action-check.md) | こわい操作は申告＋合図で確認 | 承認 |
-| [ADR-048](adr/ADR-048-profile-per-agent.md) | プロフィールはエージェントごと、VM はタスクごと | 承認 |
-| [ADR-049](adr/ADR-049-docker-compose.md) | 配り方は Docker Compose 一式 | 承認 |
-| [ADR-050](adr/ADR-050-one-agent-per-ask.md) | 1件の依頼はエージェント1人 | 承認 |
-| [ADR-051](adr/ADR-051-gateway-in-core.md) | gateway は本体の中の部品 | 承認（2026-10-24） |
-| [ADR-052](adr/ADR-052-browser-checks-table.md) | ブラウザの確認は別の表 `browser_checks` | 承認（2026-10-24） |
-| [ADR-053](adr/ADR-053-pack-by-purpose.md) | パックは「用途」の単位。依頼の振り分けに使う | 承認 |
-| [ADR-054](adr/ADR-054-terminal-in-vm.md) | ターミナルは VM の中。VM の中のコマンドは判定しない | 承認 |
-| [ADR-055](adr/ADR-055-agpl-license.md) | OSS として公開。ライセンスは AGPL-3.0。一般向けの配布はせず、収益化するなら企業導入 | 承認（2026-10-24） |
-| [ADR-056](adr/ADR-056-llm-provider.md) | LLM の接続先に Bedrock・Vertex 経由の Claude を足す（Should） | 承認（2026-10-24） |
-| [ADR-057](adr/ADR-057-screen-work-in-child-context.md) | 画面の操作は子の文脈で行い、親には短い報告だけ返す | 提案（Q-124） |
+| [ADR-058](adr/ADR-058-resident-agent.md) | 常駐型（ループと状態は本体・きっかけで起き・眠る） | 承認（v1.0） |
+| [ADR-059](adr/ADR-059-main-agent-delegates.md) | 1 本のチャットでメインと話し、メインが裏で振り分ける | 承認（v1.0） |
+| [ADR-060](adr/ADR-060-one-persistent-vm.md) | VM は持ち主に 1 台・残り続け・画面は順番 | 承認（v1.0） |
+| [ADR-061](adr/ADR-061-vm-no-judge-restore.md) | VM の中は判定せず、資格情報を置かず、控えで戻す | 承認（v1.0） |
+| [ADR-062](adr/ADR-062-send-to-owner.md) | 持ち主に話す道具は `send_to_owner` 1 つ | 承認（v1.0） |
+| [ADR-063](adr/ADR-063-memory-four-layers.md) | 記憶は 4 層。プロフィールとログは共有 | 承認（v1.0） |
+| [ADR-064](adr/ADR-064-auto-review.md) | 合図の後にオートレビュー。外に出す・支払う・消す・秘密は人 | 承認（v1.0） |
+| [ADR-065](adr/ADR-065-webhook-funnel.md) | webhook は Funnel で受け口だけ公開 | 承認（v1.0） |
+| [ADR-066](adr/ADR-066-prompt-cache-layout.md) | 文脈はキャッシュの先頭を変えない形に組む | 承認（v1.0） |
+| [ADR-067](adr/ADR-067-web-push-first.md) | Web Push を最初の版に | 承認（v1.0） |
+| [ADR-041](adr/ADR-041-linux-host.md)〜[ADR-047](adr/ADR-047-risky-action-check.md)・[ADR-049](adr/ADR-049-docker-compose.md)・[ADR-051](adr/ADR-051-gateway-in-core.md)〜[ADR-053](adr/ADR-053-pack-by-purpose.md)・[ADR-055](adr/ADR-055-agpl-license.md)・[ADR-056](adr/ADR-056-llm-provider.md) | 置き先・本体・VM の作り・egress・Tailscale・こわい操作・Compose・gateway・確認の表・パック・ライセンス・接続先 | 承認（v0.6 から） |
+| [ADR-048](adr/ADR-048-profile-per-agent.md)・[ADR-050](adr/ADR-050-one-agent-per-ask.md)・[ADR-057](adr/ADR-057-screen-work-in-child-context.md) | プロフィールはエージェントごと・1 件 1 人・子の文脈 | 置き換え済み（→ 060・059） |
+| [ADR-054](adr/ADR-054-terminal-in-vm.md) | ターミナルは VM の中 | 一部置き換え済み（→ 061） |
+
+## Claude判断で決めたこと（見直してほしいもの）
+<details>
+<summary>D-212〜D-240（29 件）</summary>
+
+| ID | 決めたこと |
+|---|---|
+| D-212 | 持ち主に話すのは `send_to_owner` だけ。メインの地の文は出さない |
+| D-213 | 先頭は次の要約まで変えない。要約は 10 万トークン超（v1.1 で 6 万：D-270）・ターン後 10 分。`cache_control` 1 時間 |
+| D-214・215 | VM は 10 分で眠る。控えは毎日 1 回・3 世代 |
+| D-216 | Chrome は利用者 `browser`、コマンドは利用者 `agent` |
+| D-217 | 裏のタスク 3 つ・画面の番 1 つ（3 分で返す）・ターミナル 2 本 |
+| D-218・219 | 振り分けは 1 段だけ。報告は 2,000 字＋成果物の場所 |
+| D-220 | 持ち主のチャットは動いているターンの次の歩みへ。3 秒以内のメッセージはまとめる |
+| D-221・222 | ルーチンは持ち主の ○ で作る・15 分以上・20 本。予約はメインだけ・5 分〜30 日・1 日 20 件 |
+| D-223 | webhook は 256KB・1 分 60 件・配達 ID で重複を捨てる。GitHub と汎用の HMAC |
+| D-224・225 | 記憶はプロフィール 100 個・4,000 字、ログ 30 件、メモ 60 分。材料は持ち主の言葉とメインの文だけ。検索は FTS5 |
+| D-226〜228 | オートレビューは `claude-sonnet-5-5`・20 秒・会話を渡さない。言葉を必ず人とオートレビューに分ける。申告に種類を足す |
+| D-229 | Web Push は `send_to_owner`・人の確認・交代の頼みだけ。前に出ているときは送らない |
+| D-230・231 | メインの 1 ターンは $1・40 歩・10 分。日次 $10 の残り $1 は持ち主のチャットに取っておく。待機中は LLM を呼ばない |
+| D-232 | webhook と汚染したタスクの報告で起きたターンは汚染する |
+| D-233・234 | 入力中にキャッシュを温める（Should）。`send_to_owner` でファイルを渡せる（20MB） |
+| D-235・236 | 依頼をやめ、チャット・ターン・タスクにする。メインは VM を使わない |
+| D-237・238 | 交代の放置では VM を止めない。道具はターンの途中で足し外ししない |
+| D-239・240 | 書き出しにプロフィールとルーチンを入れる。最低のディスクは 20GB |
+
+</details>
+
+<details>
+<summary>D-241〜D-274（v1.1。レビューの反映、33 件）</summary>
+
+| ID | 決めたこと |
+|---|---|
+| D-241 | Funnel は 8443 番だけ。443 番（画面と API）は公開しない |
+| D-242 | `確定`・`Submit`・POST の送信・決済の iframe・`textarea` の Enter は人に回す |
+| D-243・244 | 成果物の HTML はスクリプトを動かさずに配る。報告の時点で `~/work/<taskId>` の下だけを写す |
+| D-245・246 | 汚染はタスク・言い直し・予約・ルーチンに引き継ぐ。プロフィールの材料は持ち主のメッセージだけ |
+| D-247 | `attached` を足し、ターンを閉じる瞬間のチャットを失わない |
+| D-249・250 | 道具の冪等（`tool_call_id`）。取り消したタスクの確認は期限切れ |
+| D-251・252・253 | VM の操作は 1 つずつ。CDP はパイプだけ。ホストへの入りを断る |
+| D-254 | `tasks` は今の `schema.ts` の状態の値に合わせる |
+| D-255・256 | computer use は 1 歩＝操作の列。履歴は追記だけ（古いスクショはサーバー側で消す・要約のあとは履歴を持ち越さない） |
+| D-257・258 | `blocked` はタスクの終わり。画面の番は通常の実行中だけ 3 分を数え、番号を分ける |
+| D-259・260・261 | 費用の区分（`chat`・`auto`）。件数で捨てるのは webhook だけ。重複の鍵と署名の範囲 |
+| D-262〜264 | 履歴は要約まで残す。履歴にも 1 時間のキャッシュ。呼び出しの前に大きさを見る |
+| D-265〜268 | ホームは 8GB。VM の中の 127.0.0.1:8000〜8099 で点検。Web Push の送り待ち。戻すときはタスクを止める |
+| D-269〜274 | 見えているかは心拍で。要約は 6 万トークン。本体だけの再起動では VM を引き継ぐ。`apt` は使えない。構造化出力。小さな食い違いの統一 |
+
+</details>
 
 ## 最近の変更
-- [2026-10-24 GrokBot の参考資料から取り入れる（v0.6）](changes/2026-10-24-grokbot-reference.md)：道具は安い順に試す・`read_page` でページの構造を読む・スキルの本文とコネクタの道具の詳細は要るときだけ（FR-088）。動いているタスクへの持ち主のメッセージは次の歩みの頭に（FR-089）。SSE は通し番号つきの合図。知らせの絞り込み、確認カードの出し分け、失敗を eval にする流れ（D-191〜D-199）。画面の操作を子の文脈にする案は ADR-057（Q-124）。ルーチン・記憶は次の版の候補
-- 2026-10-24 [12 実装の順番](12_implementation_order.md) を追加：置き先は手元の WSL2 → クラウドの Linux VM → ラズパイの 3 段（D-190）。作る順番は VM の縦の 1 本 → こわい操作 → 本体の移植 → パックとターミナル。各段を終える条件と arm64 で詰まらない約束
-- [2026-10-24 OSS の方針と LLM の接続先を反映（v0.5）](changes/2026-10-24-oss-and-provider.md)：AGPL-3.0 で OSS 公開（ADR-055）。一般向けはやらず、企業導入で要る複数人は次の版。LLM の接続先に Bedrock・Vertex（REQ-095・FR-087・ADR-056）。標準パック「告知ページ制作」。成果物を外に出す操作は人が最終承認（BR-10）。第三者が完成できる成功指標と NFR-081
-- [2026-10-24 持ち主の決定を反映し、パックと VM のターミナルを足す（v0.4）](changes/2026-10-24-decisions-v0.4.md)：Q-114〜123 をすべて決着（ADR-044・045・051・052 を承認）。呼び名を「VM」など正式名称に。パック（FR-085）・ターミナル（FR-086）を追加。Web Push とスマホの文字入力は次の版
-- [2026-10-24 Claude のレビューを反映（v0.3）](changes/2026-10-24-claude-review.md)：`type` の改行と `open_url` も判定、画面が変わったら Claude に決め直させる、操作する人の切り替えに API-113、スクショは直近 3 枚、秘密の欄を塗る、交代で中止した歩みの精算、`web_fetch` のアドレスの判定。新しい未決 Q-121〜123
-- [2026-10-24 Astra のレビューを反映（v0.2）](changes/2026-10-24-astra-review.md)：VM ごとのネットワーク、ブラウザの確認を別の表に、合図に T-5・T-6、承認を中身に結びつけて1回だけ実行、交代の排他、再開の表
-- 2026-10-23 v0.1 を作成。[docs/cloudflare-design.md](../cloudflare-design.md) の「Cloudflare だけで動かす」を置き換える（ADR-041）
+- [2026-10-24 Fable 5.1 と Astra のレビューを反映（v1.1）](changes/2026-10-24-review-v1.1.md)：Funnel のポート・人に回す操作・成果物の HTML・汚染の引き継ぎ・ターンの境目・メインの書き込みの承認・冪等・VM の操作の直列・CDP の隔離・追記だけの履歴など（D-241〜D-274）
+- [2026-10-24 常駐型として作り直す（v1.0）](changes/2026-10-24-resident-v1.md)：参考資料（GrokBot の講義の解説動画）をもとに、メインの振り分け・きっかけと眠り・記憶・`send_to_owner`・オートレビュー・VM 1 台・Web Push・webhook・キャッシュを入れた。04・08・09・10 はディレクトリに分けた。12_implementation_order.md は削除
+- [2026-10-24 GrokBot の参考資料から取り入れる（v0.6）](changes/2026-10-24-grokbot-reference.md)：道具は安い順・`read_page`・スキルの本文は要るときだけ・SSE は合図
+- それより前（v0.1〜v0.5）は [changes/](changes/) にある。2026-10-23 の v0.1 は [docs/cloudflare-design.md](../cloudflare-design.md) を置き換えた（ADR-041）

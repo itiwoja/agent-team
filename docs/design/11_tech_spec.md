@@ -1,10 +1,10 @@
 # 11. 技術仕様書
-- プロジェクト：Agent-Team-Open ／ 版数：v0.6（2026-10-24） ／ インプット：[01](01_requirements.md)〜[10](10_diagrams.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.1（2026-10-24） ／ インプット：[01](01_requirements.md)〜[10](10_diagrams/README.md)
 
 > **3行で**
-> 1. Linux ホスト1台の上で Docker Compose の6種類のコンテナ（Tailscale・本体・box-manager・Docker の中継・egress・VM）を動かし、持ち主1人が PC とスマホから使う。
-> 2. 本体は Node＋SQLite に移した Cloudflare 版の中身（DB のアダプターと LLM の会話の形は作り直す）。新しいのは VM（Xvfb＋Chromium＋VNC）、パック（FR-085）と VM のターミナル（FR-086）、コンピューターユース、こわい操作の判定（`judgeBrowserAction`）と確認（`browser_checks`）、交代、歩みの記録。
-> 3. 実装の順番・タスクはこの文書の範囲外。順番だけは [12](12_implementation_order.md) に書いた（D-190）。
+> 1. Linux ホスト1台の上で Docker Compose の 6 種類のコンテナ（Tailscale・本体・box-manager・Docker の中継・egress・VM 1 台）を動かす。持ち主1人が PC とスマホから 1 本のチャットでメインと話す。
+> 2. 本体は常駐型：受付・ルーター・メインのターン・裏のタスク・タイマーが、歩みの記録で耐久性を持ち、用がなければ眠る。メインは振り分け、`send_to_owner` でだけ話し、記憶（4 層）を持つ。VM は残り続け、画面の番を順に使う。こわい操作は Kernel の合図 → オートレビュー → 人。
+> 3. 実装の順番・タスクはこの文書の範囲外（12_implementation_order.md は v1.0 で削除：D-211）。
 
 ## 🧭 判断してほしいこと
 全体の一覧は [README](README.md#-判断してほしいこと全ドキュメントから集約)。この文書だけの論点はなし。
@@ -13,19 +13,20 @@
 ```mermaid
 flowchart LR
  O(["持ち主"]) -->|"Tailscale"| TS["tailscale"]
- TS --> CORE["本体<br/>Node・SQLite"]
+ GH(["webhook"]) -->|"Funnel"| TS
+ TS --> CORE["本体<br/>受付・ターン・タスク<br/>Node・SQLite"]
  CORE --> BM["box-manager"]
- BM --> BOX["box<br/>Chromium・VNC"]
+ BM --> BOX["VM（1 台）<br/>Chromium・シェル"]
  BOX --> EG["egress"]
  EG --> WEB(["Web"])
- CORE --> EXT[["Claude・Google・GitHub"]]
+ CORE --> EXT[["Claude・Google・GitHub・Push"]]
 ```
-見てほしいところ：持ち主 → 本体 → VM の一方向。VM から本体へは戻れない。
+見てほしいところ：持ち主 → 本体 → VM の一方向。VM から本体へは戻れない。webhook は本体の別の口にしか届かない。
 
 ## 要点
-- 構成とその理由は [07](07_architecture.md) と ADR-041〜054
-- こわい操作の判定は [04 FR-076](04_functional_spec.md#fr-076こわい操作の見分け)
-- 新しい表は [08](08_database.md)、新しい API は [09](09_api.md)
+- 構成とその理由は [07](07_architecture.md) と ADR-041〜067
+- 常駐の仕組みは [04 resident](04_functional_spec/resident.md)、VM とこわい操作は [04 vm](04_functional_spec/vm.md)
+- 新しい表は [08](08_database/README.md)、新しい API は [09](09_api/README.md)、図は [10](10_diagrams/README.md)
 - リスクは [§12](#12-リスクと対策)
 
 ---
@@ -33,63 +34,75 @@ flowchart LR
 ## 詳細
 
 ### 1. 概要
-- 目的：API・MCP のないページもエージェントに任せる。置き先を選ばない（[01](01_requirements.md)）
-- スコープ：REQ-076〜095。Won't は [01 §7](01_requirements.md#7-スコープ外wont)
+- 目的：持ち主が一言頼むか予定を置いておけば、API のないサイトの仕事やコードの修正まで、留守の間に進む（[01](01_requirements.md)）
+- スコープ：REQ-076〜105。Won't は [01 §7](01_requirements.md#7-スコープ外wont)
 - 読む人：本体・VM・画面を作る開発者（持ち主）と、OSS として自分の機械に置く開発者
 - ライセンス：AGPL-3.0（`AGPL-3.0-only`）。リポジトリ直下の `LICENSE`。依存ライブラリは AGPL と両立するものだけ（[ADR-055](adr/ADR-055-agpl-license.md)）
 
 ### 2. システム全体像
 - コンテナ図は [07 レベル2](07_architecture.md#レベル2コンテナ図)、本体の部品は [07 レベル3](07_architecture.md#レベル3本体のコンポーネント図)
-- 技術：Node 24・Hono・`better-sqlite3`・React＋Vite・Claude（computer use。`@anthropic-ai/sdk`、接続先に応じて `@anthropic-ai/bedrock-sdk`・`@anthropic-ai/vertex-sdk`）・Docker Compose・Tailscale・Xvfb・Chromium・x11vnc・noVNC
+- 技術：Node 24・Hono・`better-sqlite3`（WAL・FTS5）・React＋Vite（PWA・Service Worker）・`web-push`・Claude（computer use・プロンプトキャッシュ。`@anthropic-ai/sdk`、接続先に応じて `@anthropic-ai/bedrock-sdk`・`@anthropic-ai/vertex-sdk`）・Docker Compose・Tailscale（serve・funnel）・Xvfb・Chromium・x11vnc・noVNC
 
 ### 3. 機能概要
 | 区分 | FR |
 |---|---|
-| 新しい | FR-073・074・075・076・077・078・079・082・083・084・085・086、FR-087（Should） |
-| 引き継ぎ（差分あり） | FR-013・016・018・061・063・072・080・081。どこから移すかは [04 移植元](04_functional_spec.md#移植元) |
-| 次の版 | FR-017（通知。D-179） |
+| v1.0 で足した（常駐） | FR-090〜098（受付・ターン・振り分け・`send_to_owner`・ルーチン・予約・webhook・記憶・文脈）、FR-017（Web Push を Must に） |
+| v1.0 で足した（VM・確認） | FR-099（オートレビュー）・FR-100（控えと作り直し） |
+| v1.0 で直した | FR-013・061・072・073・074・076〜079・082〜089 |
+| 引き継ぎ（差分あり） | FR-016・018・075・080・081。どこから移すかは [04 移植元](04_functional_spec/tools.md#移植元) |
+| 使わない | FR-063（FR-093 に統合） |
 
 ### 4. データモデル
-- [08 の ER図](08_database.md#全体図)。新しい表は TBL-032〜034・036〜039、変える表は TBL-031・035・040。`tasks.paused_ms`（確認待ち・交代待ちの時間の合計。D-174）を足す
+- [08 の ER図](08_database/README.md#全体図)。常駐の表は TBL-041〜054、VM の表は TBL-031〜040（TBL-036 は使わない、TBL-037 は作る）
+- 依頼（`asks`・`ask_pending_replies`・`ask_members`）は使わない。`tasks` に `turn_id`・`brief`・`report`・`tainted` などを足す（[08 変える表](08_database/README.md#変える表)）
 
 ### 5. インターフェース
-- 画面向け：[09 エンドポイント一覧](09_api.md#エンドポイント一覧)。パックは API-114〜116
-- 内部：box-manager の API-101〜109・113、VM のコマンド（API-117）とファイルの出し入れ（API-118）
-- 外部：Claude Messages API（computer use ツール。接続先は Anthropic 直・Bedrock・Vertex：FR-087）、Google カレンダー API、GitHub API、Tailscale
+- 画面向け：[09 エンドポイント一覧](09_api/README.md#エンドポイント一覧)。チャットは API-119・120、タスクは API-122〜124、きっかけは API-125〜128・136・139・140・142、記憶は API-130〜132・141、VM は API-088〜091・099・133〜135・138、通知は API-031・032・137
+- 公開：webhook の口 API-129（:8081・Funnel）
+- 内部：box-manager の API-101〜109・113・117・118・143・144
+- 外部：Claude Messages API（computer use・プロンプトキャッシュ。接続先は Anthropic 直・Bedrock・Vertex：FR-087）、Google カレンダー API、GitHub API と webhook、Tailscale、Web Push のサービス
 
 ### 6. 画面構成
-- [06 の画面遷移図](06_ux_design.md#全体図)。新しい画面は SCR-022（VM の画面）・SCR-023（設定）・SCR-024（パック）
+- [06 の画面遷移図](06_ux_design.md#全体図)。v1.0 で作り直したのはチャット（SCR-020）とタスク（SCR-021）、足したのは記憶（SCR-025）ときっかけ（SCR-026）
 
 ### 7. 非機能要件への対応方針
 | NFR | 実現手段 |
 |---|---|
-| NFR-061・062 | VM の同時数は `workspace.max_boxes`（既定 1）。VM の資源の上限は box-manager が固定で付ける |
+| NFR-061・088 | VM は 1 台。画面の番は `boxes.screen_task_id` の条件つきの UPDATE。裏のタスクの同時数は `workspace.max_tasks`。ターミナルは box-agent が 2 本まで受ける |
+| NFR-062 | VM の資源の上限は box-manager が固定で付ける。控えは 3 世代 |
 | NFR-063 | Xvfb を 1280×800 で起こす。computer use のツールへの画面の大きさの渡し方は、実装するときの既定モデルのツールの版の仕様に従う |
-| NFR-064 | ホストのポートは出さない。入口は `tailscale serve` だけ |
+| NFR-064・085 | ホストのポートは出さない。入口は `tailscale serve`（443 → :8080。tailnet だけ）と、受け口があるときの `tailscale funnel --https=8443`（`/hooks/` → :8081）だけ。Funnel の公開はポート単位なので、443 番は Funnel にしない（D-241）。:8081 は Hono の別のアプリで、ルートは 1 つ |
 | NFR-065 | Hono のミドルウェアで Origin と `X-Makase-Request` を確かめる |
-| NFR-066 | VM ごとに `internal: true` のネットワーク、権限なし、egress でグローバルでないアドレスを断り、つなぐ先を固定する（ADR-045） |
+| NFR-066 | VM は `internal: true` のネットワーク、権限なし、egress でグローバルでないアドレスを断り、つなぐ先を固定する（ADR-045）。Chrome とコマンドの利用者を分け、CDP はパイプだけ・X と VNC と box-agent にはコマンドから届かない（D-216・D-252）。ホストのブリッジのアドレスへの入りを断る（D-253） |
 | NFR-067・068 | VM のイメージを小さくし、起動のときに Chromium を先に立ち上げておく。スクショは PNG を縮めずに渡す |
-| NFR-070・071 | タイマーで `VACUUM INTO`。歩みの記録で再開 |
-| NFR-080 | box-agent がコマンドごとに 120 秒で打ち切り、出力を 64KB で切る。1 タスクの回数は `terminal.max_commands` で数える |
-| NFR-076 | edge の上限（費用・回数・時間）を歩みごとに確かめる。LLM を呼ぶ前に見積もりの費用を予約し、並んだタスクで日次を超えない（TBL-038）。会話に残すスクショは直近 3 枚だけ（D-161） |
+| NFR-070・071 | タイマーで `VACUUM INTO`。歩みの記録で再開（ターンもタスクも同じ仕組み） |
+| NFR-076 | edge の上限（費用・歩数・回数・時間）を歩みごとに確かめる。LLM を呼ぶ前に見積もりの費用を予約する（TBL-038）。日次の残りの $1 は `chat` のターンのために取っておく（D-230） |
+| NFR-080 | box-agent がコマンドごとに 120 秒で打ち切り、出力を 64KB で切る |
+| NFR-082 | タイマーは SQLite を読むだけで LLM を呼ばない。VM は 10 分で止める |
+| NFR-083 | 先頭（①〜⑤）を `context_snapshots` に固定し、`cache_control` を付ける。`cache_read_tokens` と 5 分・1 時間の書き込みを記録し、外れを部分ごとのハッシュで残す。履歴は追記だけ（D-256）で、古いスクショはサーバー側の context editing で消す（FR-098） |
+| NFR-084 | box-manager がホームを `tar --zstd` で書く。戻すときはボリュームを空にしてから展開する |
+| NFR-086 | `send_to_owner`・確認・交代の頼みを書くのと同じトランザクションで `push_outbox` に入れ、送り手がすぐ送る。失敗・再起動のあとも送り直す（D-267） |
+| NFR-087 | 書くときに数と字数を数える。`search_memory` は FTS5 の `bm25` |
 
 ### 8. セキュリティ設計
 | 観点 | 設計 |
 |---|---|
-| 認証 | Tailscale の身元＋`OWNER_LOGIN`（ADR-046） |
-| 認可 | 持ち主1人。ロールなし |
-| 入力の検証 | 今の Worker の検証（`edge/validate.ts`・`schema-check.ts`）を引き継ぎ、道具の結果の画像と computer use の操作の形を足す。VM の操作の引数は computer use の形と `open_url` だけ受ける。`open_url` は `http`・`https` だけ（D-158） |
-| VM の隔離 | ADR-043・044・045、NFR-066。ターミナルの外向きは許可リスト（`terminal.allow_hosts`） |
-| こわい操作 | ADR-047・052。Kernel の決定論の判定。先が分からない操作も確認。承認は中身のハッシュに結びつき、1回だけ実行。VM の中のコマンドは判定しない（ADR-054） |
-| 汚染 | VM で読んだものは汚染（BR-06）。汚染のあとの API の書き込みは確認に回る |
-| 外へのアドレス | `web_fetch` にも egress と同じ判定をかける。名前を引いて返った全アドレスがグローバルであること、つなぐ先の固定、リダイレクト先の再判定（D-164） |
-| 秘密 | `.env`（600）。カレンダーの refresh token は暗号化して SQLite。ログでマスク |
-| 個人の情報 | スクショは Claude（Anthropic の API）に送る。ホストに残すスクショは DB の外のファイルで、7日で消す（バックアップに入らない）。秘密の欄の領域は、保存するスクショと Claude に送るスクショの両方で塗り、サイトがマスクしないカード番号も画像に残さない（D-162）。プロフィールはホストの中だけ。秘密の欄に打った文字は、DB のどの表にも平文で残さない（Claude との会話には残る：Claude が出した文字のため） |
+| 認証 | Tailscale の身元＋`OWNER_LOGIN`（ADR-046）。webhook は受け口ごとの HMAC（ADR-065） |
+| 認可 | 持ち主1人。ロールなし。エージェントの道具は役（メイン・振り分け先）で分ける |
+| 入力の検証 | 今の Worker の検証（`edge/validate.ts`・`schema-check.ts`）を引き継ぎ、道具の結果の画像と computer use の操作の形を足す。`open_url` は `http`・`https` だけ（D-158）。webhook の本文は決まった欄だけ抜いてメインに渡す |
+| VM の隔離 | ADR-043〜045・060・061、NFR-066。資格情報を置かない。ターミナルの外向きは許可リスト。コマンドから Chrome のプロフィールも CDP も読めない（D-252）。ホームは 8GB まで（D-265） |
+| こわい操作 | ADR-047・052・064。Kernel の決定論の判定と行き先。先が分からない操作も確認。承認（人・オートレビュー）は中身のハッシュに結びつき、1回だけ実行。外に出す・支払う・消す・秘密・POST の送信・別オリジンの iframe は必ず人（D-242）。取り消したタスクの確認は期限切れにする（D-250） |
+| 汚染 | VM・Web・webhook・汚染したタスクの報告は汚染（BR-06・BR-11）。汚染のあとの API の書き込みは確認に回る。汚染したものは「外から来た内容」の枠に入れて渡す |
+| 記憶 | 記憶は情報として渡す。プロフィールの材料は持ち主のメッセージだけ（BR-12・D-246）。汚染はタスク・言い直し・予約・ルーチンに引き継ぐ（D-245）。ルーチンは持ち主の ○ で作る（BR-13） |
+| 外へのアドレス | `web_fetch` にも egress と同じ判定をかける（D-164） |
+| 秘密 | `.env`（600）。refresh token と受け口の秘密は暗号化して SQLite。ログでマスク。通知の文に秘密を入れない |
+| 個人の情報 | スクショは Claude に送る。ホストに残すスクショは DB の外のファイルで、7日で消す。秘密の欄の領域は塗る（D-162）。VM のホームと控えには Cookie が入る（ディスクの暗号化を勧める：R-81）。Web Push の文は Push のサービスを通るので、要約だけにする。成果物の HTML はスクリプトを動かさずに配る（D-243） |
 
 ### 9. エラーハンドリング・ログ・監視
-- API のエラーは共通の形（[09 共通仕様](09_api.md#共通仕様)）。RPC 越しの値の返し方（WriteResult・EdgeOutcome）は、同じプロセスになったので普通の例外に戻してよい
-- VM の失敗は1回だけ起こし直し、だめなら `failed`（`sandbox_lost`）
-- ログは JSON の行（NFR-079）。監視の仕組みは持たず、SCR-023 でホストの状態を見る
+- API のエラーは共通の形（[09 共通仕様](09_api/README.md#共通仕様)）。RPC 越しの値の返し方は、同じプロセスになったので普通の例外に戻してよい
+- VM の失敗は1回だけ起こし直し、だめならタスクを `failed`（`sandbox_lost`）にしてメインに報告する
+- ターンの LLM の失敗は 3 回までやり直し、だめなら `failed` にして `system` のメッセージを出す
+- ログは JSON の行（NFR-079）。監視の仕組みは持たず、SCR-023 でホストの状態（キャッシュの当たり率・今日の費用を含む）を見る
 
 ### 10. 環境・設定
 <details>
@@ -99,18 +112,21 @@ flowchart LR
 |---|---|---|
 | `LLM_PROVIDER` | いいえ | `anthropic`（既定）・`bedrock`・`vertex`（FR-087） |
 | `ANTHROPIC_API_KEY` | `anthropic` のとき | Claude の API キー |
-| `AWS_REGION` | `bedrock` のとき | Bedrock のリージョン。資格情報は AWS の標準の順（`AWS_ACCESS_KEY_ID`・`AWS_SECRET_ACCESS_KEY`、または `AWS_PROFILE`）で読む |
-| `CLOUD_ML_REGION`・`ANTHROPIC_VERTEX_PROJECT_ID` | `vertex` のとき | Vertex のリージョン（`global` を推奨）と GCP のプロジェクト。資格は ADC（`GOOGLE_APPLICATION_CREDENTIALS` のサービスアカウントの鍵） |
+| `AWS_REGION` | `bedrock` のとき | Bedrock のリージョン。資格情報は AWS の標準の順で読む |
+| `CLOUD_ML_REGION`・`ANTHROPIC_VERTEX_PROJECT_ID` | `vertex` のとき | Vertex のリージョン（`global` を推奨）と GCP のプロジェクト。資格は ADC |
 | `CLAUDE_MODEL` | いいえ | 既定 `claude-opus-5-5`。`bedrock` では本体が `anthropic.` を前に付ける |
+| `CLAUDE_REVIEW_MODEL` | いいえ | オートレビューのモデル。既定 `claude-sonnet-5-5`（D-226） |
 | `OWNER_LOGIN` | はい | 持ち主の Tailscale のログイン名 |
-| `OWNER_LOGIN_REPLACE` | いいえ | `1` のとき、違っていても `workspace.owner_login` を `OWNER_LOGIN` で上書きして起動する（D-170） |
+| `OWNER_LOGIN_REPLACE` | いいえ | `1` のとき、違っていても `workspace.owner_login` を上書きして起動する（D-170） |
 | `TS_AUTHKEY` | はい（初回） | Tailscale の認証キー |
 | `TS_HOSTNAME` | いいえ | 既定 `makase` |
-| `BOX_MANAGER_TOKEN` | はい | 本体 ↔ box-manager の共有トークン（手順書の作り方で作る） |
-| `ENCRYPTION_KEY` | はい | refresh token の暗号化の鍵 |
+| `TS_FUNNEL` | いいえ | `auto`（既定：受け口があれば 8443 番で `/hooks/` を公開）・`off` |
+| `BOX_MANAGER_TOKEN` | はい | 本体 ↔ box-manager の共有トークン |
+| `ENCRYPTION_KEY` | はい | refresh token と受け口の秘密の暗号化の鍵 |
+| `VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`・`VAPID_SUBJECT` | はい | Web Push の鍵（手順書の作り方で作る）と連絡先（`mailto:`） |
 | `GOOGLE_CLIENT_ID`・`GOOGLE_CLIENT_SECRET` | カレンダーを使うとき | OAuth のクライアント |
 | `GITHUB_APP_ID`・`GITHUB_APP_PRIVATE_KEY` | GitHub を使うとき | GitHub App |
-| `TZ` | いいえ | 既定 `Asia/Tokyo` |
+| `TZ` | いいえ | 既定 `Asia/Tokyo`（ルーチン・ログの日付・控えの時刻） |
 
 </details>
 
@@ -119,34 +135,42 @@ flowchart LR
 ### 11. テスト方針
 | レベル | 観点 |
 |---|---|
-| 単体 | `judgeBrowserAction` の合図（申告・T-1〜T-6、キーと修飾キー・押すと離す）、中身のハッシュ、`pending → executing` の1回だけ、歩みの記録のなぞり、再開の表（FR-084）のすべての行、費用の予約と精算、`type` の改行の判定（D-157）、`open_url` のスキームと T-2（D-158）、スクショの枚数の制限（D-161）、秘密の欄の塗りつぶし（D-162）、`paused_ms` の計算（D-174）、`clickable` の T-3（D-173）、パックの JSON の検証、接続先ごとの道具の宣言の切り替えとモデル名の形（FR-087） |
-| 結合 | 本体＋偽の box-manager で UC-046〜048 を通す。LLM は今の ScriptedLlm。二重の ○、交代と動いている呼び出しの重なり、承認のあとの画面の変化、実行の途中での再起動。UC-052（パックを入れる・外す）・UC-053（VM のターミナルで仕事をする） |
-| VM | 実の VM に決まった試験ページ（パスワード欄・購入ボタン・同じ出どころとほかの出どころの iframe・canvas・JS のダイアログ・新しいタブ）を開かせ、確かめた先と実行した先が同じであることを確かめる |
-| 隔離 | VM から、ほかの VM・本体・box-manager の口・ホストのブリッジのアドレス・192.168.x・100.64.x・`::1`・IPv4 を入れた IPv6 に届かないこと。名前を引き直す仕掛け（DNS rebinding）で抜けないこと。egress の断りが記録されること。`web_fetch` からも同じアドレスに届かないこと（D-164）。ターミナルから許可リスト外のホスト・LAN に届かないこと |
-| 実機 | ラズパイ 5・WSL2・amd64 の Linux で NFR-067〜069 を測る |
-| eval（D-199） | 失敗したタスクをケースにして、ハーネスを直す前と後で比べる。`npm run eval:capture <taskId>` で `task_steps`・`browser_actions`・確かめの結果（秘密の欄は `***` のまま）を `evals/cases/<日付>-<短い名前>/` に書き出し、期待する結果（確認に回るべき操作・回らないべき操作・終わりの状態）を手で足す。種類は (1) 判定：録った確かめの結果を `judgeBrowserAction` に通す（LLM なし・毎回）、(2) 道具の選び方：録った依頼で、最初に選ぶ道具が FR-088 の順番に合うか（LLM あり・ハーネスを変えたとき）、(3) パックの通し：告知ページパックの依頼例 3 件を実の VM で通し、点検の手順書の項目で採点（MS-4 以降・リリースの前）。ハーネス（判定・道具の渡し方・指示・パック）を変える PR は (1) が緑で、(2)(3) の点が下がらないこと |
+| 単体 | `judgeBrowserAction` の合図と行き先の表（BR-14）、中身のハッシュ、`pending → executing` の1回だけ、歩みの記録のなぞり、再開の表（FR-084）のすべての行、費用の予約と精算・`chat` のための取っておき、`type` の改行・`open_url`・スクショの枚数・秘密の欄の塗りつぶし・`paused_ms`・`clickable`、パックの JSON の検証、接続先ごとの道具の宣言。受付の重複（`source_key`）・3 秒のまとめ・持ち主のチャットの割り込み。ルーチンの cron の次の時刻・過ぎた分を 1 回だけ。webhook の署名・件数・大きさ。記憶の数と字数・消してよい事実だけ消す。先頭のハッシュとキャッシュの外れの判定 |。v1.1：行き先の表の T-7・iframe・名前のない作動・`textarea` の Enter（D-242）、`attached` とターンを閉じる処理（D-247）、`tool_call_id` での再開（D-249）、取り消しのときの確認の期限切れ（D-250）、`vm_op` の直列（D-251）、`screen_epoch`（D-258）、費用の区分（D-259）、webhook のまとめと重複（D-260・D-261）、送り待ちの再送（D-267）
+| 結合 | 本体＋偽の box-manager で UC-046〜048・054〜061 を通す。LLM は今の ScriptedLlm。二重の ○、交代と動いている呼び出しの重なり、承認のあとの画面の変化、実行の途中での再起動、画面の番の取り合い（タスク 3 つ）、タスクの完了が同時に 2 つ届く、ターンの途中に持ち主のメッセージ、オートレビューの時間切れ |
+| VM | 実の VM に決まった試験ページ（パスワード欄・購入ボタン・同じ出どころとほかの出どころの iframe・canvas・JS のダイアログ・新しいタブ）を開かせ、確かめた先と実行した先が同じであることを確かめる。止めて起こしたあとにホームとログインが残ること。控えから戻せること |
+| 隔離 | VM から本体・box-manager の口・ホストのブリッジのアドレス・192.168.x・100.64.x・`::1`・IPv4 を入れた IPv6 に届かないこと。DNS rebinding で抜けないこと。`web_fetch` からも同じアドレスに届かないこと（D-164）。ターミナルから許可リスト外のホスト・LAN に届かないこと。利用者 `agent` から `/home/browser/profile` を読めないこと（D-216）。Funnel から :8080 の口（`/api/*`・`/`）に届かないこと |。v1.1：利用者 `agent` から Chrome の CDP・X のソケット・VNC・box-agent に届かないこと（D-252）、ホストのブリッジのアドレスに届かないこと（D-253）、インターネットから 443 番に届かず 8443 番の `/hooks/` だけが届くこと（D-241）、成果物の HTML のスクリプトが動かないこと（D-243）
+| 実機 | ラズパイ 5・WSL2・amd64 の Linux で NFR-067〜069・082〜084・086 を測る |
+| eval（D-199） | 失敗したタスク・ターンをケースにして、ハーネスを直す前と後で比べる。`npm run eval:capture <taskId|turnId>` で歩みの記録・操作・確かめの結果（秘密は `***`）を `evals/cases/<日付>-<短い名前>/` に書き出し、期待する結果を手で足す。種類は (1) 判定と行き先：録った確かめの結果を `judgeBrowserAction` に通す（LLM なし・毎回）、(2) 道具の選び方と振り分け：録ったきっかけで、メインが自分で答えるか・どのエージェントに振るか・黙るか（LLM あり・ハーネスを変えたとき）、(3) オートレビュー：通すべき・止めるべき操作の組で、止めるべきものを通さないこと（LLM あり）、(4) パックの通し：告知ページパックの頼みの例 3 件を実の VM で通す（リリースの前）。ハーネスを変える PR は (1) が緑で、(2)〜(4) の点が下がらないこと |
 
 ### 12. リスクと対策
 | # | リスク | 対策 |
 |---|---|---|
-| R-76 | ページの仕掛けでプロフィールを悪用される | 合図・確認するドメイン・汚染・操作の記録。エージェントを用途で分けてプロフィールを小さく。`div` のボタンも `clickable` で T-3 の対象（D-173） |
-| R-77 | ラズパイで遅い | VM1つ・1280×800・実機で測る |
-| R-78 | WSL2・ノートが止まる | 歩みの記録で再開。手順書に WSL を止めない設定 |
-| R-79 | box-manager がホストを握られる | 決まった操作だけ・中身はコードで固定・口は ctl だけ。中継は API の種類を絞るだけと前提にする |
-| R-80 | ヘッダーの偽装 | 本体の画面向けの口は front だけで待ち受け、front には Tailscale と本体だけ |
-| R-81 | プロフィールがディスクから漏れる | ディスクの暗号化を勧める・消す操作 |
-| R-82 | スクショの画像で費用がかさむ | 1タスク $3・操作 300 回・60分（ポリシーの `max_minutes` は 55：M-59）。会話に残すスクショは直近 3 枚（D-161）。安い道具から試す・`read_page` で構造を読む・スキルの本文は要るときだけ（FR-088、D-191〜D-194）。足りなければ子の文脈（ADR-057、Q-124） |
+| R-76 | ページの仕掛けでログイン済みのブラウザを悪用される | 合図・確認するドメイン・汚染・操作の記録。`div` のボタンも `clickable` で T-3 の対象（D-173）。オートレビューに会話を渡さない |
+| R-77 | ラズパイで遅い | VM1つ・1280×800・画面の番 1 つ・実機で測る |
+| R-78 | WSL2・ノートが止まる。止まっている間はルーチンも動かない | 歩みの記録で再開。過ぎたルーチンは 1 回だけ。手順書に WSL を止めない設定 |
+| R-79 | box-manager がホストを握られる | 決まった操作だけ・中身はコードで固定・口は ctl だけ |
+| R-80 | ヘッダーの偽装 | 画面と API の口は front だけで待ち受け、front には Tailscale と本体だけ。webhook の口は身元を読まない |
+| R-81 | VM のホームと控えがディスクから漏れる | ディスクの暗号化を勧める・消す操作 |
+| R-82 | スクショの画像で費用がかさむ | 1タスク $3・操作 300 回・55 分。会話に残すスクショは直近 3 回分（サーバー側の context editing：D-256）。安い道具から試す・`read_page`。スクショは振り分け先の文脈だけに入る（ADR-059） |
 | R-83 | 自動の操作を禁じるサイトがある | 持ち主の責任。確認するドメインで止められる |
-| R-84 | VM の中のコマンドが暴走する | 資源の上限・タイムアウト（NFR-080）・使い捨ての VM |
+| R-84 | VM の中のコマンドが暴走する | 資源の上限・タイムアウト（NFR-080）・控えから戻す（FR-100） |
 | R-85 | パックの更新で持ち主の手直しが消える | 更新の前に知らせを出す（SCR-024） |
-| R-86 | レビューで評価された「4 人の工程の受け渡し」が、この設計では 1 人のエージェントの手順書 4 本（D-186）になり、工程の見え方が弱くなる | 歩みの記録を工程（設計・制作・点検・仕上げ）ごとに SCR-021 で見せる。手順書を工程ごとに分け、点検の結果を次の手順書に渡す。1 件 1 人（ADR-050）は変えない |
-| R-87 | Bedrock・Vertex では費用の見積もりが実際の請求とずれる。Bedrock では Web 検索の道具がない | 設定画面と手順書に「見積もりは目安」と書く。Bedrock では `web_fetch` と VM のブラウザで調べる（FR-087） |
+| R-86 | 「4 人の工程の受け渡し」が 1 人の手順書 4 本になり、工程の見え方が弱くなる | タスクのページで歩みを手順書ごとに区切って見せる。メインが工程ごとに別のタスクに分けてもよい（ADR-059） |
+| R-87 | Bedrock・Vertex では費用の見積もりがずれる。Bedrock では Web 検索の道具がなく、computer use も古い形（`computer_20251124`）。サーバー側の context editing が使えない接続先があるかもしれない | 「見積もりは目安」と書く。`web_fetch` と VM のブラウザで調べる。context editing が使えなければ古いスクショを消さず、操作の上限で抑える（FR-087） |
+| R-88 | 前のタスクの残り（ファイル・Cookie・ツール）に仕掛けが残る | 汚染・資格情報を置かない・控えから戻す・作り直す（ADR-061） |
+| R-89 | Funnel の公開口が攻撃される | 別のポート（8443）と別の口・`/hooks/` だけ・署名・件数と大きさの上限・受け口を作らなければ公開しない（ADR-065） |
+| R-90 | オートレビューがだまされる・見逃す | 必ず人の分類（BR-14・D-242）・会話を渡さず、ページの文は信用しない材料として枠に入れる・迷ったら stop・記録と eval (3)（ページに承認を促す文がある組を含める） |
+| R-91 | 記憶が汚染される・作り話が入る | 材料を持ち主のメッセージに限る（BR-12・D-246）・ログは定型文・情報として渡す・画面で直せる |
+| R-92 | ルーチン・webhook で日次の上限を使い切る | `chat` のための取っておき（D-230）・15 分以上の間隔・20 本まで・1 時間 200 件 |
+| R-93 | キャッシュの外れで費用がかさむ | 先頭を固定・道具を途中で変えない・外れを部分ごとに記録して直す（ADR-066） |
+| R-94 | 画面の番の待ちでタスクが遅れる | 3 分使わなければ返す。ターミナルは番なしで進む。待っている数を画面に出す |
 
 ### 13. 未決事項・Claude判断で決めた項目
-- 未決：Q-124（画面の操作を子の文脈にするか。[ADR-057](adr/ADR-057-screen-work-in-child-context.md)。MS-1 の実測のあとに決める）。Q-114〜123 は 2026-10-24 に決着（[00 決定事項ログ](00_overview.md#決定事項ログ) の D-172〜D-182。OSS と事業の方針は D-183〜D-189）
-- Claude判断：[00 決定事項ログ](00_overview.md#決定事項ログ) の D-136〜D-146・D-151〜D-171・D-187〜D-189・D-191〜D-199
+- 未決：なし。v0.6 の Q-124 は D-201（ADR-059）で決着。Q-114〜123 は D-172〜D-182
+- Claude判断：[00 決定事項ログ](00_overview.md#決定事項ログ) の D-136〜D-146・D-151〜D-171・D-187〜D-189・D-191〜D-199・D-212〜D-240・D-241〜D-274（D-248 を除く）
 
 ### 14. 参照ドキュメント
-- [00](00_overview.md)〜[10](10_diagrams.md)、[adr/](adr/)。実装の順番は [12](12_implementation_order.md)
+- [00](00_overview.md)〜[10](10_diagrams/README.md)、[adr/](adr/)
+- 参考資料：[GrokBot の講義の解説動画のノート](../../参考資料/2026-10-17_GrokBotの仕組み_常駐型エージェントのアーキテクチャ.md)、[スクリーンショットの書き起こし](../../参考資料/index.md)
 - 今の実装：`apps/worker/src`（移す元）、`apps/web/src`
 - 置き換える前の設計：[docs/cloudflare-design.md](../cloudflare-design.md)
