@@ -1,8 +1,8 @@
 # 08. DB設計：VM と確認の表（v0.6 から引き継ぐ表）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[08 DB設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[08 DB設計](README.md)
 
 > **3行で**
-> 1. v0.6 の TBL-031〜040 を引き継ぐ。`boxes` は「持ち主に 1 台の VM の 1 回の起動（世代）」になり、エージェントとタスクの列をなくして、画面の番（`screen_task_id`）を持つ。
+> 1. v0.6 の TBL-031〜040 を引き継ぐ。`boxes` は「持ち主に 1 台の VM の 1 回の起動（世代）。実体は 2 つのコンテナ（`box-browser`・`box-shell`）の組」になり、エージェントとタスクの列をなくして、画面の番（`screen_task_id`）を持つ。
 > 2. 操作（`browser_actions`）と確認（`browser_checks`）に、オートレビューへの参照と理由を足した。ポリシーに `human_words`・`confirm_words`・メインのターンの上限を足した。
 > 3. `browser_profiles`（TBL-036）は使わない。`push_subscriptions`（TBL-037）は作る（Web Push を最初の版に：D-207）。
 
@@ -21,33 +21,32 @@
 | snapshot_hour | INTEGER | NO | 4 | VM の控えを取る時刻（0〜23、`TZ`） |
 | vm_op | TEXT | NO | `'none'` | VM の操作：`none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding`（D-251）。`none` 以外の間は起こさない。遷移は [10 states](../10_diagrams/states.md#workspacevm_op) |
 | vm_op_started_at | TEXT | YES | — | `vm_op` を `none` 以外にした時刻。`none` のとき NULL。上限（`starting`・`stopping` 2 分、`snapshotting`・`restoring`・`rebuilding` 30 分）を超えたら打ち切る（D-294） |
-| vm_home_state | TEXT | NO | `'ok'` | VM のホームの状態：`ok`・`over_quota`（4GB を超えた。掃除のための起動だけ受ける：D-301）・`broken`（戻し・作り直しに失敗した。戻す・作り直すだけ受ける：D-294） |
+| vm_home_state | TEXT | NO | `'ok'` | VM のホーム（2 つのボリューム）の状態：`ok`・`broken`（戻し・作り直しに失敗した。戻す・作り直すだけ受ける：D-294） |
 
 </details>
 
 ### TBL-032：boxes（VM の世代）
-持ち主に 1 台の VM の 1 回の起動。主なカラム：`id`, `status`, `control`, `screen_task_id`
+2 つのコンテナ（`box-browser`・`box-shell`）の組の 1 世代。持ち主に 1 台。2 つは一緒に起こし、一緒に止める（ADR-068）。主なカラム：`id`, `status`, `control`, `screen_task_id`
 
 <details>
-<summary>カラム定義（16列）</summary>
+<summary>カラム定義（15列）</summary>
 
 | カラム | 型 | NULL | デフォルト | キー | 説明 |
 |---|---|---|---|---|---|
 | id | TEXT | NO | — | PK | UUIDv7。VM の世代 |
 | status | TEXT | NO | `'starting'` | | `starting`・`running`・`stopping`・`stopped`・`failed` |
-| mode | TEXT | NO | `'normal'` | | `normal`・`cleanup`（掃除のための起動。タスクの道具は受けない：D-301） |
 | control | TEXT | NO | `'agent'` | | `agent`・`handing_over`・`human` |
 | control_epoch | INTEGER | NO | 0 | | `control` を変えるたびに1増やす。box-agent は古い番号の画面の操作を断る |
 | screen_epoch | INTEGER | NO | 0 | | 画面の番を取るたびに1増やす（取るときの 1 か所だけ。D-258・D-299）。比べるのは本体だけで、box-agent には渡さない。コマンドはどちらの番号も確かめない（D-296） |
 | screen_task_id | TEXT | YES | — | FK tasks | 画面の番を持つタスク（D-205） |
 | screen_since | TEXT | YES | — | | 番を取った時刻 |
-| container_name | TEXT | YES | — | | box-manager が付けた名前 |
-| stop_reason | TEXT | YES | — | | `idle`・`owner`・`restore`・`rebuild`・`snapshot`・`disk_quota`・`disk_low`（ホストの空きが 3GB を切った：D-300）・`start_timeout`・`sandbox_unavailable`（Chromium のサンドボックスが使えない：D-304）・`isolation_missing`（ホストへの入りが断られていない：D-293）・`crashed`・`host_restart` |
+| browser_container_id | TEXT | YES | — | | `box-browser` のコンテナの ID（box-manager が起こしたとき） |
+| shell_container_id | TEXT | YES | — | | `box-shell` のコンテナの ID。どちらかが落ちたら世代ごと `failed` |
+| stop_reason | TEXT | YES | — | | `idle`・`owner`・`restore`・`rebuild`・`snapshot`・`disk_quota`・`disk_low`（ホストの空きが 3GB を切った：D-300）・`start_timeout`・`crashed`・`host_restart` |
 | started_at | TEXT | NO | NOW | | |
 | last_activity_at | TEXT | NO | NOW | | 最後の操作・コマンド（人・エージェント） |
 | stopped_at | TEXT | YES | — | | |
-| home_bytes | INTEGER | YES | — | | box-manager が最後に測ったホームの大きさ（動いている間は毎分 API-109 から写す：D-309） |
-| profile_bytes | INTEGER | YES | — | | 止めたときに測った Chrome のプロフィールの大きさ（FR-079） |
+| home_bytes | INTEGER | YES | — | | box-manager が最後に測った 2 つのボリューム（ブラウザのプロフィールとホーム）の合計の大きさ（動いている間は毎分 API-109 から写す：D-309） |
 | created_at | TEXT | NO | NOW | | |
 
 </details>
@@ -115,8 +114,8 @@
 
 ```json
 {
- "budget": { "per_task_usd": 3, "per_day_usd": 10, "max_steps": 200, "max_minutes": 55, "max_browser_actions": 300,
-  "per_turn_usd": 1, "max_turn_steps": 40, "max_turn_minutes": 10, "reserve_chat_usd": 1 },
+ "budget": { "per_task_usd": 3, "daily_usd": 10, "daily_auto_usd": 7, "max_steps": 200, "max_minutes": 55, "max_browser_actions": 300,
+  "per_turn_usd": 1, "max_turn_steps": 40, "max_turn_minutes": 10 },
  "terminal": { "allow_hosts": ["github.com", "registry.npmjs.org", "pypi.org", "files.pythonhosted.org"], "max_commands": 200, "command_timeout_sec": 120 },
  "browser": {
   "confirm_domains": [],
@@ -132,12 +131,12 @@
 
 </details>
 
-- `max_steps`（タスクの歩み）と `max_browser_actions`（VM の操作）は別に数える。`per_turn_usd`・`max_turn_steps`・`max_turn_minutes` はメインの 1 ターン、`reserve_chat_usd` は日次の残りのうち持ち主のチャットのために取っておく額（D-230）。`human_words` と `confirm_words` は D-227、`auto_review` は FR-099（`enabled = false` なら行き先がオートレビューのものも人に回す）。1タスクの時間の上限は、外側の 60 分の打ち切りより前に切れるよう `max_minutes = 55`（今の M-59 の決まり）
+- `max_steps`（タスクの歩み）と `max_browser_actions`（VM の操作）は別に数える。`per_turn_usd`・`max_turn_steps`・`max_turn_minutes` はメインの 1 ターン。`daily_usd` はすべての LLM の費用の合計の 1 日の上限、`daily_auto_usd` は `routine`・`scheduled`・`webhook` で始まったターンと、そこから生まれたタスク・オートレビュー・要約の合計の上限（D-322）。`human_words` と `confirm_words` は D-227、`auto_review` は FR-099（`enabled = false` なら行き先がオートレビューのものも人に回す）。1タスクの時間の上限は、外側の 60 分の打ち切りより前に切れるよう `max_minutes = 55`（今の M-59 の決まり）
 - 効くのは次のタスクから。タスクは始まるときのポリシーを固定して使う（今の `edge/inputs.ts` の形）
 - `max_steps`・`max_minutes` の初期値は設計書の値で確定（D-175。今の既定の 40 歩・15 分とは違う）。1タスクの時間は確認待ち・交代待ちを除いて数える（`tasks.paused_ms`：D-174）。`terminal` 欄はターミナルの決まり（D-178）：`allow_hosts` は VM のコマンドの通信の許可リスト、`max_commands` は1タスクのコマンド数、`command_timeout_sec` は1コマンドの時間の上限。`keep_screenshots` は Claude との会話に残すスクショの枚数（D-161）
 
 ### TBL-036：browser_profiles（プロフィール）
-使わない（v1.0）。Chrome のプロフィールは VM のホームに 1 つ（ADR-060）。大きさは `boxes.profile_bytes` に持つ。
+使わない（v1.0）。Chrome のプロフィールは専用のボリューム `makase-browser-profile` に 1 つ（ADR-060・ADR-068）。
 
 ### TBL-037：push_subscriptions（通知の購読）
 Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
@@ -166,7 +165,7 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 |---|---|---|---|---|---|
 | owner_kind | TEXT | NO | — | PK | `task`・`turn`（メインのターン）。v0.6 の `ask` は使わない |
 | owner_id | TEXT | NO | — | PK | タスクかターンの ID |
-| step_key | TEXT | NO | — | PK | 歩みの名前（`llm:<n>`・`tool:<callId>`・`box:<actionId>`・`review:<actionId>`・`input:<n>`（ターンに足した文。`result` に描いた文をそのまま：D-277）・`memory:<n>`（記憶の更新）・`summary:<n>`（呼び出し前の要約。`result` に作った `context_snapshot_id`：D-280）。`<n>` はその持ち主の中の歩みの番号。タイマーの要約と冷えた後の要約はターンの外なので書かない） |
+| step_key | TEXT | NO | — | PK | 歩みの名前（`llm:<n>`・`tool:<callId>`・`box:<actionId>`・`review:<actionId>`・`input:<n>`（ターンに足した文。`result` に描いた文をそのまま：D-277）・`memory:<n>`（記憶の更新）。`<n>` はその持ち主の中の歩みの番号。要約はターンの外の仕事なので書かない：D-323） |
 | status | TEXT | NO | — | | `started`・`done`（`done` の結果に `aborted`（交代で中止）がある） |
 | result | TEXT | YES | — | | JSON。`done` のとき必須。LLM の歩みは返った assistant の content をそのまま（思考のブロック・署名・`tool_use` の ID を含む。D-256）。画像は入れず、スクショのパスだけ（組み直すときに同じバイトになるよう、パスから元の画像を読む） |
 | repeatable | INTEGER | NO | 1 | | 0 なら、`started` のまま残っても繰り返さない（VM の操作・書き込み） |
@@ -203,7 +202,7 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 | screenshot_path | TEXT | YES | — | | 押す場所の印つきのスクショ |
 | policy_hash | TEXT | NO | — | | 判定に使ったポリシー |
 | expires_at | TEXT | NO | — | | 作ってから 30分 |
-| expire_reason | TEXT | YES | — | | `approval_timeout`・`page_changed`・`taken_over`・`box_restarted`・`core_restarted`・`task_cancelled`・`screen_lost`・`vm_replaced`（控えに戻した・作り直した：D-308） |
+| expire_reason | TEXT | YES | — | | `approval_timeout`・`page_changed`・`taken_over`・`box_restarted`・`task_cancelled`・`screen_lost`・`vm_replaced`（控えに戻した・作り直した：D-308） |
 | decided_at | TEXT | YES | — | | |
 | created_at | TEXT | NO | NOW | | |
 
@@ -215,7 +214,7 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 - 監査ログに `browser.checked`（作った・決めた・結果）を残す
 
 ### TBL-040：sandbox_commands（ターミナルの記録）
-VM の中のコマンド1つ。今の表の `session_id`（`sandbox_sessions`）を `box_id`（`boxes`）に変える。`sandbox_sessions` は使わない。主なカラム：`box_id`, `task_id`, `tool`, `status`, `output`
+VM の中のコマンド1つ（実行は `box-shell`）。今の表の `session_id`（`sandbox_sessions`）を `box_id`（`boxes`）に変える。`sandbox_sessions` は使わない。主なカラム：`box_id`, `task_id`, `tool`, `status`, `output`
 
 <details>
 <summary>カラム定義（12列）</summary>

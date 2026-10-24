@@ -1,5 +1,5 @@
 # ADR-043：VM はコンテナに仮想画面と Chromium と VNC を入れたものにする
-- 状態：承認 ／ 日付：2026-10-23 ／ 決定者：ユーザー（中身の部品は Claude判断（提案））
+- 状態：承認（v1.4 で ADR-068 の追記あり） ／ 日付：2026-10-23 ／ 決定者：ユーザー（中身の部品は Claude判断（提案））
 - 影響する ID：REQ-081, REQ-083, FR-074, FR-078, NFR-066, NFR-075
 
 ## 状況
@@ -19,3 +19,4 @@ Docker のコンテナに Xvfb・軽いウィンドウマネージャ・Chromium
 - 隔離はコンテナの強さまで。権限を外し、ネットワークを分けて補う（NFR-066、ADR-045）
 - v1.2（VM 側のレビュー）：利用者を分けるため、VM の最初のプロセス（起動役）だけが `CAP_SETUID`・`CAP_SETGID` を持ち、子を起こしたら手放す（D-291）。X は TCP と抽象名前空間のソケットで待ち受けず、鍵で確かめる（D-290）。Chromium のサンドボックスは専用の seccomp と AppArmor のプロファイルで動かし、ホストの前提が足りなければ `--no-sandbox` に逃げず VM を起こさない（D-304。ホストの挙動に頼るので実装のときに確かめる）
 - v1.3 の直し：Chromium の HTTP キャッシュはホームの外の `/tmp/chromium-cache` に置き、`--disk-cache-size` で 512MB までにする。`/tmp` は tmpfs にせず、VM を止めると消えてよい（D-313）
+- v1.4：ADR-068 で VM を `box-browser`・`box-shell` の 2 つのコンテナの組にした。上の v1.2 の起動役・`CAP_SETUID`/`CAP_SETGID`・X の鍵と、Chromium の専用 AppArmor・起動拒否は外した（D-326）。サンドボックスが使えないホストは `--no-sandbox` で起こす。v1.3 の Chromium の HTTP キャッシュの置き場も設計書から外した（D-321）

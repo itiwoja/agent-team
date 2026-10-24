@@ -1,58 +1,55 @@
 # 08. DB設計：常駐の表（v1.0 で足す表）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[08 DB設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[08 DB設計](README.md)
 
 > **3行で**
 > 1. きっかけ（`wakes`）・メインのターン（`turns`）・チャット（`chat_messages`）が常駐の中心。どのきっかけも `wakes` の 1 行になり、`source_key` の UNIQUE で重複を捨てる。
-> 2. ルーチン・予約した確認・受け口（`routines`・`scheduled_wakes`・`webhooks`）は、きっかけを作るためだけの表。記憶は 4 つの表（`memory_facts`・`memory_log`・`memory_notes`・`memory_search`）。
+> 2. ルーチン・予約した確認・受け口（`routines`・`scheduled_wakes`・`webhooks`）は、きっかけを作るためだけの表。記憶は 2 つの層（プロフィールの `memory_facts`・検索の `memory_search`）。
 > 3. オートレビュー（`auto_reviews`）・VM の控え（`vm_snapshots`）・文脈の先頭（`context_snapshots`）を足した。
 
 ---
 
 ### TBL-041：wakes（きっかけ）
 <details>
-<summary>カラム定義（16列）</summary>
+<summary>カラム定義（15列）</summary>
 
 | カラム | 型 | NULL | デフォルト | キー | 説明 |
 |---|---|---|---|---|---|
 | id | TEXT | NO | — | PK | UUIDv7 |
 | origin | TEXT | NO | — | | `chat`・`routine`・`scheduled`・`webhook`・`task_done`・`approval_done`・`steer` |
-| budget_class | TEXT | NO | — | | `chat`・`auto`（FR-013・D-259） |
+| budget_class | TEXT | NO | — | | `chat`・`auto`（FR-013・D-322） |
 | retries | INTEGER | NO | 0 | | 失敗したターンから戻した回数（2 まで：FR-091・D-276） |
-| source_key | TEXT | NO | — | UNIQUE | 重複の鍵。`<origin>:<…>` の形（`chat:<messageId>`・`webhook:<hookId>:<配達 ID>` など。FR-090・D-261）。webhook のまとめは `webhook-batch:<hookId>:<分>`（D-284） |
+| source_key | TEXT | NO | — | UNIQUE | 重複の鍵。`<origin>:<…>` の形（`chat:<messageId>`・`webhook:<hookId>:<配達 ID>` など。FR-090・D-261）。重複は `source_key` の UNIQUE だけで捨てる（D-318） |
 | target_kind | TEXT | NO | — | | `main`・`task` |
 | target_task_id | TEXT | YES | — | FK tasks | `target_kind = 'task'` のとき |
 | payload | TEXT | NO | — | | JSON。中身（メッセージの ID・ルーチンの ID・覚え書き・webhook の要約・報告の参照） |
 | tainted | INTEGER | NO | 0 | | 汚染の印（D-232） |
-| status | TEXT | NO | `'queued'` | | `queued`・`attached`・`consumed`・`merged`・`dropped`（D-247・D-284） |
-| consumed_turn_id | TEXT | YES | — | FK turns | 結びつけた・渡したターン（`attached`・`consumed`。タスク宛てなら NULL） |
-| consumed_step_key | TEXT | YES | — | | 渡した歩み（`input:<n>`）。組み直すときはこの歩みの `result` を使う（D-277） |
-| hook_id | TEXT | YES | — | FK webhooks | `webhook` のとき（D-284） |
-| body_sha256 | TEXT | YES | — | | `webhook` の本文の sha256（`github` の 24 時間の重複を捨てる。D-261・D-284） |
-| drop_reason | TEXT | YES | — | | `budget`・`target_gone`・`retry_exceeded`（件数では捨てない：D-260） |
+| status | TEXT | NO | `'queued'` | | `queued`・`consumed`・`dropped` |
+| consumed_turn_id | TEXT | YES | — | FK turns | 渡したターン（`consumed`。記録として残す。タスク宛てなら NULL） |
+| consumed_step_key | TEXT | YES | — | | どのターンのどの歩み（`input:<n>`）で渡したかの記録。組み直すときはこの歩みの `result` を使う（D-277） |
+| hook_id | TEXT | YES | — | FK webhooks | `webhook` のとき。1 分の件数を数えるために持つ（D-318） |
+| drop_reason | TEXT | YES | — | | `budget`・`target_gone`・`retry_exceeded`（件数の超過は 429 で断り、行を残さない：D-318） |
 | created_at | TEXT | NO | NOW | | |
 
 </details>
 
-- 索引：`(status, target_kind, created_at)`・`(hook_id, created_at)`（件数）・`(hook_id, body_sha256)`（重複）。`consumed`・`merged`・`dropped` の行は 30 日で消す（監査は `audit_logs`）
-- ターンを閉じると決めるとき、`attached` の行が残っていれば閉じない（FR-091 の 4）。閉じる処理（`done`・`halted`・`failed`）では、残った `attached` の行を同じトランザクションで `queued` に戻す。`failed` のターンで `consumed` にしたメイン宛ての行は、すべて `queued` に戻して `retries` を 1 増やす。3 回目は `dropped`（`retry_exceeded`。D-276）
-- `merged`：1 分の上限を超えて、まとめのきっかけに足した配達（終わり。`payload` にまとめの `wakes.id`）。重複と件数のためだけに行を持つ（D-284）
+- 索引：`(status, target_kind, created_at)`・`(hook_id, created_at)`（件数）。`consumed`・`dropped` の行は 30 日で消す（監査は `audit_logs`）
+- メインのターンが動いている間に届いた `chat`・`approval_done` は `queued` のまま。ターンが終わったら（`done`・`halted`・`failed`）すぐ次のターンを始める（D-324）。`failed` のターンで `consumed` にしたメイン宛ての行は、すべて `queued` に戻して `retries` を 1 増やす。3 回目は `dropped`（`retry_exceeded`。D-276）
 
 ### TBL-042：turns（メインのターン）
 <details>
-<summary>カラム定義（12列）</summary>
+<summary>カラム定義（11列）</summary>
 
 | カラム | 型 | NULL | デフォルト | キー | 説明 |
 |---|---|---|---|---|---|
 | id | TEXT | NO | — | PK | UUIDv7 |
 | status | TEXT | NO | `'running'` | | `running`・`done`・`halted`・`failed` |
-| budget_class | TEXT | NO | — | | `chat`・`auto`（まとめたきっかけに `chat` 系があれば `chat`。動いている間に `chat`・`approval_done` を結びつけたら `chat` に上げる：D-279） |
+| budget_class | TEXT | NO | — | | `chat`・`auto`。始めるときに決めて変えない。まとめたきっかけに `chat`・`approval_done`・`steer`（持ち主から）が 1 つでもあれば `chat`、それ以外は `auto`（D-322） |
 | origins | TEXT | NO | `'[]'` | | JSON の配列。まとめたきっかけの `origin` |
-| tainted | INTEGER | NO | 0 | | 汚染したか（汚染したきっかけ・道具の結果・メモを読んだ、使う先頭（`context_snapshots.tainted`）が汚染していて印が消されていない（D-310）、または前の要約のあとの履歴に汚染した内容がある：D-245・D-278・D-285） |
-| context_snapshot_id | TEXT | NO | — | FK context_snapshots | 始めたときの先頭（途中の要約で替わったら、歩み `summary:<n>` の `result` に新しい先頭：D-280） |
+| tainted | INTEGER | NO | 0 | | 汚染したか（汚染したきっかけを受けた、外の内容を含む道具の結果を読んだ、検索で汚染した報告が返った：D-245） |
+| context_snapshot_id | TEXT | NO | — | FK context_snapshots | 始めたときの先頭（履歴が 6 万トークンを超えていれば、ターンの行を作る前に要約して新しい先頭を作る：D-323） |
 | steps | INTEGER | NO | 0 | | 歩んだ数 |
 | cost_micro_usd | INTEGER | NO | 0 | | |
-| halt_reason | TEXT | YES | — | | `budget_exceeded`（1 ターンの $1）・`daily_budget_exceeded`・`steps_exceeded`・`timeout`（D-289） |
-| closing_at | TEXT | YES | — | | 閉じると決めた時刻（記憶の更新の前）。入っていればルーターは結びつけない（FR-091 の 4。D-280） |
+| halt_reason | TEXT | YES | — | | `budget_exceeded`（1 ターンの $1）・`daily_budget_exceeded`・`steps_exceeded`・`timeout`・`context_exceeded`（呼び出しの前の入力が 20 万トークンを超えた。次のターンの開始で要約する：D-323） |
 | started_at | TEXT | NO | NOW | | |
 | finished_at | TEXT | YES | — | | |
 
@@ -69,9 +66,9 @@
 | id | TEXT | NO | — | PK | UUIDv7。持ち主のメッセージは画面が作る（`Idempotency-Key` と同じ） |
 | tool_call_id | TEXT | YES | — | UNIQUE | `main` のとき、`send_to_owner` の `tool_use` の ID（D-249） |
 | role | TEXT | NO | — | | `owner`・`main`・`system` |
-| kind | TEXT | NO | `'text'` | | `text`・`file`・`choices`・`reaction`。選択肢への持ち主の返事は `text`＋`reply_to`（D-274） |
-| body | TEXT | NO | — | | JSON。`text`・ファイルの名前とパスと大きさ・問いと選択肢・リアクションの絵文字 |
-| reply_to | TEXT | YES | — | FK chat_messages | 選択肢への返事・リアクションの先 |
+| kind | TEXT | NO | `'text'` | | `text`・`file`・`choices`。選択肢への持ち主の返事は `text`＋`reply_to`（D-274） |
+| body | TEXT | NO | — | | JSON。`text`・ファイルの名前とパスと大きさ・問いと選択肢 |
+| reply_to | TEXT | YES | — | FK chat_messages | 選択肢への返事の先 |
 | turn_id | TEXT | YES | — | FK turns | `main` のとき書いたターン |
 | notify | INTEGER | NO | 0 | | Web Push を送る対象か（`send_to_owner` の `notify`）。送ったかは `push_outbox` の行で見る（D-288） |
 | status | TEXT | NO | `'sent'` | | `sent`・`delivered`（持ち主のメッセージをターンに渡した） |
@@ -175,39 +172,10 @@
 
 - 制約：`deleted_at IS NULL` の行は 100 個・合計 4,000 字まで（書くときに数える：D-224）
 
-### TBL-048：memory_log（ログ）
-<details>
-<summary>カラム定義（6列）</summary>
-
-| カラム | 型 | NULL | デフォルト | キー | 説明 |
-|---|---|---|---|---|---|
-| id | TEXT | NO | — | PK | |
-| day | TEXT | NO | — | | `YYYY-MM-DD`（`TZ`） |
-| text | TEXT | NO | — | | 1 行の出来事。200 字まで |
-| source | TEXT | NO | — | | `system`（本体）・`main`（記憶の更新）・`owner` |
-| ref | TEXT | YES | — | | 関係する ID（タスク・ルーチン） |
-| created_at | TEXT | NO | NOW | | |
-
-</details>
-
-### TBL-049：memory_notes（メモ）
-| カラム | 型 | NULL | 説明 |
-|---|---|---|---|
-| id | TEXT | NO | PK |
-| agent_id | TEXT | NO | FK agents（メインを含む） |
-| tool_call_id | TEXT | YES | UNIQUE。`write_note` の `tool_use` の ID |
-| text | TEXT | NO | 500 字まで |
-| tainted | INTEGER | NO | 書いたターン・タスクが汚染していたか（D-285） |
-| expires_at | TEXT | NO | 書いてから 60 分 |
-| created_at | TEXT | NO | |
-
-- 1 人 20 行まで。期限を過ぎた行はタイマーが消す（検索の行も）
-- 振り分け先のメモはタスクの文脈の⑤に入れ、汚染したメモがあればタスクは汚染から始める。メインのメモは文脈（⑥）に入れず、`search_memory` でだけ読む（D-285）
-
 ### TBL-050：memory_search（記憶の検索）
-- FTS5 の仮想表（`tokenize = 'trigram'`。D-225）。列は `kind`（`chat`・`log`・`report`・`note`）・`ref`（元の行の ID）・`day`・`text`・`agent_id`（メモの持ち主。UNINDEXED）・`tainted`（UNINDEXED。D-285）
-- 本体が `chat_messages`（`text` だけ）・`memory_log`・`tasks.report`・`memory_notes` を書くときに同じトランザクションで入れる。元の行が消えたら消す
-- `search_memory(query, kind?, since?)` は `bm25` の順で上位 10 件を返す。メモは呼んだエージェントのものだけ返す。汚染した報告・メモから入った行は、結果に「外の内容」の印を付け、返したら呼んだターン・タスクは汚染する（D-285）
+- FTS5 の仮想表（`tokenize = 'trigram'`。D-225）。索引するのはチャット（持ち主のメッセージと `send_to_owner` の文）とタスクの報告。列は `kind`（`chat`・`report`）・`ref`（元の行の ID）・`day`・`text`・`tainted`（UNINDEXED）
+- 本体が `chat_messages`（`text` だけ）・`tasks.report` を書くときに同じトランザクションで入れる。元の行が消えたら消す
+- `search_memory(query, kind?, since?)` は `bm25` の順で上位 10 件を返す。汚染した報告から入った行は、結果に「外の内容」の印を付け、返したら呼んだターン・タスクは汚染する（D-325）
 
 ### TBL-051：auto_reviews（オートレビュー）
 <details>
@@ -243,7 +211,7 @@
 
 ### TBL-053：context_snapshots（文脈の先頭）
 <details>
-<summary>カラム定義（11列）</summary>
+<summary>カラム定義（9列）</summary>
 
 | カラム | 型 | NULL | デフォルト | キー | 説明 |
 |---|---|---|---|---|---|
@@ -251,17 +219,15 @@
 | owner_kind | TEXT | NO | — | | `main`・`task` |
 | owner_id | TEXT | YES | — | | タスクの ID（メインは NULL） |
 | parts_hash | TEXT | NO | — | | JSON。①〜⑤の部分ごとの sha256（FR-098） |
-| memory_copy | TEXT | NO | — | | ④の記憶の写し（プロフィール・ログ 30 件） |
+| memory_copy | TEXT | NO | — | | ④の記憶の写し（プロフィール） |
 | summary | TEXT | YES | — | | ⑤の要約（メインだけ） |
 | history_from | TEXT | YES | — | | 履歴（⑥）に入れる最初のチャット・歩みの位置 |
 | tokens | INTEGER | NO | 0 | | ①〜⑤の大きさ |
-| tainted | INTEGER | NO | 0 | | 要約に渡した⑤・⑥に汚染した内容があったか（前の要約の汚染も引き継ぐ。D-278） |
-| untainted_at | TEXT | YES | — | | 持ち主が印を消した時刻（API-147）。入っていれば汚染していない扱い（D-310） |
 | created_at | TEXT | NO | NOW | | |
 
 </details>
 
-- メインの今の先頭は、`owner_kind = 'main'` の最新の行。古い行は、参照する `turns` が残っている間は消さない（D-262）。`tainted = 1` の先頭を使うターンは汚染から始める（D-278）
+- メインの今の先頭は、`owner_kind = 'main'` の最新の行。古い行は、参照する `turns` が残っている間は消さない（D-262）。要約は汚染の印を引き継がない（D-323）
 
 ### TBL-055：push_outbox（Web Push の送り待ち）
 | カラム | 型 | NULL | 説明 |

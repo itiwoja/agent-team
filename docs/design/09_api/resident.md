@@ -1,10 +1,10 @@
 # 09. API設計：常駐の API（v1.0 で足す API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[09 API設計](README.md)
 
 > **3行で**
 > 1. チャットは送る（API-119）・読む（API-120）の 2 つ。送ったメッセージはきっかけになり、返事があるかはメインが決めるので、API-119 は受けたことだけを返す。
 > 2. タスクは見る・言い直す（API-122〜124）。きっかけはルーチン・予約・受け口の CRUD と、公開の webhook の口（API-129）。
-> 3. 記憶はプロフィールとログを見て直す（API-130〜132・141）。
+> 3. 記憶はプロフィールを見て直す（API-130・131・141）。
 
 ---
 
@@ -20,7 +20,7 @@
 
 </details>
 
-- 処理：`chat_messages` に `role = 'owner'` で入れ、同じトランザクションできっかけ（`origin = 'chat'`、`source_key = chat:<messageId>`。D-261）を入れる。ルーターに知らせる（FR-090）
+- 処理：`chat_messages` に `role = 'owner'` で入れ、同じトランザクションできっかけ（`origin = 'chat'`、`source_key = chat:<messageId>`。D-261）を入れる。ルーターに知らせる（FR-090）。メインのターンが動いている間に届いたものは `queued` のままで、ターンが終わったら次のターンで扱う（D-324）
 - レスポンス（202）：`{ "id": "0193...", "createdAt": "..." }`。同じ `Idempotency-Key` の 2 回目は 1 回目の応答を返す
 - 選択肢への返事は `kind = text`＋`replyTo`＋`choice`（何番目か）で送り、`chat_messages` には `kind = 'text'`・`reply_to` で入れる（D-274）
 - エラー：422 `VALIDATION_ERROR`（4,000 字を超えた・`choice` が選択肢にない）
@@ -34,23 +34,22 @@
 ```json
 {
  "items": [
-  { "id": "0193...", "role": "owner", "kind": "text", "body": { "text": "..." }, "reactions": ["♥"], "createdAt": "..." },
+  { "id": "0193...", "role": "owner", "kind": "text", "body": { "text": "..." }, "createdAt": "..." },
   { "id": "0193...", "role": "main", "kind": "choices", "body": { "text": "どれにしますか", "choices": ["1 番を予約", "2 番", "やめる"] }, "chosen": null, "createdAt": "..." },
   { "id": "0193...", "role": "main", "kind": "file", "body": { "name": "店の比較.html", "url": "/api/v1/files/0193.../店の比較.html", "sizeBytes": 12034 }, "createdAt": "..." }
  ],
  "mainState": "sleeping",
- "summaryTainted": false,
  "nextBefore": "0193..."
 }
 ```
 
 </details>
 
-- `reaction` の行は単独では返さず、先のメッセージの `reactions` に入れる。`mainState` は `sleeping`・`running`。`summaryTainted` はメインの今の先頭（`context_snapshots`）が `tainted = 1` で `untainted_at` が空のとき `true`。画面は「外の印あり」を出し、押すと SCR-025 の要約の欄へ行く（D-311）。確認のカード（API-087・019 の応答の `summaryTainted`）も同じ規則で、そのターンの先頭が今の先頭のままのときだけ `true`
+- `mainState` は `sleeping`・`running`
 
 ### API-121：POST /api/v1/presence
-- リクエスト：`{ "deviceId": "...", "visible": true, "typing": true }`（`deviceId` は PWA が初回に作って持つ UUID。ほかは任意）
-- 処理（D-269）：画面は前に出ている間、30 秒ごとに `visible: true` を送り、隠れたら `visible: false` を送る。本体は端末ごとに最後の心拍を覚え、60 秒以内の心拍があり、その端末の SSE がつながっていれば「見えている」とする（Web Push を送るかの判断：FR-017）。`typing` はメインが眠っていれば先温め（FR-098。5 分に 1 回まで、Should）
+- リクエスト：`{ "deviceId": "...", "visible": true }`（`deviceId` は PWA が初回に作って持つ UUID）
+- 処理：画面は前に出ている間、30 秒ごとに `visible: true` を送り、隠れたら `visible: false` を送る。本体は端末ごとに最後の心拍を覚え、60 秒以内の心拍があり、その端末の SSE がつながっていれば「見えている」とする（Web Push を送るかの判断：FR-017。心拍だけで、入力中の合図としては使わない）
 - レスポンス：204
 
 ### API-122：GET /api/v1/tasks
@@ -94,7 +93,7 @@
 
 ### API-142：POST /api/v1/routine-proposals/:proposalId/decision
 - リクエスト：`{ "decision": "approve" | "reject" }`
-- 処理：`pending` のときだけ。approve なら `routines` に行を作る（`created_by = 'main'`、提案の `tainted` を引き継ぐ）。メインは起こさず、`memory_log` に 1 行書く（次のターンで分かる。D-274）
+- 処理：`pending` のときだけ。approve なら `routines` に行を作る（`created_by = 'main'`、提案の `tainted` を引き継ぐ）。メインは起こさない
 - エラー：409 `CHECK_NOT_PENDING`、409 `ROUTINE_LIMIT`
 
 ### API-128：GET・POST /api/v1/webhooks
@@ -113,20 +112,18 @@
 
 ### API-129：POST /hooks/:hookId
 - 待ち受け：:8081 だけ。外からは Funnel の 8443 番だけが届く（FR-073・ADR-065・D-241）。Tailscale の身元は見ない
-- 処理：FR-096 の 1〜5。順番は「大きさ → 受け口 → 署名（`generic` は時刻も）→ 重複 → 件数（1 分の上限を超えたらまとめに足す）→ きっかけ」
-- レスポンス：202（受けた・重複・まとめに足した）。エラー：404 `HOOK_NOT_FOUND`・401 `HOOK_SIGNATURE_INVALID`・429 `HOOK_RATE_LIMITED`（1 時間 600 件を超えた）・413 `PAYLOAD_TOO_LARGE`。エラーの本文は `{ "error": { "code": "..." } }` だけ（中のことを漏らさない）
+- 処理：FR-096 の 1〜5。順番は「大きさ → 受け口 → 署名（`generic` は時刻も）→ 重複（配達 ID だけ）→ 件数（1 分 60 件を超えたら 429 で何も残さない）→ きっかけ」
+- レスポンス：202（受けた・重複）。エラー：404 `HOOK_NOT_FOUND`・401 `HOOK_SIGNATURE_INVALID`・429 `HOOK_RATE_LIMITED`（1 分 60 件を超えた）・413 `PAYLOAD_TOO_LARGE`。エラーの本文は `{ "error": { "code": "..." } }` だけ（中のことを漏らさない）
 - 署名が合わないものは記録にも本文を残さない（件数だけ `audit_logs` の `webhook.rejected` に 1 分ごとにまとめる）
 
-### API-130〜132・141・147：記憶
-- GET `/api/v1/memory?q=&tab=facts|log&cursor=`：
+### API-130・131・141：記憶
+- GET `/api/v1/memory?q=`（プロフィール。`q` があれば検索）：
 <details>
 <summary>例</summary>
 
 ```json
 {
- "facts": { "items": [{ "id": "0193...", "text": "告知ページは明るい色、絵文字なし", "rank": 3.2, "source": "main", "updatedAt": "..." }], "count": 42, "chars": 1830, "maxCount": 100, "maxChars": 4000 },
- "summary": { "snapshotId": "0193...", "text": "…", "createdAt": "...", "tainted": true, "taintSources": ["webhook"], "untaintedAt": null },
- "log": { "items": [{ "id": "0193...", "day": "2026-10-23", "text": "店探しのタスクで 3 件見つけた", "source": "system", "ref": "0193..." }], "nextCursor": "..." }
+ "facts": { "items": [{ "id": "0193...", "text": "告知ページは明るい色、絵文字なし", "rank": 3.2, "source": "main", "updatedAt": "..." }], "count": 42, "chars": 1830, "maxCount": 100, "maxChars": 4000 }
 }
 ```
 
@@ -134,9 +131,8 @@
 
 - POST `/api/v1/memory/facts`：`{ "text" }`（200 字まで）→ 201。`source = 'owner'`。エラー：409 `MEMORY_FULL`
 - PATCH `/api/v1/memory/facts/:factId`：`{ "text" }`。DELETE：`deleted_at` を入れる
-- DELETE `/api/v1/memory/log/:logId`：行と検索の行を消す
-- POST `/api/v1/memory/summary/:snapshotId/untaint`（API-147）：今の先頭の印を消す（D-310）。→ 200 `{ "untaintedAt" }`。エラー：409 `TURN_RUNNING`（メインのターンが動いている）・409 `SNAPSHOT_NOT_CURRENT`（今の先頭でない）・409 `NOT_TAINTED`。監査ログ `memory.untainted`
 - どれも監査ログ `memory.changed` を残し、SSE の `memory.updated` を出す。持ち主が変えた記憶は、次の要約まで先頭（④）を変えず、メインの次の `user` メッセージに「（本体から：持ち主が記憶を直した：…）」の枠で足す（FR-098・D-286）
 
 ## このドキュメントで決まったこと
-- D-196、D-212、D-220〜D-225、D-233、D-234、D-261、D-286、D-310、D-311（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-196、D-221〜D-223、D-225、D-234、D-261、D-286（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- v1.4：D-317（API-121 は心拍だけ）、D-318（webhook は 1 分 60 件で 429）、D-320（リアクションを消す）、D-324（差し込みをやめる）、D-325（記憶は 2 層）

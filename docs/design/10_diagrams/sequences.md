@@ -1,9 +1,9 @@
 # 10. 図：シーケンス図
-- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[10 図](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[10 図](README.md)
 
 > **3行で**
-> 1. v1.0 で足したのは 6 本：きっかけからターン・振り分け・報告まで（UC-054・055）・webhook（UC-057）・ルーチンの提案（UC-056）・オートレビュー（UC-059）・要約（UC-060）・VM が起きて眠る（UC-061）。
-> 2. v0.6 の 5 本（VM の 1 歩・確認・交代・ターミナル・再開）は、画面の番と VM が残る形に直した。v1.2 で 1 歩を操作の列と直前の確かめの形に直し、控えを取る・戻す（FR-100）を足した。
+> 1. きっかけからターン・振り分け・報告まで（UC-054・055）・webhook（UC-057）・ルーチンの提案（UC-056）・オートレビュー（UC-059）・要約（UC-060：ターンを始めるときの 1 経路）・VM が起きて眠る（UC-061：`box-browser` と `box-shell` の 2 コンテナ）の 6 本を描いた。
+> 2. VM の 1 歩・確認・交代・ターミナル・再開は、画面の番と VM が残る形で描いた。再開（FR-084）は必ず新しい世代で起こし直す。控え（FR-100）は 2 つのボリュームを 1 つの tar にまとめる。
 > 3. どの図も「SSE は合図だけで、中身は REST」の決まり（D-196）は省いて描いた。
 
 ---
@@ -27,6 +27,7 @@ sequenceDiagram
  T->>TK: tasks（queued → running）
  T-->>W: chat_messages（main）
  T->>T: 記憶の更新の歩み → done（眠る）
+ Note over IN,T: ターンが動いている間に来た chat は queued のまま。ターンが終わったらすぐ次のターンを始める
  Note over TK: 新しい文脈で歩む（VM・Web）
  TK->>IN: report → wakes（task_done）
  IN->>T: ターンを始める
@@ -64,10 +65,12 @@ sequenceDiagram
  participant T as メインのターン
  GH->>TS: POST :8443/hooks/k3q7...（X-Hub-Signature-256。Funnel は 8443 番だけ）
  TS->>H: 8443 番は / ごと流す（:8081 は POST /hooks/:hookId 以外を 404。D-305）
- H->>H: 大きさ → 受け口 → HMAC → 重複（配達 ID・本文） → 1 分 60 件（超えたらまとめに足す）
+ H->>H: 大きさ → 受け口 → HMAC → 1 分 60 件 → 重複（source_key の UNIQUE）
  alt 署名が合わない
   H-->>GH: 401（何も残さない）
- else 合う
+ else 1 分 60 件を超えた
+  H-->>GH: 429（何も残さない）
+ else 通った
   H->>IN: wakes（webhook・source_key = webhook:hookId:X-GitHub-Delivery・tainted）
   H-->>GH: 202
   IN->>T: ターン（汚染から始まる）
@@ -88,7 +91,7 @@ sequenceDiagram
  T->>W: routine_proposals（pending・7 日）・Web Push
  O->>W: ○
  W->>API: API-142 approve
- API->>API: routines（created_by = main・next_run_at）・memory_log に 1 行（メインは起こさない）
+ API->>API: routines（created_by = main・next_run_at）（メインは起こさない）
  Note over TM: 毎分
  TM->>IN: next_run_at を過ぎた → wakes（routine）
  TM->>TM: next_run_at を計算し直す
@@ -116,22 +119,23 @@ sequenceDiagram
  end
 ```
 
-### UC-060：留守の間に要約する
+### UC-060：ターンを始めるときに要約する
 ```mermaid
 sequenceDiagram
- participant TM as タイマー
+ participant IN as 受付・ルーター
  participant CTX as context
  participant C as Claude API
  participant DB as SQLite
- Note over TM: 毎分。最後のターンから 10 分・⑥が 6 万トークン超
- TM->>CTX: 要約して
- CTX->>C: 同じ先頭と履歴（1 時間のキャッシュが温かい）＋「ここまでを要約して」
- C-->>CTX: 要約
- alt 要約を始めてから turns が増えていない（同じトランザクションで確かめる。D-281）
-  CTX->>DB: context_snapshots（新しい先頭：①〜④＋要約・parts_hash・tainted（D-278））
-  Note over CTX: 次のターンから新しい先頭。履歴は持ち越さない（思考のブロックを残すと 400）
- else 要約の途中でターンが始まった
-  CTX->>CTX: 要約を捨てる（ターンを待たせない）。次の機会にやり直す
+ Note over IN: ターンを始めるとき（turns の行を作る前）。メインの履歴（⑥）が 6 万トークン超
+ IN->>CTX: 要約して
+ CTX->>C: 同じ先頭と履歴＋「ここまでを要約して」（外から来た内容の枠の中の指示は写さない）
+ alt 要約できた
+  C-->>CTX: 要約
+  CTX->>DB: context_snapshots（新しい先頭：①〜④＋要約・parts_hash）、usage_records（phase = summary・turn_id = NULL）
+  Note over CTX: 履歴は持ち越さない（思考のブロックを残すと 400）
+  IN->>IN: 新しい先頭でターンを始める（要約の間に来たきっかけも同じターンに入れる）
+ else 失敗した
+  IN->>IN: 要約せずにそのままターンを始める。次の機会にやり直す
  end
 ```
 
@@ -141,16 +145,16 @@ sequenceDiagram
  participant TK as タスク
  participant CU as computer（本体）
  participant BM as box-manager
- participant B as box-agent
+ participant BR as box-browser（box-agent）
+ participant SH as box-shell（shell-agent）
  participant TM as タイマー
  TK->>CU: read_page（VM が止まっている）
  CU->>CU: vm_op が none・vm_home_state が ok・空き 3GB 以上を確かめる
  CU->>CU: 1 つのトランザクションで vm_op = starting・boxes（starting・新しい世代）。ほかのタスクは waiting_vm
- CU->>BM: API-101（boxId・mode = normal）
- BM->>BM: ホストへの入りが断られているか（D-293。なければ 503）
- BM->>B: ホームのボリュームをつないで起こす（起動役 → 子を起こして capability を手放す）
- B->>B: Chromium のサンドボックスを確かめる（だめなら failed：D-304）
- B-->>CU: 応答 → running、vm_op = none
+ CU->>BM: API-101（boxId）
+ BM->>BR: box-browser を起こす（makase-browser-profile をつなぐ。Chromium 用の seccomp を付ける。使えないホストは --no-sandbox）
+ BM->>SH: box-shell を起こす（makase-vm-home をつなぐ）
+ BR-->>CU: 2 つとも応答 → running、vm_op = none
  CU->>CU: 画面の番を取る（screen_epoch +1）
  loop 毎分
   BM->>BM: ホームの大きさ・ホストの空きを測る（D-309）
@@ -172,7 +176,7 @@ sequenceDiagram
  participant CU as computer（本体）
  participant K as Kernel
  participant BM as box-manager
- participant B as box-agent
+ participant B as box-agent（box-browser）
  R->>R: 画面の番を取る（boxes.screen_task_id。取れなければ waiting_screen。取ったら screen_epoch +1）
  R->>R: task_steps に started（費用を予約）。今の screen_epoch を覚える
  R->>C: messages（スクショつき）
@@ -282,7 +286,7 @@ sequenceDiagram
  participant R as 実行役（本体）
  participant G as gateway
  participant BM as box-manager
- participant B as box-agent
+ participant B as shell-agent（box-shell）
  participant C as Claude API
  participant K as Kernel
  participant W as 画面
@@ -293,6 +297,7 @@ sequenceDiagram
  C-->>R: tool_use run_command(npm test)
  R->>BM: API-117 commands（actionId・timeoutSec。世代だけを確かめ、交代中も動く：D-296）
  BM->>B: 実行（VM の中なので判定しない）
+ Note over B: box-shell から外への通信は、egress が送り元のコンテナで見分けて terminal.allow_hosts の許可リストだけを通す
  B-->>R: ok・exitCode・output（64KB まで・汚染）
  R->>C: 出力を渡す（外の内容として扱う）
  Note over C,R: run_command・write_file を繰り返す（最大 200 回）
@@ -310,37 +315,25 @@ sequenceDiagram
 ```
 
 ### FR-084：再起動からの再開
-VM の世代を先に決め、確認・交代・コマンドの戻し方はその結果を使う（D-271・D-302）。
+本体の再起動では、止まっていない世代を必ず止め、次に使うときに新しい世代で起こし直す。
 ```mermaid
 sequenceDiagram
  participant CORE as 本体（起動）
  participant DB as SQLite
  participant BM as box-manager
- participant B as box-agent
  CORE->>DB: 終わっていないきっかけ・ターン・タスク・確認・交代・オートレビュー
  alt vm_op が restoring・rebuilding・snapshotting
   CORE->>BM: API-108・143 の GET
   BM-->>CORE: running（待つ）・done（片付ける）・failed（失敗の道）
- else vm_op が starting・stopping
-  CORE->>BM: API-102 止める（止め切る）
-  CORE->>DB: 世代を failed・stopped、vm_op = none
  end
- CORE->>BM: API-109 一覧
- alt 一覧に同じ世代が running でいる（本体だけの再起動）
-  CORE->>DB: その世代を使い続ける。画面の番を空に。pending の確認は expired（core_restarted）
-  CORE->>DB: 交代は expired、control = agent・control_epoch +1
-  CORE->>BM: API-113 control = agent（epoch）
-  CORE->>BM: API-117・103 の GET（actionId で結果だけを問い合わせる）
-  BM->>B: 実行したか・結果
-  B-->>CORE: done・executed は結果を記録、分からなければ expired・unknown_outcome
- else 一覧にない・違う世代
-  CORE->>BM: 残っている世代を止める（host_restart）
-  CORE->>DB: 画面の番を空に。pending の確認は expired（box_restarted）、コマンドは expired
- end
+ CORE->>BM: 止まっていない世代を止めさせる（host_restart）
+ CORE->>DB: boxes を failed（host_restart）、vm_op が starting・stopping なら none
+ CORE->>DB: 画面の番を空に。pending の確認は expired（box_restarted）、executing は unknown_outcome
+ CORE->>DB: 交代は expired、コマンドは expired、started のままの VM の操作は「実行されたか分からない」として Claude に伝える
  CORE->>DB: 表のほかの行を戻す（FR-084）
  CORE->>CORE: 過ぎたルーチンは 1 回だけ・過ぎた予約は動かす
  CORE->>CORE: running のターン・タスクを歩みの記録から続ける
- Note over CORE: 世代を止めたときは、次に使うときに新しい世代で起きる（ホームは残っている）
+ Note over CORE: 次に VM の道具を使うタスクが新しい世代で起こす。ホームは残っているのでファイルは入れ直さない。Claude には「VM を起こし直した。開いていたページは閉じた」と新しいスクショ
 ```
 
 ### FR-100：控えを取る・戻す
@@ -355,9 +348,9 @@ sequenceDiagram
  Note over TM: 毎日 4:00。VM が止まっていて vm_op が none
  TM->>CORE: vm_op = snapshotting、vm_snapshots（creating）
  CORE->>BM: API-143 POST（snapshotId）
- BM->>BM: 空きが「ホーム＋3GB」あるか（なければ 507 DISK_LOW）
+ BM->>BM: 空きが「2 つのボリュームの合計＋3GB」あるか（なければ 507 DISK_LOW）
  BM-->>CORE: 202
- BM->>BM: ホームを tar.zst で /snapshots に書く
+ BM->>BM: makase-browser-profile と makase-vm-home を 1 つの tar.zst（browser/ と home/）にして /snapshots に書く
  loop 5 秒ごと
   CORE->>BM: API-143 GET
  end
@@ -368,7 +361,7 @@ sequenceDiagram
  CORE->>CORE: 1 つのトランザクションで vm_op = restoring。VM を使ったタスクを halted（vm_replaced）、その確認を expired（vm_replaced）
  CORE->>BM: API-102 止める
  CORE->>BM: API-108 POST restore
- BM->>BM: 印ファイル（running）→ ホームを空にして控えを広げる
+ BM->>BM: 印ファイル（running）→ 2 つのボリュームを空にして控えを広げる
  BM-->>CORE: 202
  loop 5 秒ごと（30 分まで）
   CORE->>BM: API-108 GET

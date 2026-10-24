@@ -1,10 +1,10 @@
 # 04. 機能仕様：VM とこわい操作
-- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ 親：[04 機能仕様](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[04 機能仕様](README.md)
 
 > **3行で**
-> 1. VM は持ち主に 1 台。道具を使うときに起き、10 分使わなければ眠る（FR-074）。画面は 1 つで、画面を使うタスクは番を取る。ファイルとログインはホームに残り、控えから戻せる（FR-079・FR-100）。
+> 1. VM は持ち主に 1 台。実体は 2 つのコンテナ（`box-browser`・`box-shell`）の組で、道具を使うときに一緒に起き、10 分使わなければ一緒に眠る（FR-074・ADR-068）。画面は 1 つで、画面を使うタスクは番を取る。ファイルとログインは 2 つのボリュームに残り、控えから戻せる（FR-079・FR-100）。
 > 2. 変える操作は Kernel が合図で判定し、当たったら行き先の表で人（FR-077）かオートレビュー（FR-099）に回す。承認は中身のハッシュに結びつき、1 回だけ実行する。
-> 3. 交代（FR-078）・ターミナル（FR-086）・再開（FR-084）は v0.6 を引き継ぎ、VM が残る形に直した。
+> 3. 交代（FR-078）・ターミナル（FR-086）は VM が残る形に直した。再開（FR-084）は、本体の再起動のたびに VM を新しい世代で起こし直す（D-327）。
 
 ## 全体図
 ```mermaid
@@ -27,15 +27,15 @@ flowchart TD
 ---
 
 ### FR-074：VM の起動と眠り
-- VM は 1 台（コンテナ `box`）。ホームのボリューム `makase-vm-home`（`/home`。利用者 `agent` と `browser` のホーム）を、起こすたびにつなぐ（ADR-060）
+- VM は 1 台で、2 つのコンテナ `box-browser`（Chromium・画面・box-agent）と `box-shell`（コマンド・shell-agent）の組。box-manager が一緒に起こし、一緒に止め、どちらかが落ちたら世代ごと失敗にする（ADR-068）。ボリュームは `makase-browser-profile`（`/home/browser`。Chrome のプロフィール）と `makase-vm-home`（`/home/agent`。入れたツール・`~/work`）で、起こすたびにつなぐ（ADR-060）
 - 起こす：タスクが VM の道具（computer use・`open_url`・`read_page`・ターミナル）を初めて使うとき、VM が止まっていれば本体が box-manager に頼む（API-101）
 - 処理：
  1. VM の操作は 1 つずつ（D-251）：`workspace.vm_op` が `none` のときだけ、同じトランザクションで `vm_op = 'starting'` にして `boxes` に `starting` の行（新しい世代）を入れる。止まっていない世代は 1 つだけ（部分 UNIQUE）。`vm_op` がほかの値（止めている・控えを取っている・戻している・作り直している）の間は、タスクは `waiting_vm` で待つ。`vm_op` の遷移は [10 states](../10_diagrams/states.md#workspacevm_op)
  1a. ホストの空きディスクが 3GB を切っていれば起こさず、タスクに「ディスクが足りない」を返して持ち主に知らせる（D-265）
- 1b. ホームの状態（`workspace.vm_home_state`）が `ok` のときだけ、タスクのために起こす。`over_quota`（容量超え）のときは掃除のための起動（下）だけ、`broken`（戻し・作り直しに失敗した）のときは戻す・作り直すだけを受ける。タスクには「VM のホームが容量を超えている・壊れている」を返して持ち主に知らせる（D-294・D-301）
- 2. box-manager は、決まったイメージ・決まった資源の上限・VM のネットワーク・ホームのボリュームで VM を起こす（中身は [07](../07_architecture.md#vm-の中身)）。起こす前に、box ネットワークからホストへの入りが断られているかを確かめ、断られていなければ起こさない（503 `HOST_ISOLATION_MISSING`。D-293）。Docker が別の VM にある置き先（Docker Desktop・OrbStack・Colima）は、`isolated` モードで box ネットワークを作れたときだけ起こす。作れなければ起こさず `HOST_ISOLATION_MISSING` を返し、手順書の「Docker Engine に入れ替える」節を知らせる。別の VM かどうかを見分けられないときは規則の確かめだけで決める（D-314）
- 3. box-agent が応答したら running にし、`vm_op = 'none'` に戻す。60秒応答がなければ failed（`vm_op` も戻す）。Chromium のサンドボックスが使えない（ホストの前提が足りない）ときは `--no-sandbox` に逃げず failed（`stop_reason = 'sandbox_unavailable'`）にして、手順書の確かめ方を持ち主に知らせる（D-304）
- 4. box-agent は起動時に、Chrome のロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから Chromium を起こす（D-171）。起こすとき、HTTP キャッシュはホームの外の `/tmp/chromium-cache`（利用者 `browser`・700）にして、`--disk-cache-dir`・`--disk-cache-size`（512MB）を付ける。VM を止めると消えてよい（D-313）。VM の中のプロセスの起こし方（起動役・利用者）は [07](../07_architecture.md#vm-の中身)（D-291）
+ 1b. ホームの状態（`workspace.vm_home_state`）が `ok` のときだけ、タスクのために起こす。`broken`（戻し・作り直しに失敗した）のときは戻す・作り直すだけを受ける。ホームが 4GB を超えている間もタスクのためには起こさない（下の容量）。タスクには「VM のホームが容量を超えている・壊れている」を返して持ち主に知らせる（D-294）
+ 2. box-manager は、決まったイメージ・決まった資源の上限（`box-browser` はメモリ 1.5GB・CPU 1.5・プロセス 512、`box-shell` はメモリ 1GB・CPU 1・プロセス 256）・box ネットワーク・2 つのボリュームで 2 つのコンテナを起こす（中身は [07](../07_architecture.md#vm-の中身)）。`box-browser` には Chromium 用の seccomp プロファイル（リポジトリの `makase-browser-seccomp.json`）を付ける。Chromium のサンドボックスが使えないホストでは `--no-sandbox` で起こし、API-111 とホストの状態欄（SCR-023）に「ブラウザのサンドボックスなし」を出す（R-100）
+ 3. box-agent と shell-agent の両方が応答したら running にし、`vm_op = 'none'` に戻す。60秒応答がなければ failed（`vm_op` も戻す）。動いている間にどちらかが落ちたら世代ごと failed にする
+ 4. box-agent は起動時に、Chrome のロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから Chromium を起こす（D-171）。VM の中のプロセスの起こし方は [07](../07_architecture.md#vm-の中身)
 - 画面の番（D-205・D-217）：
  1. 画面を使う道具の前に、`boxes.screen_task_id` を条件つきの UPDATE（`WHERE screen_task_id IS NULL`）で取る。取れなければタスクは `waiting_screen` で待ち、空いたら待った順に渡す
  2. 返すとき（D-258）：タスクが終わった・取り消された・3 分画面の操作がない。3 分は通常の実行中だけ数え、LLM の呼び出し中・確認待ち・オートレビュー中・交代の頼み・交代中は数えない。確認が期限切れ・× になったら、その時点から数え始める。ターミナルは番なしで動く
@@ -43,35 +43,27 @@ flowchart TD
  4. 番が替わったら、本体は新しい番のタスクに「前のタスクの画面のまま。タブを確かめて」と新しいスクショを渡す
 - `boxes` の1行が「VM の世代」。起こし直すと新しい行（新しい世代）になる。承認・交代・操作は世代に結びつく
 - 眠る（止める）：タイマーが毎分、`last_activity_at` から 10 分たち、画面の番・交代・動いているコマンドがない世代を止める（`vm_op = 'stopping'`、`stop_reason = 'idle'`。D-214）。ほかに：持ち主が止めた（API-099）・控えに戻す・作り直す（FR-100）・落ちた・ホームが容量を超えた・ホストの空きが足りない
-- 容量（D-265 を D-300・D-309 で直した）：
- 1. 測るのは box-manager だけ。VM が動いている間、毎分ホームの大きさと、ホストの空き（ボリュームのあるファイルシステム）を測る。Chromium の HTTP キャッシュ（`/tmp/chromium-cache`・上限 512MB）はホームの外なので、ホームの測りにも控えにも入らない（D-313）。本体のタイマーは毎分 API-109 で結果を読むだけで、自分では測らない
- 2. ホームが 4GB を超えたら、box-manager が動いているコマンドを止めて VM を止める（`stop_reason = 'disk_quota'`）。本体は次の API-109 で知り、`vm_home_state = 'over_quota'` にして持ち主に知らせる。戻り方は、控えに戻す・作り直す（FR-100）・掃除のための起動（下）
+- 容量（D-265・D-309）：
+ 1. 測るのは box-manager だけ。VM が動いている間、毎分ホーム（`makase-browser-profile` と `makase-vm-home` の合計）の大きさと、ホストの空き（ボリュームのあるファイルシステム）を測る。本体のタイマーは毎分 API-109 で結果を読むだけで、自分では測らない
+ 2. ホームが 4GB を超えたら、box-manager が動いているコマンドを止めて VM を止める（`stop_reason = 'disk_quota'`）。ホームが 4GB を超えている間は、タスクのために VM を起こさず、設定の VM の欄に大きさと 3 つの操作（「ブラウザのデータを消す」（FR-079）・「控えに戻す」・「作り直す」（FR-100））を出して持ち主に知らせる
  3. 動いている間にホストの空きが 3GB を切ったら、box-manager が同じく VM を止める（`stop_reason = 'disk_low'`）。空きが 3GB 以上に戻るまで起こさない
  4. box-manager が自分で止めるのは安全のため（本体の `vm_op` を待たない）。止めたあとの `boxes` の行は本体が API-109 で閉じる
-- 掃除のための起動（D-301）：
- 1. `vm_home_state = 'over_quota'` のとき、持ち主は設定の VM の欄で「掃除のために起こす」（API-145）。VM は `boxes.mode = 'cleanup'` の世代で起きる。タスクは受けない：画面の番・交代・ターミナルの道具は使えず、VM を使いたいタスクは `waiting_vm` で待つ
- 2. 画面に `/home/agent` の下の大きいフォルダ（上位 20 個と大きさ）を出し、持ち主が選んで消す（API-145 → 内部 API-146。利用者 `agent` で消す）。Chrome のプロフィールは「ブラウザのデータを消す」（FR-079）で消す
- 3. 容量を超えていても止めない（増やす操作がない）。ホストの空きが 3GB を切っていても起こせる
- 4. ホームが 4GB を下回ったら `vm_home_state = 'ok'`。持ち主が「終える」か、10 分操作がなければ止める。次にタスクが道具を使うときに普通の世代（`mode = 'normal'`）で起きる
 - 状態：[ステータス定義](README.md#ステータス定義)の `boxes.status`
 
 ### FR-079：ブラウザのデータ
-- Chrome のプロフィールは VM のホームの `/home/browser/profile` に 1 つ（全エージェントで共通。D-205）。フォルダは利用者 `browser` だけが読める（700。D-216）
-- 消す：持ち主が設定の VM の欄で「ブラウザのデータを消す」（API-138）。画面の番が使われている間は 409 `SCREEN_IN_USE`。VM が動いていれば box-agent が Chromium を止めてプロフィールを消し、起こし直す
-- プロフィールの大きさを VM が止まるときに測る（`boxes.profile_bytes`）。1GB を超えたら設定画面に知らせを出す
-- プロフィールの中に残る大きなもの（Service Worker の CacheStorage・IndexedDB など）はフラグでは外に出せない。この大きさは上のホームの測りと、「掃除のための起動」・「ブラウザのデータを消す」で扱う（D-301・D-313）
-- HTTP キャッシュはプロフィールに入れない（`/tmp/chromium-cache`。VM を止めると消える。D-313）。code cache などもフラグで一緒に移るかは実装のときに確かめる
+- Chrome のプロフィールは `box-browser` のボリューム `makase-browser-profile`（`/home/browser`）に 1 つ（全エージェントで共通。D-205）。使うのは利用者 `browser` だけで、`box-shell` にはつながない（別コンテナ）
+- 消す：持ち主が設定の VM の欄で「ブラウザのデータを消す」（API-138）。画面の番が使われている間は 409 `SCREEN_IN_USE`。box-manager が世代を止め、`makase-browser-profile` のボリュームを空にして、次に起こす
+- ホームが 4GB を超えたときの戻り方の 1 つでもある（FR-074 の容量）
 - エージェントを消しても消えない（BR-07）
 
 ### FR-075：コンピューターユースの操作
 - 道具：Claude の computer use ツールと、Agent-Team-Open の道具 `open_url`・`read_page`・`confirm_action`・`request_takeover`。振り分け先のエージェントだけが持つ（メインには渡さない：D-236）
  - 使う前に画面の番を取る（FR-074）。番がなければ、本体が取ってから最初の歩みを返す
  - `confirm_action(target, summary, category)`：`category` は `publish`・`pay`・`delete`・`send`・`account`・`other`（D-228）。行き先は FR-076 の表
- - computer use ツールは、Anthropic 直と Vertex では `computer_toolset_20260801`（名前も画面の大きさも渡さない。座標は返したスクショの画素で数える）、Bedrock では `computer_20251124`（`display_width_px`・`display_height_px` に 1280×800）（FR-087）
+ - computer use ツールは `computer_toolset_20260801`（名前も画面の大きさも渡さない。座標は返したスクショの画素で数える）
  - `read_page()` はページの構造を読む（D-194）。box-agent が CDP のアクセシビリティツリーから、見えているボタン・リンク・入力欄・見出しの一覧（役割・名前・中心の座標・入力欄なら今の値）を文で返す。最大 200 個・16KB。秘密の欄（T-1 の対象）の値は返さない。汚染する（BR-06）。Claude は一覧の座標でクリックできるので、スクショを撮らずに進める歩みが増える（R-82）
  - `open_url(url)` はアドレスバーの代わり。CDP の `Page.navigate` で開く。`http`・`https` だけ受け、`javascript:`・`file:`・`chrome:` などは断る。確認するドメイン（`browser.confirm_domains`）への `open_url` は T-2 として確認に回し、それ以外はページを開くだけの読み取りとして判定しない（D-158）
- - VM の中で作ったページの点検（D-266）：`http://127.0.0.1:8000`〜`8099` だけは egress を通さずに開ける。ターミナルで簡易サーバーを立てて開く。box-agent・VNC は 127.0.0.1 で待ち受けないので、ここから管理の口には届かない
-   - 書き方（D-303）：Chromium の除外リストはポートの範囲を書けず、ループバックは書かなくてももともとプロキシを通らない（たぶん。実装のときに確かめる）。そこで `--proxy-bypass-list` に `<-loopback>`（ループバックもプロキシに通す）と `127.0.0.1:8000`〜`127.0.0.1:8099` の 100 個を並べる。ほかのポートの 127.0.0.1・`localhost`・`[::1]` は egress に行き、egress がグローバルでないアドレスとして断る。効き方は隔離の試験（11 §11）で確かめる
+ - VM の中で作ったページの点検：簡易サーバーは `box-shell` の中で立てる。Chromium は `http://shell:8000`〜`8099`（box ネットワーク上の `box-shell` のコンテナ名 `shell`）を開く。`--proxy-bypass-list` に `shell` を書き、このホストだけ egress を通さない。shell-agent の管理の口はトークンで守られているので、Chromium から届いても何もできない。効き方は隔離の試験（11 §11）で確かめる
 - 処理（1歩）：
  1. Claude が操作を返す。toolset では 1 つの返事に操作がいくつも並ぶ（`tool_use` が複数。D-255）。1 歩＝1 つの返事の操作の列で、並んだ順に 2〜4 を行う。`confirm_action` は、同じ列の次の変える操作を指す
  2. 操作の種類で分ける
@@ -140,7 +132,7 @@ flowchart TD
    | 中身が違う | `expired`（`page_changed`）。新しい確認は作らず、Claude に新しいスクショと「画面が変わったので実行しなかった」を返して操作を決め直させる（T-6・`unknown_outcome` と同じ扱い。D-159） |
    | 答えがない・本体が落ちた | `unknown_outcome`。Claude に「実行されたか分からない」と新しいスクショで伝える |
  5. × → `rejected`。期限 → `expired`（`approval_timeout`）。どちらも Claude に結果を返して続ける
- 6. 交代・VM の起こし直しで、その VM の世代の `pending` は `expired`（`taken_over`・`box_restarted`）。本体だけの再起動で同じ世代を使い続けるときは `core_restarted`（D-271・D-302）
+ 6. 交代・VM の起こし直しで、その VM の世代の `pending` は `expired`（`taken_over`・`box_restarted`）
  7. タスクの取り消し（API-016）で、そのタスクの `pending` の確認は `expired`（`task_cancelled`）、答えを待っているオートレビューは結果を捨てる（D-250）
  8. 控えに戻す・作り直す（FR-100）で止めたタスクの `pending` の確認は `expired`（`vm_replaced`）、答えを待っているオートレビューは結果を捨てる（D-308）
 - 実行の直前に確かめることは FR-075 の 3a（人の ○ もオートレビューの `pass` も同じ。D-307）
@@ -171,8 +163,7 @@ flowchart TD
  | 状態 | 戻し方 |
  |---|---|
  | `wakes.status = queued` | そのまま。ルーターが並べ直す |
- | `wakes.status = attached` | `queued` に戻す（`consumed_turn_id = NULL`）。ルーターが並べ直し、続けるターンがあればまた結びつける（D-276） |
- | 道具の歩み（`tool:<callId>`）が `started` のまま | `repeatable = 0` なのでやり直さない。`tool_call_id` で作ったもの（タスク・メッセージ・予約・提案・メモ・コネクタの書き込みの Intent）を探す。`steer_task` は `source_key = steer:<toolCallId>` のきっかけ、`cancel_task` はタスクが `cancelled` かで確かめる。あれば `done`、なければ「実行されたか分からない」を返して続ける（D-249・D-287） |
+| 道具の歩み（`tool:<callId>`）が `started` のまま | `repeatable = 0` なのでやり直さない。`tool_call_id` で作ったもの（タスク・メッセージ・予約・提案・コネクタの書き込みの Intent）を探す。`steer_task` は `source_key = steer:<toolCallId>` のきっかけ、`cancel_task` はタスクが `cancelled` かで確かめる。あれば `done`、なければ「実行されたか分からない」を返して続ける（D-249・D-287） |
  | `workspace.vm_op` が `restoring`・`rebuilding` | API-108 の GET で box-manager に聞く（D-294）。動いていれば終わるまで待つ。終わっていれば片付ける（`none`・監査ログ）。失敗なら失敗の道（FR-100）。box-manager も落ちていたときは、box-manager が起動時に印ファイルを見て最初からやり直す（D-251）。終わるまで VM を起こさない |
  | `workspace.vm_op` が `snapshotting` | API-143 の GET で box-manager に聞く（D-295）。動いていれば待つ。終わっていれば控えを `ready` に、失敗・box-manager が知らなければ `failed`（書きかけのファイルは box-manager が消す）。そのあと `none` |
  | `workspace.vm_op` が `starting` | その世代を止め（API-102）、`failed`（`host_restart`）にして `none` に戻す |
@@ -183,24 +174,24 @@ flowchart TD
  | `tasks.status = provisioning` | `queued` に戻す |
  | `tasks.status = running` | 歩みの記録をなぞって続ける |
  | `tasks.status = awaiting_approval`（API の書き込み） | 確認を待ち続ける（承認は SQLite に残っている） |
- | `tasks.status = awaiting_approval`（ブラウザ） | 確認は `expired`。理由は下の「VM の世代」の行の結果で決める：同じ世代を使い続けるなら `core_restarted`、止めたなら `box_restarted`（D-302）。running として続ける |
+| `tasks.status = awaiting_approval`（ブラウザ） | 確認は `expired`（`box_restarted`）にして、running として続ける |
  | `tasks.status = executing`（API の書き込み） | 今の `unknown_outcome` の流れ（Cloudflare 版のまま） |
- | `browser_checks.status = executing` | 同じ世代を使い続けるなら、`actionId` で box-agent に結果だけを問い合わせる（API-103 の GET。実行はしない）。実行していれば `executed`、そうでなければ `unknown_outcome`。世代を止めたなら `unknown_outcome` |
- | `auto_reviews.verdict` が空のまま | 人の確認に回す（`pending` の確認を作る）。同じ世代を使い続けないなら、確認を作らず Claude に「VM を起こし直した」を返す |
- | `takeovers.status` が `requested`・`active` | `expired`。同じ世代を使い続けるなら `control = 'agent'`・`control_epoch` を 1 増やし、API-113 で box-agent に伝える（D-302）。`control` の画面の接続はもうない（本体が落ちたので） |
+| `browser_checks.status = executing` | `unknown_outcome` |
+| `auto_reviews.verdict` が空のまま | 確認を作らず、Claude に「VM を起こし直した」を返す |
+| `takeovers.status` が `requested`・`active` | `expired`。`control` の画面の接続はもうない（本体が落ちたので） |
  | LLM の呼び出しが `started` のまま | 予約した見積もりの費用で精算し（FR-013）、呼び出しはやり直す |
- | `sandbox_commands.status = running` のまま | 同じ世代を使い続けるなら、`actionId` で box-agent に結果だけを問い合わせる（API-117 の GET。実行はしない）。終わっていれば結果で `done`、動いていれば終わりを待つ、box-agent が知らなければ `expired`。世代を止めたなら `expired`。`expired` のときは、やり直さず Claude に「前のコマンドが実行されたか分からない」と伝える（FR-086・D-302） |
+| `sandbox_commands.status = running` のまま | `expired`。やり直さず、Claude に「前のコマンドが実行されたか分からない」と伝える（FR-086） |
  | `routines.next_run_at` が過ぎている | 1 回だけ動かす（FR-094） |
  | `scheduled_wakes` の `at` が過ぎている | 動かす（FR-095） |
- | VM の世代が止まっていない（`vm_op` が `none`） | box-manager の一覧（API-109）に同じ世代が `running` でいれば、そのまま使う（本体だけの再起動。D-271）。一覧にない・違う世代なら止める（`host_restart`）。どちらでも画面の番は空にする（次に取るときに `screen_epoch` が増える）。この行をほかの VM の行より先に決め、確認・交代・コマンド・オートレビューの戻し方の「同じ世代を使い続けるか」はこの結果を使う（D-302） |
+| VM の世代が止まっていない（`vm_op` が `none`） | box-manager に止めさせ（`host_restart`）、`boxes` を `failed`（`host_restart`）にする。画面の番は空にする（次に取るときに `screen_epoch` が増える）。VM の行はこの行の結果（必ず新しい世代で起こし直す）を前提に戻す（D-327） |
  | `push_outbox` の送っていない行 | 送り直す（FR-017） |
 
 - VM を新しい世代で起こし直すときは、VM を使っていたタスクが次に VM の道具を使うときに起こす。ホームは残っているので、ファイルは入れ直さない。Claude には「VM を起こし直した。開いていたページは閉じた」と新しいスクショを渡し、記録の古いスクショは使わない
-- `started` のまま残った VM の操作（`box:<actionId>`）は、やり直さない。同じ世代を使い続けるなら API-103 の GET で実行したかを問い合わせ、分かればその結果を、分からなければ「前の操作が実行されたか分からない」を Claude に伝える
+- `started` のまま残った VM の操作（`box:<actionId>`）は、やり直さず、「前の操作が実行されたか分からない」を Claude に伝える
 - 戻しは本体の起動から 60 秒以内に終える（NFR-071）。ただし box-manager のホームの入れ替え・控えの終わりを待つ時間は含めない（その間は `vm_op` のまま VM を起こさない。D-294）
 
 ### FR-086：VM のターミナル
-- 入力：Claude の道具の呼び出し。box-agent が VM の中で実行する（内部 API-117）。VM のイメージにシェル（bash）・git・Node・Python・よく使う CLI を入れる。持ち主やエージェントが入れたツールはホームに残る（ADR-060）
+- 入力：Claude の道具の呼び出し。`box-shell` の shell-agent が実行する（内部 API-117）。`box-shell` にシェル（bash）・git・Node・Python・よく使う CLI を入れる。持ち主やエージェントが入れたツールはホーム（`makase-vm-home`）に残る（ADR-060）
 - 道具（6つ。旧 sandbox の名前。`sandbox_commands.tool` の CHECK と同じ）：
 
  | 道具 | 引数・働き |
@@ -213,22 +204,19 @@ flowchart TD
  | `delete_file` | ファイルを消す |
 
 - 処理：
- 1. 実行（API-117）：タスクの中では 1 つずつ。VM 全体で同時に 2 本まで（D-217。空くまで `running_command` の前で待つ）。画面の番は要らない。`actionId` と VM の世代（パスの `boxId`）だけを確かめ、同じ `actionId` は 2 回実行しない。`control`・`control_epoch`・画面の番は確かめない（交代中も動く。D-258・D-296）。コマンドは利用者 `agent` で動き（box-agent がコマンドの実行役に渡す：07）、Chrome のプロフィールのフォルダ（利用者 `browser`・700）は読めない（D-216）。既定の `cwd` はタスクのフォルダ `~/work/<taskId>`（決まりで、強制はしない）
+ 1. 実行（API-117）：タスクの中では 1 つずつ。VM 全体で同時に 2 本まで（D-217。空くまで `running_command` の前で待つ）。画面の番は要らない。`actionId` と VM の世代（パスの `boxId`）だけを確かめ、同じ `actionId` は 2 回実行しない。`control`・`control_epoch`・画面の番は確かめない（交代中も動く。D-258・D-296）。コマンドは shell-agent が利用者 `agent` で動かす。Chrome のプロフィールは別コンテナの `box-browser` にあり、見えない。既定の `cwd` はタスクのフォルダ `~/work/<taskId>`（決まりで、強制はしない）
  2. 判定しない：VM の中のコマンドは Kernel で判定しない（BR-08）。VM には資格情報がなく、外へは許可リストだけ。壊したら控えから戻す・作り直す（FR-100。ADR-061）
- 2a. コマンドから届かないもの（D-252 を D-290・D-291 で直した）：
+ 2a. コマンドから届かないもの：
    - Chrome の操作口（CDP）は TCP では開かず、Chromium を起こすときのパイプ（`--remote-debugging-pipe`）だけ。パイプの端は box-agent だけが持つ
-   - X（Xvfb）は TCP と抽象名前空間のソケット（`@/tmp/.X11-unix/X0`）で待ち受けない（`-nolisten tcp -nolisten local`）。ファイルのソケットだけにし、Xauthority の鍵（`-auth`。`/home/browser` の下・700）で確かめる。box-agent と x11vnc は鍵を起動役から fd で受け取る。ファイルの権限だけでは抽象名前空間のソケットを守れないため（D-290）
-   - box-agent・VNC は box ネットワークのアドレスにだけ結び、世代ごとのトークンで確かめる
-   - トークン・X の鍵・egress の Chromium 用の資格は、環境変数にも引数にも載せず、起動役から fd で渡す（引数は `/proc/<pid>/cmdline` で誰でも読める）。`/proc` の `hidepid` には頼らない（capability がないので付けられない）。ほかの利用者のプロセスの環境・fd・メモリは、同じ利用者でないので読めない（D-291）
+   - X・CDP・VNC・box-agent・Chrome のプロフィールは `box-browser` の中にあり、別コンテナなので `box-shell` のコマンドからは届かない。box-agent・VNC は box ネットワークのアドレスにだけ結び、世代ごとのトークンで確かめる
  2b. ルートは読み取りだけなので `apt` は使えない。残るのはホームの下に入れたもの（`npm` の prefix・`pip --user`・`~/.local`）（D-272）
- 3. 外向きの通信：egress は資格（プロキシ認証）のない通信を断る（D-292）。資格は 2 つで、egress は資格ごとに許可リストを分ける
-   | 資格 | 持つもの | 許可 |
-   |---|---|---|
-   | ターミナル用 | コマンドのプロセス（`HTTPS_PROXY` に入れる。コマンドから見えてよい） | `terminal.allow_hosts`。既定は `github.com`・`registry.npmjs.org`・`pypi.org`・`files.pythonhosted.org` |
-   | Chromium 用 | box-agent だけ。Chromium へは、プロキシの認証を求められたときに box-agent が CDP で答えて渡す（`Fetch.authRequired`。たぶん効く。実装のときに確かめ、だめなら `/home/browser`（700）の下に置く拡張で付ける） | アドレスの判定だけ（今までどおり） |
-   - どちらも世代ごとに box-manager が作る（名前は `terminal:<boxId>`・`browser:<boxId>`、合言葉は box-manager と egress だけが持つ秘密 `EGRESS_SECRET` での HMAC。egress は計算し直して確かめるので、egress に伝える口は要らない）。コマンドが資格を外して egress につなぐと断られる（Chromium 扱いにならない）
+ 3. 外向きの通信：egress は通信の送り元のコンテナで許可を分ける。box-manager は世代を起こすとき、2 つのコンテナの box ネットワーク上のアドレスを egress に伝える。知らない送り元は断る
+   | 送り元 | 許可 |
+   |---|---|
+   | `box-shell`（コマンド） | `terminal.allow_hosts`。既定は `github.com`・`registry.npmjs.org`・`pypi.org`・`files.pythonhosted.org` |
+   | `box-browser`（Chromium） | アドレスの判定だけ（グローバルでないアドレスを断る）。例外は `shell`（FR-075 の点検） |
  4. リポジトリの出し入れ（API-118）：clone はしない。本体の gateway が GitHub から tar を取り、VM に入れる。変更は tar として取り出し、差分にして PR の Intent に乗せる（確認つき。FR-081）。push・PR・外部 API への書き込みは VM からは直接できない（資格情報を VM に渡さない）
- 4a. tar の作り方（D-306）：VM の中の tar は、コマンドの実行役（利用者 `agent`）が作る・広げる。シンボリックリンクはたどらず（リンクのまま入れる）、本体は受け取った tar を広げるときにシンボリックリンク・ハードリンク・装置ファイル・絶対パス・`..` を含むものを捨てる。`~/work/<taskId>` に Cookie へのリンクを置かれても、`agent` は中を読めず、リンクは写らない。成果物の写し（D-244）も同じ
+ 4a. tar の作り方（D-306）：VM の中の tar は、shell-agent が利用者 `agent` で作る・広げる。シンボリックリンクはたどらず（リンクのまま入れる）、本体は受け取った tar を広げるときにシンボリックリンク・ハードリンク・装置ファイル・絶対パス・`..` を含むものを捨てる。`~/work/<taskId>` に Cookie へのリンクを置かれても、Cookie のファイルは別コンテナ（`box-browser`）にあってそもそも見えない。成果物の写し（D-244）も同じ
  5. 汚染：コマンドの出力・読んだファイルは外の内容として汚染する（BR-06 と同じ）
  6. 上限（NFR-080）：1 コマンド 120 秒・出力 64KB（超えた分は切って知らせる）・1 タスク 200 回（`terminal.max_commands`）。回数を超えたら halted（`budget_exceeded`）
  7. 記録：`sandbox_commands`（TBL-040）に 1 コマンド 1 行（`box_id`・`task_id`・`tool`・`args`・`status`・`ok`・`output`（64KB まで）・`exit_code`）
@@ -240,7 +228,7 @@ flowchart TD
  | 世代が違う | 409 | `STALE_CONTROL` |
  | 1 コマンドが 120 秒を超えた | 結果に打ち切りを入れて返す（`ok = false`） | — |
  | 回数の上限 | タスクを halted（`budget_exceeded`） | — |
-- 補足：再開は [FR-084](#fr-084再起動から続ける)。方針は D-178・D-209・ADR-054・ADR-061
+- 補足：再開は [FR-084](#fr-084再起動から続ける)。方針は D-178・D-209・ADR-054・ADR-061・ADR-068
 
 
 ### FR-099：オートレビュー
@@ -264,16 +252,16 @@ flowchart TD
 ### FR-100：VM の控えと作り直し
 - 控え（`vm_snapshots`、TBL-052）：
  1. タイマーが毎日 1 回（既定 4:00）、VM が止まっているときに box-manager に頼む（API-143）。動いていれば、止まるまで待つ（その日のうち）
- 2. box-manager はホームのボリュームを tar（zstd）にして、控え専用のボリューム `makase-vm-snapshots` の `/snapshots/<id>.tar.zst` に書く（D-309）。3 世代を超えたら古いものを消す（D-215）
+ 2. box-manager は `makase-browser-profile` と `makase-vm-home` の 2 つを 1 つの tar（zstd）にして（中は `browser/` と `home/`）、控え専用のボリューム `makase-vm-snapshots` の `/snapshots/<id>.tar.zst` に書く（D-309）。3 世代を超えたら古いものを消す（D-215）
  3. 持ち主は「今すぐ控えを取る」もできる（API-133）。そのときは VM を止めてから取る（動いているタスクは VM 待ち）
- 4. 控えを取る間は `vm_op = 'snapshotting'`（D-251）。API-143 は受けたら 202 で返し、box-manager が裏で書く。本体は 5 秒ごとに API-143 の GET で終わりを確かめる（本体が落ちても box-manager は書き続けるので、再開で聞き直せる：D-295）。書き終えて確かめてから古い控えを消す。失敗したら古い控えは消さない。書く前に、ホストの空きが「今のホームの大きさ＋3GB」に足りなければ取らずに知らせる（D-265・D-300）
+ 4. 控えを取る間は `vm_op = 'snapshotting'`（D-251）。API-143 は受けたら 202 で返し、box-manager が裏で書く。本体は 5 秒ごとに API-143 の GET で終わりを確かめる（本体が落ちても box-manager は書き続けるので、再開で聞き直せる：D-295）。書き終えて確かめてから古い控えを消す。失敗したら古い控えは消さない。書く前に、ホストの空きが「今の 2 つのボリュームの合計の大きさ＋3GB」に足りなければ取らずに知らせる（D-265）
 - 戻す（API-134）・作り直す（API-135）：
  1. 確かめのダイアログ（「動いているタスク N 件が止まります」）のあと、1 つのトランザクションで `vm_op = 'restoring'`（`rebuilding`）にし、VM を使っているタスクを `halted`（`vm_replaced`）で閉じてメインに報告する（D-268）。画面の番を空にし、VM を止める
    - 「VM を使っているタスク」は、終わっていないタスクのうち、VM の道具を一度でも使ったもの（どの世代でも。`browser_actions`・`sandbox_commands` に行がある）と、画面の番を持つもの（D-308）。眠っている間に古い世代で `~/work` を作ったタスクも入る。まだ VM を使っていない `waiting_vm` のタスクは止めず、戻したあとの VM で始める
    - 止めたタスクの `pending` の確認は `expired`（`vm_replaced`）、答えを待っているオートレビューは結果を捨て、`queued` のコマンドは `expired`（D-308）
- 2. box-manager は印ファイル（`{ action, snapshotId, status: "running" }`）を書いてから、ホームのボリュームを空にして控えの中身を入れる（作り直しは空のまま、イメージの既定のホームを入れる）。API-108 は受けたら 202 で返し、本体は 5 秒ごとに API-108 の GET で終わりを確かめる（D-294）
+ 2. box-manager は印ファイル（`{ action, snapshotId, status: "running" }`）を書いてから、2 つのボリューム（`makase-browser-profile`・`makase-vm-home`）を空にして控えの中身を入れる（作り直しは空のまま、`makase-vm-home` にはイメージの既定のホームを入れる）。API-108 は受けたら 202 で返し、本体は 5 秒ごとに API-108 の GET で終わりを確かめる（D-294）
  3. 終わったら box-manager は印ファイルを消す。本体は `vm_op = 'none'`・`vm_home_state = 'ok'` に戻し、監査ログに `vm.restored`・`vm.rebuilt`。次に VM の道具を使うときに新しい世代で起きる
 - 失敗の道（D-294）：box-manager が「失敗した」と答えたら（落ちずに失敗した）、印ファイルを `status: "failed"` にして残す。本体は `vm_op = 'none'`・`vm_home_state = 'broken'` にし、監査ログに `vm.restore_failed`、持ち主に知らせる。`broken` の間は VM を起こさず（API-101 も印ファイルで断る）、戻す・作り直すだけを受ける。次の戻し・作り直しが印ファイルを上書きする
 - 時間の上限（D-294）：`vm_op_started_at` から `starting` 2 分・`stopping` 2 分・`snapshotting` 30 分・`restoring`・`rebuilding` 30 分。タイマーが毎分見て、超えたら box-manager に打ち切りを頼む（API-108・143 の DELETE）。止めたと答えたら失敗の道へ（控えなら `failed`、`starting`・`stopping` は世代を `failed` にして `none`）。答えなければ `vm_op` はそのままにして持ち主に知らせる（box-manager を起こし直せば、印ファイルから続きを決める）
-- 控えには Chrome のプロフィール（ログイン状態）が入る。控え専用のボリュームに置き、本体のデータのボリュームとは分ける（本体はつながない。box-manager はデータのボリュームをつながない：D-309）。書き出し（FR-082）とバックアップ（NFR-070）には入れない
+- 控えには Chrome のプロフィール（ログイン状態）が入る。控え専用のボリュームに置き、本体のデータのボリュームとは分ける（box-manager がつなぐのは `makase-browser-profile`・`makase-vm-home`・`makase-vm-snapshots` の 3 つで、データのボリュームはつながない：D-309）。4GB の上限は 2 つの合計。本体のバックアップ（NFR-070）には入れない
 - `vm_op` と `vm_home_state` の遷移は [10 states](../10_diagrams/states.md#workspacevm_op)。流れは [10 sequences](../10_diagrams/sequences.md#fr-100控えを取る戻す)

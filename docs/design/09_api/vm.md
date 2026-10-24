@@ -1,10 +1,10 @@
 # 09. API設計：VM・確認・設定の API（v0.6 から引き継ぐ API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.3（2026-10-24） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[09 API設計](README.md)
 
 > **3行で**
-> 1. VM は 1 台なので、画面向けの VM の API は `/api/v1/vm/*` になった（v0.6 の `/boxes/:boxId`）。控え・戻す・作り直す（API-133〜135）と、v1.2 で掃除のための起動（API-145）を足した。
+> 1. VM は 1 台なので、画面向けの VM の API は `/api/v1/vm/*` になった（v0.6 の `/boxes/:boxId`）。控え・戻す・作り直す（API-133〜135）を足した。VM の実体は `box-browser`・`box-shell` の 2 つのコンテナの組で、画面向けの API では 1 つの VM として見せる。
 > 2. ブラウザの確認の ○ / × は、API の書き込みの承認（API-019）とは別の口（API-110）。実行は1回だけで、中身が同じときだけ。
-> 3. パック・設定・引っ越し・つなぎ方は v0.6 の形のまま、v1.0 の欄を足した。内部 API は [下](#内部-apibox-manager)。
+> 3. パック・設定・つなぎ方は v0.6 の形のまま、v1.0 の欄を足した。内部 API は [下](#内部-apibox-manager)。
 
 ---
 
@@ -19,8 +19,8 @@
  "screenTask": { "id": "0193...", "title": "店探し" }, "waitingScreen": 1,
  "takeoverRequest": null, "lastShotUrl": "/api/v1/shots/0193....png",
  "lastActionSummary": "日付を選んでいます", "vmOp": "none",
- "vmHomeState": "ok", "mode": "normal",
- "homeBytes": 1834000000, "homeLimitBytes": 4294967296, "profileBytes": 210000000,
+ "vmHomeState": "ok",
+ "homeBytes": 1834000000, "homeLimitBytes": 4294967296,
  "lastSnapshot": { "id": "0193...", "createdAt": "2026-10-24T04:00:00+09:00" }
 }
 ```
@@ -28,7 +28,7 @@
 </details>
 
 - 眠っているときは `status: "stopped"` と最後のスクショ
-- `vmHomeState`：`ok`・`over_quota`（掃除のための起動だけ：API-145）・`broken`（戻す・作り直すだけ）（D-294・D-301）。`mode`：`normal`・`cleanup`
+- `vmHomeState`：`ok`・`broken`（戻す・作り直すだけ）（D-294）。`homeBytes` が `homeLimitBytes` を超えている間は、タスクのために VM を起こさず、画面は大きさと 3 つの操作（ブラウザのデータを消す・控えに戻す・作り直す）を出す（D-319）。`homeBytes` は `makase-vm-home` と `makase-browser-profile` の合計
 
 ### API-089：WebSocket /api/v1/vm/screen
 - 開始のとき `Origin` を確かめる。`mode=view` は VM が動いていればいつでも（眠っていれば 409 `BOX_NOT_RUNNING` で閉じ、画面は最後のスクショを出す）。`mode=control` は `boxes.control = 'human'` のときだけで、同時に1本だけ（違えば 409 `NOT_TAKEN_OVER`・`CONTROL_IN_USE` で閉じる）
@@ -52,17 +52,8 @@
 - 今すぐの控え（POST `/api/v1/vm/snapshots`）は、ホストの空きが「ホームの大きさ＋3GB」に足りなければ 507 `DISK_LOW`（D-300）
 - エラー：404 `SNAPSHOT_NOT_FOUND`、交代中は 409 `ALREADY_TAKEN_OVER`
 
-### API-145：GET・POST /api/v1/vm/cleanup（掃除のための起動）
-- 概要：ホームが容量を超えたとき（`vmHomeState = "over_quota"`）に、タスクを受けない VM を起こし、持ち主が大きいフォルダを消す（D-301）
-- POST `{ "action": "start" }`：`boxes.mode = 'cleanup'` の世代で起こす → 202。`vmHomeState` が `over_quota` でなければ 409 `VM_NOT_OVER_QUOTA`、`vm_op` が `none` でなければ 409 `VM_BUSY`
-- GET：`{ "homeBytes", "homeLimitBytes", "items": [{ "path": "/home/agent/work/0193.../node_modules", "bytes": 912000000 }] }`（`/home/agent` の下の大きいフォルダ上位 20 個。内部 API-146）
-- POST `{ "action": "delete", "paths": ["/home/agent/work/0193..."] }`：消す（利用者 `agent` で。`/home/agent` の外・シンボリックリンクの先はたどらず 422 `VALIDATION_ERROR`）→ `{ "homeBytes", "vmHomeState" }`。4GB を下回れば `vmHomeState = "ok"`
-- POST `{ "action": "end" }`：VM を止める（10 分操作がなくても止まる）
-- 掃除の世代ではタスクの VM の道具を受けない（タスクは `waiting_vm`）。監査ログ `vm.cleanup`（消したパスと大きさ）
-
 ### API-087：GET /api/v1/check
 - 概要：確認待ちのもの。今の書き込みのカードに、`kind: "browser"`・`kind: "takeover"`・`kind: "routine"`（ルーチンの提案：API-142）を足す。ブラウザのカードには `taskId`・`taskTitle`・オートレビューが止めた理由（`reviewReason`）を入れる
-- メインのターンから来た書き込みのカードとルーチンの提案のカードには `summaryTainted` を入れる。そのターンの `turns.context_snapshot_id` がメインの今の先頭のままで、先頭が `tainted = 1` かつ `untainted_at` が空のときだけ `true`。画面はカードに「メインの記憶の要約に外の内容が入っているため確認しています」と SCR-025 の要約の欄へのリンクを出す。タスクから来たカードとブラウザ・交代のカードには入れない（D-311）
 - レスポンス（200）：
 <details>
 <summary>例</summary>
@@ -86,7 +77,7 @@
    "expiresAt": "2026-10-23T10:30:00Z"
   },
   { "kind": "takeover", "boxId": "0193...", "taskId": "0193...", "reason": "ログインしてください", "requestedAt": "2026-10-23T10:00:00Z" },
-  { "kind": "routine", "proposalId": "0193...", "name": "週次の PR のまとめ", "schedule": "0 9 * * 1", "scheduleText": "毎週月曜 9:00", "prompt": "先週の PR を…", "summaryTainted": false, "expiresAt": "2026-10-31T10:00:00Z" }
+  { "kind": "routine", "proposalId": "0193...", "name": "週次の PR のまとめ", "schedule": "0 9 * * 1", "scheduleText": "毎週月曜 9:00", "prompt": "先週の PR を…", "expiresAt": "2026-10-31T10:00:00Z" }
  ]
 }
 ```
@@ -104,12 +95,8 @@
 - API-095：`state`・Cookie・PKCE（Google）、インストールの ID（GitHub）を確かめる。合わなければ 400 `CONNECT_STATE_INVALID`。使った `state` は消す
 
 ### API-096：GET・PATCH /api/v1/settings
-- PATCH のボディ：`{ "budget": {...}, "browser": { "confirmDomains": [...], "skipUnresolvedDomains": [...], "humanWords": [...], "confirmWords": [...], "autoReview": { "enabled": true } }, "maxTasks": 3 }`（部分）
-- 副作用：ポリシーの新しい版を作る（`workspace_policies`）。効くのは次のタスク・ターンから（動いているものは始まるときのポリシーのまま）。ただし日次の上限か `reserve_chat_usd` が変わったら、同じ処理の後にルーターが待っているきっかけを今すぐ評価し直す。上げて届けば、待っていたメインのターンをすぐ始める。下げたときも同じ規則で評価する（D-312）
-
-### API-097・098：書き出し・取り込み
-- 書き出しの形：`{ "formatVersion": 2, "exportedAt": "...", "agents": [...], "skills": [...], "policy": { "budget": {...}, "browser": {...}, "terminal": {...} }, "memoryFacts": [...], "routines": [...] }`（D-239。`formatVersion` 1 も取り込める）
-- 取り込みの応答：`{ "imported": ["..."], "skipped": [{ "name": "...", "reason": "same_name" }] }`
+- PATCH のボディ：`{ "budget": { "daily_usd": 10, "daily_auto_usd": 7 }, "browser": { "confirmDomains": [...], "skipUnresolvedDomains": [...], "humanWords": [...], "confirmWords": [...], "autoReview": { "enabled": true } }, "maxTasks": 3 }`（部分）
+- 副作用：ポリシーの新しい版を作る（`workspace_policies`）。効くのは次のタスク・ターンから（動いているものは始まるときのポリシーのまま）
 
 ### API-114：GET /api/v1/packs
 - 概要：置き場（イメージの `/opt/makase/packs/*.json` と、データのボリュームの `/data/packs/*.json`）にあるパックと、入っているパック（`pack_installs`）の一覧
@@ -143,24 +130,23 @@
 - エラー：パックのエージェントが動いていれば 409 `AGENT_BUSY`、404 `PACK_NOT_FOUND`
 
 ### 内部 API（box-manager）
-認証は `Authorization: Bearer <BOX_MANAGER_TOKEN>`。box-manager は ctl ネットワークでだけ待ち受け、box ネットワークでは待ち受けない。パスの `:boxId` は VM の世代（`boxes.id`）で、今の世代と違えば 409 `STALE_CONTROL`。
+認証は `Authorization: Bearer <BOX_MANAGER_TOKEN>`。box-manager は ctl ネットワークでだけ待ち受け、box ネットワークでは待ち受けない。パスの `:boxId` は VM の世代（`boxes.id`）で、今の世代と違えば 409 `STALE_CONTROL`。VM の世代は `box-browser` と `box-shell` の 2 つのコンテナの組で、box-manager が一緒に起こし、一緒に止める。画面の操作・スクショ・VNC・ブラウザのデータは `box-browser` の box-agent、コマンドの実行とファイルの出し入れは `box-shell` の shell-agent が受ける。
 
 | ID | メソッド | パス | 概要 |
 |---|---|---|---|
-| API-101 | POST | `/internal/v1/boxes` | 起こす。`{ boxId, mode }`（`normal`・`cleanup`）だけを受ける（イメージ・上限・ネットワーク・ホームのボリュームは固定）。戻し・作り直しの印ファイルがある（`failed` を含む）・控えを書いている間は 409 `VM_BUSY`（D-294・D-295）。ホストへの入りが断られていなければ 503 `HOST_ISOLATION_MISSING`（D-293）。Docker が別の VM にある置き先（Docker Desktop・OrbStack・Colima）で `isolated` モードが使えないときも同じ（手順書の「Docker Engine に入れ替える」節を知らせる：D-314）。ホストの空きが 3GB 未満なら 507 `DISK_LOW`（`cleanup` は除く） |
-| API-102 | DELETE | `/internal/v1/boxes/:boxId` | 止める（ホームのボリュームは残す） |
-| API-103 | POST・GET | `/internal/v1/boxes/:boxId/actions`・`/internal/v1/boxes/:boxId/actions/:actionId` | POST：操作を1つ、確かめてから実行する。GET：その `actionId` を実行したかだけを答える（`executed`・`not_executed`・`unknown`。実行はしない。本体の再開で使う：D-302） |
-| API-104 | POST | `/internal/v1/boxes/:boxId/inspect` | 確かめだけ（確認カードを作るとき） |
-| API-105 | GET | `/internal/v1/boxes/:boxId/screenshot` | PNG（1280×800） |
-| API-106 | GET（WebSocket） | `/internal/v1/boxes/:boxId/vnc` | VNC の中継 |
-| API-108 | POST・GET・DELETE | `/internal/v1/vm/home` | ホームを入れ替える（非同期：D-294）。POST `{ action: "restore", snapshotId }` か `{ action: "rebuild" }` → 202（印ファイルを書いてから裏で入れ替える）。VM が止まっているときだけ（動いていれば 409 `BOX_RUNNING`）。GET → `{ action, status: "running" \| "done" \| "failed" \| "none", startedAt, error }`（印ファイルの中身）。DELETE → 打ち切る（止め切ったら `failed` を返す） |
-| API-143 | POST・GET・DELETE | `/internal/v1/vm/snapshots`・`/internal/v1/vm/snapshots/:snapshotId` | ホームの控えを取る（非同期：D-295）。POST `{ snapshotId }` → 202。VM が止まっているときだけ。ホストの空きが「ホームの大きさ＋3GB」未満なら 507 `DISK_LOW`。GET → `{ status: "running" \| "done" \| "failed" \| "unknown", path, sizeBytes }`。DELETE → 打ち切り、書きかけのファイルを消す。控えは控え専用のボリューム（`/snapshots`）に書く（D-309） |
-| API-144 | DELETE | `/internal/v1/boxes/:boxId/browser-data` | Chromium を止めてプロフィールのフォルダを消し、起こし直す（画面の番がないときだけ） |
-| API-109 | GET | `/internal/v1/boxes` | 動いている VM の世代（本体の起動のときの突き合わせ。2 つ以上あれば全部止める）と、box-manager が毎分測った値（`homeBytes`・`hostFreeBytes`・`measuredAt`）、box-manager が自分で止めた世代と理由（`disk_quota`・`disk_low`）。本体のタイマーが毎分読む（測るのは box-manager だけ：D-309） |
-| API-117 | POST・GET | `/internal/v1/boxes/:boxId/commands`・`/internal/v1/boxes/:boxId/commands/:actionId` | POST：VM でコマンドを1つ実行する。`{ actionId, tool, args, timeoutSec }` → `{ ok, exitCode, output, truncated }`。確かめるのは世代（パスの `boxId`）と `actionId` だけで、`controlEpoch`・画面の番は受けない（交代中も動く：D-258・D-296）。VM の中のコマンドは判定しない（D-178）。`output` は 64KB まで。`actionId` が実行済みなら前の結果を返す。世代が違えば 409 `STALE_CONTROL`、時間切れは `COMMAND_TIMEOUT`、同時に 2 本動いていれば 409 `COMMANDS_FULL`（本体が待って出し直す）。利用者 `agent` で実行する（D-216）。GET：その `actionId` の結果だけを答える（`running`・`done`（結果つき）・`unknown`。実行はしない。本体の再開で使う：D-302） |
-| API-118 | PUT・GET | `/internal/v1/boxes/:boxId/files` | tar でファイルを入れる（PUT）・取り出す（GET）。`path` クエリで場所を指す（`/home/agent` の下だけ）。リポジトリの出し入れと成果物の写し（D-244）に使う。tar はコマンドの実行役（利用者 `agent`）が作る・広げ、シンボリックリンクはたどらない。本体は広げるときにリンク・装置ファイル・絶対パス・`..` を捨てる（D-306） |
-| API-113 | PATCH | `/internal/v1/boxes/:boxId/control` | 操作する人と `control_epoch` を VM に伝える。`{ control: "agent"｜"handing_over"｜"human", controlEpoch }`。box-agent はこれ以降、違う `controlEpoch` の画面の操作（API-103）を 409 `STALE_CONTROL` で断る（D-160）。コマンド（API-117）には効かない。本体の再開で交代を `expired` にしたときも、これで `agent` を伝える（D-302） |
-| API-146 | POST | `/internal/v1/boxes/:boxId/cleanup` | 掃除の世代（`mode = cleanup`）だけ。`{ action: "usage" }` → 大きいフォルダ上位 20 個、`{ action: "delete", paths }` → 消す。どちらも利用者 `agent` で、`/home/agent` の下だけ・リンクはたどらない（D-301） |
+| API-101 | POST | `/internal/v1/boxes` | 起こす。2 つのコンテナを一緒に起こす。`{ boxId }` だけを受ける（イメージ・上限・ネットワーク・ボリュームは固定）。戻し・作り直しの印ファイルがある（`failed` を含む）・控えを書いている間は 409 `VM_BUSY`（D-294・D-295）。ホストの空きが 3GB 未満なら 507 `DISK_LOW` |
+| API-102 | DELETE | `/internal/v1/boxes/:boxId` | 2 つのコンテナを止める（ボリュームは残す） |
+| API-103 | POST | `/internal/v1/boxes/:boxId/actions` | `box-browser` の box-agent に、操作を1つ、確かめてから実行させる |
+| API-104 | POST | `/internal/v1/boxes/:boxId/inspect` | `box-browser` で確かめだけ（確認カードを作るとき） |
+| API-105 | GET | `/internal/v1/boxes/:boxId/screenshot` | `box-browser` の PNG（1280×800） |
+| API-106 | GET（WebSocket） | `/internal/v1/boxes/:boxId/vnc` | `box-browser` の VNC の中継 |
+| API-108 | POST・GET・DELETE | `/internal/v1/vm/home` | ホーム（`makase-vm-home` と `makase-browser-profile`）を 2 つ一緒に入れ替える（非同期：D-294）。POST `{ action: "restore", snapshotId }` か `{ action: "rebuild" }` → 202（印ファイルを書いてから裏で入れ替える）。VM が止まっているときだけ（動いていれば 409 `BOX_RUNNING`）。GET → `{ action, status: "running" \| "done" \| "failed" \| "none", startedAt, error }`（印ファイルの中身）。DELETE → 打ち切る（止め切ったら `failed` を返す） |
+| API-143 | POST・GET・DELETE | `/internal/v1/vm/snapshots`・`/internal/v1/vm/snapshots/:snapshotId` | ホームの控えを取る。2 つのボリュームを 1 つの tar にまとめる（非同期：D-295）。POST `{ snapshotId }` → 202。VM が止まっているときだけ。ホストの空きが「ホームの大きさ＋3GB」未満なら 507 `DISK_LOW`。GET → `{ status: "running" \| "done" \| "failed" \| "unknown", path, sizeBytes }`。DELETE → 打ち切り、書きかけのファイルを消す。控えは控え専用のボリューム（`/snapshots`）に書く（D-309） |
+| API-144 | DELETE | `/internal/v1/boxes/:boxId/browser-data` | 世代を止め、`makase-browser-profile` を空にして、次に起こす（画面の番がないときだけ） |
+| API-109 | GET | `/internal/v1/boxes` | 動いている VM の世代（本体の起動のとき、止まっていない世代があれば止めさせる：D-327）と、box-manager が毎分測った値（`homeBytes`・`hostFreeBytes`・`measuredAt`）、box-manager が自分で止めた世代と理由（`disk_quota`・`disk_low`）。本体のタイマーが毎分読む（測るのは box-manager だけ：D-309） |
+| API-117 | POST | `/internal/v1/boxes/:boxId/commands` | `box-shell` の shell-agent で、コマンドを1つ実行する。`{ actionId, tool, args, timeoutSec }` → `{ ok, exitCode, output, truncated }`。確かめるのは世代（パスの `boxId`）と `actionId` だけで、`controlEpoch`・画面の番は受けない（交代中も動く：D-258・D-296）。VM の中のコマンドは判定しない（D-178）。`output` は 64KB まで。`actionId` が実行済みなら前の結果を返す。世代が違えば 409 `STALE_CONTROL`、時間切れは `COMMAND_TIMEOUT`、同時に 2 本動いていれば 409 `COMMANDS_FULL`（本体が待って出し直す）。利用者 `agent` で実行する |
+| API-118 | PUT・GET | `/internal/v1/boxes/:boxId/files` | `box-shell` の shell-agent で、tar でファイルを入れる（PUT）・取り出す（GET）。`path` クエリで場所を指す（`/home/agent` の下だけ）。リポジトリの出し入れと成果物の写し（D-244）に使う。tar は shell-agent が利用者 `agent` で作る・広げ、シンボリックリンクはたどらない。本体は広げるときにリンク・装置ファイル・絶対パス・`..` を捨てる（D-306） |
+| API-113 | PATCH | `/internal/v1/boxes/:boxId/control` | 操作する人と `control_epoch` を `box-browser` の box-agent に伝える。`{ control: "agent"｜"handing_over"｜"human", controlEpoch }`。box-agent はこれ以降、違う `controlEpoch` の画面の操作（API-103）を 409 `STALE_CONTROL` で断る（D-160）。コマンド（API-117）には効かない |
 
 <details>
 <summary>API-103 のリクエストと応答の例</summary>
@@ -210,4 +196,5 @@
 </details>
 
 ## このドキュメントで決まったこと
-- D-151、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-202、D-205、D-215、D-216、D-237、D-239、v1.2：D-293〜D-296、D-298〜D-302、D-306〜D-309（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-151、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-202、D-205、D-215、D-237、v1.2：D-294〜D-296、D-298〜D-300、D-306〜D-309（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- v1.4：D-316（書き出し・取り込みを消す）、D-319（掃除のための起動を消す）、D-322（`budget` は `daily_usd`・`daily_auto_usd`）、D-323（要約の印を消す）、D-326（2 コンテナ）、D-327（本体の再起動は新しい世代）
