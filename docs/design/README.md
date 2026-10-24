@@ -37,7 +37,7 @@ flowchart LR
 | VM とこわい操作を知りたい | [04 FR-074〜079](04_functional_spec.md#機能詳細) → [10 シーケンス図](10_diagrams.md#シーケンス図) | 15分 |
 | パックとターミナルを知りたい | [04 FR-085・086](04_functional_spec.md#機能詳細) → [ADR-053](adr/ADR-053-pack-by-purpose.md)・[ADR-054](adr/ADR-054-terminal-in-vm.md) | 10分 |
 | OSS と事業の方針を知りたい | [../oss-and-business.md](../oss-and-business.md) → [ADR-055](adr/ADR-055-agpl-license.md)・[ADR-056](adr/ADR-056-llm-provider.md) | 10分 |
-| 実装する | [07](07_architecture.md) → [08](08_database.md) → [09](09_api.md) → [10](10_diagrams.md) | — |
+| 実装する | [12](12_implementation_order.md) で順番を見て → [07](07_architecture.md) → [08](08_database.md) → [09](09_api.md) → [10](10_diagrams.md) | — |
 
 ## 主要な設計判断（ADR）
 | ADR | 決定 | 状態 |
@@ -60,6 +60,7 @@ flowchart LR
 | [ADR-056](adr/ADR-056-llm-provider.md) | LLM の接続先に Bedrock・Vertex 経由の Claude を足す（Should） | 承認（2026-10-24） |
 
 ## 最近の変更
+- 2026-10-24 [12 実装の順番](12_implementation_order.md) を追加：置き先は手元の WSL2 → クラウドの Linux VM → ラズパイの 3 段（D-190）。作る順番は VM の縦の 1 本 → こわい操作 → 本体の移植 → パックとターミナル。各段を終える条件と arm64 で詰まらない約束
 - [2026-10-24 OSS の方針と LLM の接続先を反映（v0.5）](changes/2026-10-24-oss-and-provider.md)：AGPL-3.0 で OSS 公開（ADR-055）。一般向けはやらず、企業導入で要る複数人は次の版。LLM の接続先に Bedrock・Vertex（REQ-095・FR-087・ADR-056）。標準パック「告知ページ制作」。成果物を外に出す操作は人が最終承認（BR-10）。第三者が完成できる成功指標と NFR-081
 - [2026-10-24 持ち主の決定を反映し、パックと VM のターミナルを足す（v0.4）](changes/2026-10-24-decisions-v0.4.md)：Q-114〜123 をすべて決着（ADR-044・045・051・052 を承認）。呼び名を「VM」など正式名称に。パック（FR-085）・ターミナル（FR-086）を追加。Web Push とスマホの文字入力は次の版
 - [2026-10-24 Claude のレビューを反映（v0.3）](changes/2026-10-24-claude-review.md)：`type` の改行と `open_url` も判定、画面が変わったら Claude に決め直させる、操作する人の切り替えに API-113、スクショは直近 3 枚、秘密の欄を塗る、交代で中止した歩みの精算、`web_fetch` のアドレスの判定。新しい未決 Q-121〜123

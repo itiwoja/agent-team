@@ -4,7 +4,7 @@
 > **3行で**
 > 1. Linux ホスト1台の上で Docker Compose の6種類のコンテナ（Tailscale・本体・box-manager・Docker の中継・egress・VM）を動かし、持ち主1人が PC とスマホから使う。
 > 2. 本体は Node＋SQLite に移した Cloudflare 版の中身（DB のアダプターと LLM の会話の形は作り直す）。新しいのは VM（Xvfb＋Chromium＋VNC）、パック（FR-085）と VM のターミナル（FR-086）、コンピューターユース、こわい操作の判定（`judgeBrowserAction`）と確認（`browser_checks`）、交代、歩みの記録。
-> 3. 実装の順番・タスクはこの文書の範囲外。
+> 3. 実装の順番・タスクはこの文書の範囲外。順番だけは [12](12_implementation_order.md) に書いた（D-190）。
 
 ## 🧭 判断してほしいこと
 全体の一覧は [README](README.md#-判断してほしいこと全ドキュメントから集約)。この文書だけの論点はなし。
@@ -146,6 +146,6 @@ flowchart LR
 - Claude判断：[00 決定事項ログ](00_overview.md#決定事項ログ) の D-136〜D-146・D-151〜D-171・D-187〜D-189
 
 ### 14. 参照ドキュメント
-- [00](00_overview.md)〜[10](10_diagrams.md)、[adr/](adr/)
+- [00](00_overview.md)〜[10](10_diagrams.md)、[adr/](adr/)。実装の順番は [12](12_implementation_order.md)
 - 今の実装：`apps/worker/src`（移す元）、`apps/web/src`
 - 置き換える前の設計：[docs/cloudflare-design.md](../cloudflare-design.md)
