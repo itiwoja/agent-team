@@ -10,7 +10,7 @@ v0.6 では、知らせは PWA を開いているときの SSE だけだった�
 - PWA の Web Push（VAPID）を入れる。鍵は `.env` の `VAPID_PUBLIC_KEY`・`VAPID_PRIVATE_KEY`
 - 送るのは、`send_to_owner` の `notify = true`・人の確認・交代の頼みの 3 つだけ。オートレビューで通った操作・進捗は送らない（D-197）
 - 同じ仕事の同じ種類は 1 つにまとめる（`tag` を同じにして置き換える）。PWA が前に出ているときは送らず、SSE だけ
-- 購読は端末ごと（`push_subscriptions`）。送れなかった購読（404・410）は消す
+- 購読は端末ごと（`push_subscriptions`）。送れなかった購読（404・410）は消す。送り待ち（`push_outbox`）は購読ごとに 1 行で、見えている端末があって送らなかった行は `skipped`（v1.2・D-288）
 
 ## 代替案
 | 案 | 良い点 | 悪い点 | 不採用の理由 |

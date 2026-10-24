@@ -1,5 +1,5 @@
 # 09. API設計：常駐の API（v1.0 で足す API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.1（2026-10-24） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[09 API設計](README.md)
 
 > **3行で**
 > 1. チャットは送る（API-119）・読む（API-120）の 2 つ。送ったメッセージはきっかけになり、返事があるかはメインが決めるので、API-119 は受けたことだけを返す。
@@ -20,7 +20,7 @@
 
 </details>
 
-- 処理：`chat_messages` に `role = 'owner'` で入れ、同じトランザクションできっかけ（`origin = 'chat'`、`source_key = <messageId>`）を入れる。ルーターに知らせる（FR-090）
+- 処理：`chat_messages` に `role = 'owner'` で入れ、同じトランザクションできっかけ（`origin = 'chat'`、`source_key = chat:<messageId>`。D-261）を入れる。ルーターに知らせる（FR-090）
 - レスポンス（202）：`{ "id": "0193...", "createdAt": "..." }`。同じ `Idempotency-Key` の 2 回目は 1 回目の応答を返す
 - 選択肢への返事は `kind = text`＋`replyTo`＋`choice`（何番目か）で送り、`chat_messages` には `kind = 'text'`・`reply_to` で入れる（D-274）
 - エラー：422 `VALIDATION_ERROR`（4,000 字を超えた・`choice` が選択肢にない）
@@ -54,7 +54,7 @@
 
 ### API-122：GET /api/v1/tasks
 - クエリ：`?status=active|done&cursor=&limit=`
-- レスポンス（200）：`{ "items": [{ "id", "title", "agent": { "id", "name" }, "status", "statusDetail", "origin", "createdAt", "finishedAt", "costMicroUsd" }], "nextCursor": "..." }`。`active` は `done`・`failed`・`halted`・`cancelled` 以外
+- レスポンス（200）：`{ "items": [{ "id", "title", "agent": { "id", "name" }, "status", "statusDetail", "origin", "createdAt", "finishedAt", "costMicroUsd" }], "nextCursor": "..." }`。`active` は終わっていないもの（`finished_at IS NULL`。`succeeded`・`completed`・`rejected`・`failed`・`cancelled`・`halted` 以外）、`done` はその逆
 
 ### API-123：GET /api/v1/tasks/:taskId
 - レスポンス（200）：
@@ -82,7 +82,7 @@
 
 ### API-124：POST /api/v1/tasks/:taskId/steer
 - リクエスト：`{ "text": "やっぱり 20 時でもいい" }`（2,000 字まで）。`Idempotency-Key` を受ける
-- 処理：きっかけ `steer`（`target_kind = 'task'`）を入れる。タスクの次の歩みの頭に入る（FR-089）
+- 処理：きっかけ `steer`（`target_kind = 'task'`、`source_key = steer:<Idempotency-Key>`。D-261）を入れる。タスクの次の歩みの頭に入る（FR-089）
 - レスポンス：202。エラー：409 `TASK_NOT_ACTIVE`
 
 ### API-125・126：ルーチン
@@ -116,7 +116,7 @@
 - レスポンス：202（受けた・重複・まとめに足した）。エラー：404 `HOOK_NOT_FOUND`・401 `HOOK_SIGNATURE_INVALID`・429 `HOOK_RATE_LIMITED`（1 時間 600 件を超えた）・413 `PAYLOAD_TOO_LARGE`。エラーの本文は `{ "error": { "code": "..." } }` だけ（中のことを漏らさない）
 - 署名が合わないものは記録にも本文を残さない（件数だけ `audit_logs` の `webhook.rejected` に 1 分ごとにまとめる）
 
-### API-130〜132・141：記憶
+### API-130〜132・141・147：記憶
 - GET `/api/v1/memory?q=&tab=facts|log&cursor=`：
 <details>
 <summary>例</summary>
@@ -124,6 +124,7 @@
 ```json
 {
  "facts": { "items": [{ "id": "0193...", "text": "告知ページは明るい色、絵文字なし", "rank": 3.2, "source": "main", "updatedAt": "..." }], "count": 42, "chars": 1830, "maxCount": 100, "maxChars": 4000 },
+ "summary": { "snapshotId": "0193...", "text": "…", "createdAt": "...", "tainted": true, "taintSources": ["webhook"], "untaintedAt": null },
  "log": { "items": [{ "id": "0193...", "day": "2026-10-23", "text": "店探しのタスクで 3 件見つけた", "source": "system", "ref": "0193..." }], "nextCursor": "..." }
 }
 ```
@@ -133,7 +134,8 @@
 - POST `/api/v1/memory/facts`：`{ "text" }`（200 字まで）→ 201。`source = 'owner'`。エラー：409 `MEMORY_FULL`
 - PATCH `/api/v1/memory/facts/:factId`：`{ "text" }`。DELETE：`deleted_at` を入れる
 - DELETE `/api/v1/memory/log/:logId`：行と検索の行を消す
-- どれも監査ログ `memory.changed` を残し、SSE の `memory.updated` を出す。持ち主が変えた記憶は、次の要約まで先頭（④）を変えず、メインの⑥に「（持ち主が記憶を直した：…）」を足す（FR-098）
+- POST `/api/v1/memory/summary/:snapshotId/untaint`（API-147）：今の先頭の印を消す（D-310）。→ 200 `{ "untaintedAt" }`。エラー：409 `TURN_RUNNING`（メインのターンが動いている）・409 `SNAPSHOT_NOT_CURRENT`（今の先頭でない）・409 `NOT_TAINTED`。監査ログ `memory.untainted`
+- どれも監査ログ `memory.changed` を残し、SSE の `memory.updated` を出す。持ち主が変えた記憶は、次の要約まで先頭（④）を変えず、メインの次の `user` メッセージに「（本体から：持ち主が記憶を直した：…）」の枠で足す（FR-098・D-286）
 
 ## このドキュメントで決まったこと
-- D-196、D-212、D-220〜D-225、D-233、D-234（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-196、D-212、D-220〜D-225、D-233、D-234、D-261、D-286、D-310（[00 決定事項ログ](../00_overview.md#決定事項ログ)）

@@ -1,6 +1,6 @@
 # ADR-052：ブラウザの確認は action_intents に乗せず、別の表 browser_checks にする
 - 状態：承認（2026-10-24 にユーザーが承認：D-172） ／ 日付：2026-10-24 ／ 決定者：Claude判断（提案）→ ユーザー
-- 影響する ID：FR-077, TBL-039, API-087, API-110
+- 影響する ID：FR-075, FR-077, TBL-039, API-087, API-110
 
 ## 状況
 v0.1 では、こわい操作の確認を `action_intents` に `browser_action` として足す設計だった。今の `action_intents` は MCP の書き込み用で、`connector_id`（NOT NULL・外部キー）・`tool_hash`・`destination_key`・`option_digest`・`intent_hash` などが必須。`approvals` も `risk_level`・`approver_ids` などが必須で、ブラウザの操作には当てはまる値がない。
@@ -17,3 +17,4 @@ v0.1 では、こわい操作の確認を `action_intents` に `browser_action` 
 ## 影響
 - 確認の一覧の repo（`db/repo/check.ts`）は、2つの表を合わせて返す
 - 監査ログは `browser.checked` で残す
+- v1.2（VM 側のレビュー）：確認を作るときに `screen_epoch` を写し、○ の実行の直前に今の値と比べる（D-299）。実行の直前の確かめはすべての実行（人の ○・オートレビューの `pass`・操作の列の残り）に同じものを使い、外れたら確認は `expired`、API-110 も `expired` を返す（D-307）。控えに戻す・作り直すで止めたタスクの確認は `expired`（`vm_replaced`。D-308）

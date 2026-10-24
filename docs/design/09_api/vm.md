@@ -1,8 +1,8 @@
 # 09. API設計：VM・確認・設定の API（v0.6 から引き継ぐ API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.1（2026-10-24） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[09 API設計](README.md)
 
 > **3行で**
-> 1. VM は 1 台なので、画面向けの VM の API は `/api/v1/vm/*` になった（v0.6 の `/boxes/:boxId`）。控え・戻す・作り直す（API-133〜135）を足した。
+> 1. VM は 1 台なので、画面向けの VM の API は `/api/v1/vm/*` になった（v0.6 の `/boxes/:boxId`）。控え・戻す・作り直す（API-133〜135）と、v1.2 で掃除のための起動（API-145）を足した。
 > 2. ブラウザの確認の ○ / × は、API の書き込みの承認（API-019）とは別の口（API-110）。実行は1回だけで、中身が同じときだけ。
 > 3. パック・設定・引っ越し・つなぎ方は v0.6 の形のまま、v1.0 の欄を足した。内部 API は [下](#内部-apibox-manager)。
 
@@ -19,7 +19,8 @@
  "screenTask": { "id": "0193...", "title": "店探し" }, "waitingScreen": 1,
  "takeoverRequest": null, "lastShotUrl": "/api/v1/shots/0193....png",
  "lastActionSummary": "日付を選んでいます", "vmOp": "none",
- "homeBytes": 1834000000, "profileBytes": 210000000,
+ "vmHomeState": "ok", "mode": "normal",
+ "homeBytes": 1834000000, "homeLimitBytes": 4294967296, "profileBytes": 210000000,
  "lastSnapshot": { "id": "0193...", "createdAt": "2026-10-24T04:00:00+09:00" }
 }
 ```
@@ -27,6 +28,7 @@
 </details>
 
 - 眠っているときは `status: "stopped"` と最後のスクショ
+- `vmHomeState`：`ok`・`over_quota`（掃除のための起動だけ：API-145）・`broken`（戻す・作り直すだけ）（D-294・D-301）。`mode`：`normal`・`cleanup`
 
 ### API-089：WebSocket /api/v1/vm/screen
 - 開始のとき `Origin` を確かめる。`mode=view` は VM が動いていればいつでも（眠っていれば 409 `BOX_NOT_RUNNING` で閉じ、画面は最後のスクショを出す）。`mode=control` は `boxes.control = 'human'` のときだけで、同時に1本だけ（違えば 409 `NOT_TAKEN_OVER`・`CONTROL_IN_USE` で閉じる）
@@ -45,9 +47,18 @@
 ### API-133〜135：VM の控え・戻す・作り直す
 - GET `/api/v1/vm/snapshots`：`{ items: [{ id, kind, sizeBytes, status, createdAt }] }`
 - POST `/api/v1/vm/snapshots`：今すぐ取る。VM を止めてから取る（使っているタスクは `waiting_vm`）→ 202 `{ id }`。終わったら SSE の `vm.updated`
-- POST `/api/v1/vm/restore`：`{ "snapshotId" }` → 202 `{ haltedTasks: 2 }`。POST `/api/v1/vm/rebuild` → 202。どちらも VM を使っているタスクを `halted`（`vm_replaced`）で閉じる（D-268）。`vm_op` が `none` でなければ 409 `VM_BUSY`
-- 処理（FR-100）：画面の番を空にし、VM を止め、API-108 でホームを入れ替える。監査ログ `vm.restored`・`vm.rebuilt`
+- POST `/api/v1/vm/restore`：`{ "snapshotId" }` → 202 `{ haltedTasks: 2 }`。POST `/api/v1/vm/rebuild` → 202。どちらも VM を使っているタスク（終わっていないタスクのうち VM の道具を一度でも使ったものと画面の番を持つもの）を `halted`（`vm_replaced`）で閉じ、その `pending` の確認を `expired`（`vm_replaced`）にする（D-268・D-308）。`vm_op` が `none` でなければ 409 `VM_BUSY`。`vmHomeState` が `broken` でも受ける
+- 処理（FR-100）：画面の番を空にし、VM を止め、API-108 でホームを入れ替える（非同期。本体が終わりを確かめる：D-294）。終わったら SSE の `vm.updated`。監査ログ `vm.restored`・`vm.rebuilt`、失敗は `vm.restore_failed`（`vmHomeState` が `broken` になる）
+- 今すぐの控え（POST `/api/v1/vm/snapshots`）は、ホストの空きが「ホームの大きさ＋3GB」に足りなければ 507 `DISK_LOW`（D-300）
 - エラー：404 `SNAPSHOT_NOT_FOUND`、交代中は 409 `ALREADY_TAKEN_OVER`
+
+### API-145：GET・POST /api/v1/vm/cleanup（掃除のための起動）
+- 概要：ホームが容量を超えたとき（`vmHomeState = "over_quota"`）に、タスクを受けない VM を起こし、持ち主が大きいフォルダを消す（D-301）
+- POST `{ "action": "start" }`：`boxes.mode = 'cleanup'` の世代で起こす → 202。`vmHomeState` が `over_quota` でなければ 409 `VM_NOT_OVER_QUOTA`、`vm_op` が `none` でなければ 409 `VM_BUSY`
+- GET：`{ "homeBytes", "homeLimitBytes", "items": [{ "path": "/home/agent/work/0193.../node_modules", "bytes": 912000000 }] }`（`/home/agent` の下の大きいフォルダ上位 20 個。内部 API-146）
+- POST `{ "action": "delete", "paths": ["/home/agent/work/0193..."] }`：消す（利用者 `agent` で。`/home/agent` の外・シンボリックリンクの先はたどらず 422 `VALIDATION_ERROR`）→ `{ "homeBytes", "vmHomeState" }`。4GB を下回れば `vmHomeState = "ok"`
+- POST `{ "action": "end" }`：VM を止める（10 分操作がなくても止まる）
+- 掃除の世代ではタスクの VM の道具を受けない（タスクは `waiting_vm`）。監査ログ `vm.cleanup`（消したパスと大きさ）
 
 ### API-087：GET /api/v1/check
 - 概要：確認待ちのもの。今の書き込みのカードに、`kind: "browser"`・`kind: "takeover"`・`kind: "routine"`（ルーチンの提案：API-142）を足す。ブラウザのカードには `taskId`・`taskTitle`・オートレビューが止めた理由（`reviewReason`）を入れる
@@ -83,8 +94,8 @@
 
 ### API-110：POST /api/v1/browser-checks/:checkId/decision
 - リクエスト：`{ "decision": "approve" | "reject" }`
-- 処理：1つのトランザクションで `pending → executing`（approve）か `pending → rejected`（reject）に変える。0行なら 409 `CHECK_NOT_PENDING`。approve のときは同じトランザクションで、タスクが `awaiting_approval`・VM の世代が同じ・画面の番をそのタスクが持っている・`screen_epoch` が同じことを確かめ、違えば `expired`（`task_cancelled`・`box_restarted`・`screen_lost`）にして `rejected` を返す（D-250）。approve なら、その外で API-103 に `actionId` と `expect: contentHash` を付けて頼む
-- レスポンス（200）：`{ "result": "executed" | "page_changed" | "rejected" | "unknown_outcome" }`
+- 処理：1つのトランザクションで `pending → executing`（approve）か `pending → rejected`（reject）に変える。0行なら 409 `CHECK_NOT_PENDING`。approve のときは同じトランザクションで実行の直前の確かめ（FR-075 の 3a：タスクが `awaiting_approval`・VM の世代が同じ・画面の番をそのタスクが持ち `screen_epoch` が確認の `screen_epoch` と同じ・`control = agent`・VM の操作の途中でない）をし、外れたら `expired`（`task_cancelled`・`box_restarted`・`screen_lost`・`taken_over`・`vm_replaced`）にして `expired` を返す（D-250・D-307）。approve なら、その外で API-103 に `actionId` と `expect: contentHash` を付けて頼む
+- レスポンス（200）：`{ "result": "executed" | "page_changed" | "rejected" | "expired" | "unknown_outcome", "expireReason": null }`。`expired` のときは `expireReason` に理由（D-307）
 - `page_changed`（承認のあと中身が変わっていた）のときは、新しい確認は作らない。確認を `expired`（`page_changed`）にし、Claude に新しいスクショと「画面が変わったので実行しなかった」を返して操作を決め直させる（D-159）
 
 ### API-094・095：つなぐ
@@ -135,19 +146,20 @@
 
 | ID | メソッド | パス | 概要 |
 |---|---|---|---|
-| API-101 | POST | `/internal/v1/boxes` | 起こす。`{ boxId }` だけを受ける（イメージ・上限・ネットワーク・ホームのボリュームは固定）。戻し・作り直しの印ファイルがあれば 409 `VM_BUSY` |
+| API-101 | POST | `/internal/v1/boxes` | 起こす。`{ boxId, mode }`（`normal`・`cleanup`）だけを受ける（イメージ・上限・ネットワーク・ホームのボリュームは固定）。戻し・作り直しの印ファイルがある（`failed` を含む）・控えを書いている間は 409 `VM_BUSY`（D-294・D-295）。ホストへの入りが断られていなければ 503 `HOST_ISOLATION_MISSING`（D-293）。ホストの空きが 3GB 未満なら 507 `DISK_LOW`（`cleanup` は除く） |
 | API-102 | DELETE | `/internal/v1/boxes/:boxId` | 止める（ホームのボリュームは残す） |
-| API-103 | POST | `/internal/v1/boxes/:boxId/actions` | 操作を1つ、確かめてから実行する |
+| API-103 | POST・GET | `/internal/v1/boxes/:boxId/actions`・`/internal/v1/boxes/:boxId/actions/:actionId` | POST：操作を1つ、確かめてから実行する。GET：その `actionId` を実行したかだけを答える（`executed`・`not_executed`・`unknown`。実行はしない。本体の再開で使う：D-302） |
 | API-104 | POST | `/internal/v1/boxes/:boxId/inspect` | 確かめだけ（確認カードを作るとき） |
 | API-105 | GET | `/internal/v1/boxes/:boxId/screenshot` | PNG（1280×800） |
 | API-106 | GET（WebSocket） | `/internal/v1/boxes/:boxId/vnc` | VNC の中継 |
-| API-108 | POST | `/internal/v1/vm/home` | ホームを入れ替える。`{ action: "restore", snapshotId }` か `{ action: "rebuild" }`。VM が止まっているときだけ（動いていれば 409 `BOX_RUNNING`） |
-| API-143 | POST | `/internal/v1/vm/snapshots` | ホームの控えを取る。`{ snapshotId }` → `{ path, sizeBytes }`。VM が止まっているときだけ |
+| API-108 | POST・GET・DELETE | `/internal/v1/vm/home` | ホームを入れ替える（非同期：D-294）。POST `{ action: "restore", snapshotId }` か `{ action: "rebuild" }` → 202（印ファイルを書いてから裏で入れ替える）。VM が止まっているときだけ（動いていれば 409 `BOX_RUNNING`）。GET → `{ action, status: "running" \| "done" \| "failed" \| "none", startedAt, error }`（印ファイルの中身）。DELETE → 打ち切る（止め切ったら `failed` を返す） |
+| API-143 | POST・GET・DELETE | `/internal/v1/vm/snapshots`・`/internal/v1/vm/snapshots/:snapshotId` | ホームの控えを取る（非同期：D-295）。POST `{ snapshotId }` → 202。VM が止まっているときだけ。ホストの空きが「ホームの大きさ＋3GB」未満なら 507 `DISK_LOW`。GET → `{ status: "running" \| "done" \| "failed" \| "unknown", path, sizeBytes }`。DELETE → 打ち切り、書きかけのファイルを消す。控えは控え専用のボリューム（`/snapshots`）に書く（D-309） |
 | API-144 | DELETE | `/internal/v1/boxes/:boxId/browser-data` | Chromium を止めてプロフィールのフォルダを消し、起こし直す（画面の番がないときだけ） |
-| API-109 | GET | `/internal/v1/boxes` | 動いている VM の世代（本体の起動のときの突き合わせ。2 つ以上あれば全部止める） |
-| API-117 | POST | `/internal/v1/boxes/:boxId/commands` | VM でコマンドを1つ実行する。`{ actionId, controlEpoch, tool, args, timeoutSec }` → `{ ok, exitCode, output, truncated }`。VM の中のコマンドは判定しない（D-178）。`output` は 64KB まで。`actionId` が実行済みなら前の結果を返す。古い `controlEpoch` は 409 `STALE_CONTROL`、時間切れは `COMMAND_TIMEOUT`、同時に 2 本動いていれば 409 `COMMANDS_FULL`（本体が待って出し直す）。利用者 `agent` で実行する（D-216） |
-| API-118 | PUT・GET | `/internal/v1/boxes/:boxId/files` | tar でファイルを入れる（PUT）・取り出す（GET）。`path` クエリで場所を指す。リポジトリの出し入れに使う |
-| API-113 | PATCH | `/internal/v1/boxes/:boxId/control` | 操作する人と `control_epoch` を VM に伝える。`{ control: "agent"｜"handing_over"｜"human", controlEpoch }`。box-agent はこれ以降、違う `controlEpoch` の操作を 409 `STALE_CONTROL` で断る（D-160） |
+| API-109 | GET | `/internal/v1/boxes` | 動いている VM の世代（本体の起動のときの突き合わせ。2 つ以上あれば全部止める）と、box-manager が毎分測った値（`homeBytes`・`hostFreeBytes`・`measuredAt`）、box-manager が自分で止めた世代と理由（`disk_quota`・`disk_low`）。本体のタイマーが毎分読む（測るのは box-manager だけ：D-309） |
+| API-117 | POST・GET | `/internal/v1/boxes/:boxId/commands`・`/internal/v1/boxes/:boxId/commands/:actionId` | POST：VM でコマンドを1つ実行する。`{ actionId, tool, args, timeoutSec }` → `{ ok, exitCode, output, truncated }`。確かめるのは世代（パスの `boxId`）と `actionId` だけで、`controlEpoch`・画面の番は受けない（交代中も動く：D-258・D-296）。VM の中のコマンドは判定しない（D-178）。`output` は 64KB まで。`actionId` が実行済みなら前の結果を返す。世代が違えば 409 `STALE_CONTROL`、時間切れは `COMMAND_TIMEOUT`、同時に 2 本動いていれば 409 `COMMANDS_FULL`（本体が待って出し直す）。利用者 `agent` で実行する（D-216）。GET：その `actionId` の結果だけを答える（`running`・`done`（結果つき）・`unknown`。実行はしない。本体の再開で使う：D-302） |
+| API-118 | PUT・GET | `/internal/v1/boxes/:boxId/files` | tar でファイルを入れる（PUT）・取り出す（GET）。`path` クエリで場所を指す（`/home/agent` の下だけ）。リポジトリの出し入れと成果物の写し（D-244）に使う。tar はコマンドの実行役（利用者 `agent`）が作る・広げ、シンボリックリンクはたどらない。本体は広げるときにリンク・装置ファイル・絶対パス・`..` を捨てる（D-306） |
+| API-113 | PATCH | `/internal/v1/boxes/:boxId/control` | 操作する人と `control_epoch` を VM に伝える。`{ control: "agent"｜"handing_over"｜"human", controlEpoch }`。box-agent はこれ以降、違う `controlEpoch` の画面の操作（API-103）を 409 `STALE_CONTROL` で断る（D-160）。コマンド（API-117）には効かない。本体の再開で交代を `expired` にしたときも、これで `agent` を伝える（D-302） |
+| API-146 | POST | `/internal/v1/boxes/:boxId/cleanup` | 掃除の世代（`mode = cleanup`）だけ。`{ action: "usage" }` → 大きいフォルダ上位 20 個、`{ action: "delete", paths }` → 消す。どちらも利用者 `agent` で、`/home/agent` の下だけ・リンクはたどらない（D-301） |
 
 <details>
 <summary>API-103 のリクエストと応答の例</summary>
@@ -162,6 +174,7 @@
 ```
 
 - box-agent は、同じ VM の中では操作を1つずつ実行する。`controlEpoch` が今の値と違えば 409 `STALE_CONTROL`。`actionId` が実行済みなら、前の結果をそのまま返す（2回目は実行しない）
+- `screenEpoch` は送らない。画面の番と `screen_epoch` は、本体が頼む前に確かめる（実行の直前の確かめ：FR-075 の 3a。D-299）
 - `open_url` は `http`・`https` だけ受ける（`javascript:`・`file:`・`chrome:` などは 400 `VALIDATION_ERROR` で断る：D-158）
 - `read_page` は見るだけ。応答の `page` に、見えているボタン・リンク・入力欄・見出しの一覧（`role`・`name`・`center`・入力欄なら `value`）を最大 200 個入れる。秘密の欄の `value` は入れない（D-194）
 - `expect` があれば、確かめた中身のハッシュと比べ、違えば実行せずに 409 `CONTENT_CHANGED`
@@ -177,18 +190,23 @@
  "url": "https://example.jp/reserve/confirm",
  "domain": "example.jp",
  "tab": "T1", "frame": "main",
- "target": { "tag": "button", "type": "submit", "autocomplete": null, "role": "button", "name": "予約を確定する", "clickable": true, "inForm": true, "formSubmitName": "予約を確定する", "rect": [760, 588, 104, 32] },
- "form": { "fields": [{ "name": "date", "value": "2026-11-03" }, { "name": "card", "valueHash": "sha256:..." }] },
+ "target": { "tag": "button", "type": "submit", "autocomplete": null, "role": "button", "name": "予約を確定する", "clickable": true, "editable": false, "inForm": true, "formSubmitName": "予約を確定する", "submitsForm": true, "formMethod": "post", "rect": [760, 588, 104, 32] },
+ "form": { "method": "post", "fields": [{ "name": "date", "value": "2026-11-03" }, { "name": "card", "valueHash": "sha256:..." }] },
  "contentHash": "sha256:...",
- "resolved": true
+ "resolved": true,
+ "unresolvedKind": null
 }
 ```
 
 `clickable` は要素に `cursor: pointer` か click のリスナーがあるとき true。`div` に処理を付けただけの擬似ボタンも T-3 の対象にするため、`clickable` の要素の見えている名前も決まった言葉と照合する（D-173）。
 
-`resolved: false` のときは要素が分からなかった（canvas・ほかの出どころの iframe・JS のダイアログ）。判定は T-6 に当たる。
+`resolved: false` のときは要素が分からなかった。`unresolvedKind` に種類（`canvas`・`cross_origin_iframe`・`dialog`・`outside`）を入れる。判定は T-6 に当たり、行き先はどれも人（D-297・D-298）。
+
+- `editable`：先が `textarea`・`contenteditable`・文字の入る `input` のとき true（T-4 の行き先に使う）
+- `submitsForm`：先が標準のフォームの送信になるか（`type=submit` のボタン・`input[type=submit|image]`・フォームの中の Enter による暗黙の送信）。`formMethod` は送信ボタンの `formmethod`、なければ `form.method`（`get`・`post`・`dialog`、分からなければ null）。`submitsForm` が true で `formMethod` が `get`・`dialog` でなければ T-7（D-298）
+- JS で `form.submit()`・`fetch` を呼ぶ要素は、DOM からは分からないので `submitsForm` に入らない（T-7 で拾えない：R-76）
 
 </details>
 
 ## このドキュメントで決まったこと
-- D-151、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-202、D-205、D-215、D-216、D-237、D-239（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-151、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-202、D-205、D-215、D-216、D-237、D-239、v1.2：D-293〜D-296、D-298〜D-302、D-306〜D-309（[00 決定事項ログ](../00_overview.md#決定事項ログ)）

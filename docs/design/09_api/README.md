@@ -1,10 +1,10 @@
 # 09. API設計
-- プロジェクト：Agent-Team-Open ／ 版数：v1.1（2026-10-24） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
+- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
 
 > **3行で**
 > 1. 画面向けの API は `/api/v1`（:8080・tailnet だけ）。依頼の API（API-072〜077・084）はやめ、チャット・タスク・きっかけ・記憶・VM・通知の API を足した。詳細は [resident.md](resident.md)（新しい API）と [vm.md](vm.md)（引き継ぐ API）。
 > 2. webhook の口は別の待ち受け（:8081）に `POST /hooks/:hookId`（API-129）だけ。Funnel で 8443 番だけを公開してそこに流し、身元ではなく署名で確かめる。画面と API の 443 番は公開しない（D-241）。
-> 3. 本体と box-manager の間は内部 API（API-101〜109・113・117・118・143・144）。VM は 1 台で、パスの `:boxId` は VM の世代。
+> 3. 本体と box-manager の間は内部 API（API-101〜109・113・117・118・143・144・146）。VM は 1 台で、パスの `:boxId` は VM の世代。
 
 ## 🧭 判断してほしいこと
 なし
@@ -26,7 +26,7 @@ flowchart LR
 - 送る：`POST /messages`（API-119）。画面が ID を作り、`Idempotency-Key` に入れる。読む：`GET /messages`（API-120）
 - タスク：一覧・中身・言い直し・取り消し（API-122〜124・016）
 - きっかけ：ルーチン（API-125・126・136・142）・予約（API-127・139）・受け口（API-128・140）
-- 記憶（API-130〜132・141）・VM（API-088〜091・099・133〜135・138）・通知（API-031・032・137）
+- 記憶（API-130〜132・141・147）・VM（API-088〜091・099・133〜135・138）・通知（API-031・032・137）
 - SSE（API-085）は合図だけ。中身は REST で取りに行く
 
 ---
@@ -65,7 +65,7 @@ flowchart LR
 | `SNAPSHOT_NOT_FOUND` | 404 | 控えがない |
 | `HOOK_NOT_FOUND` | 404 | 受け口がない・止めてある |
 | `HOOK_SIGNATURE_INVALID` | 401 | 署名が合わない（本文は残さない） |
-| `HOOK_RATE_LIMITED` | 429 | 1 分 60 件を超えた |
+| `HOOK_RATE_LIMITED` | 429 | 1 受け口で 1 時間 600 件を超えた（1 分 60 件を超えた分はまとめて 202：D-260） |
 | `PAYLOAD_TOO_LARGE` | 413 | webhook の本文が 256KB を超えた・ファイルが 20MB を超えた |
 | `PUSH_INVALID` | 422 | 購読の形が違う |
 | `NOT_TAKEN_OVER` | 409 | 人が操作する状態でないのに操作の形でつなごうとした・返そうとした |
@@ -79,8 +79,13 @@ flowchart LR
 | `PACK_ALREADY_INSTALLED` | 409 | 同じ版がもう入っている |
 | `COMMANDS_FULL` | 409 | （内部）ターミナルが同時に 2 本動いている |
 | `VM_BUSY` | 409 | VM の操作（控え・戻す・作り直す）の途中 |
+| `VM_NOT_OVER_QUOTA` | 409 | ホームが容量を超えていないのに掃除のための起動を頼んだ（API-145。D-301） |
+| `TURN_RUNNING` | 409 | メインのターンが動いている間に要約の印を消そうとした（API-147。D-310） |
+| `SNAPSHOT_NOT_CURRENT` | 409 | 今の先頭ではない要約の印を消そうとした（API-147） |
+| `NOT_TAINTED` | 409 | 印のない要約の印を消そうとした（API-147） |
+| `HOST_ISOLATION_MISSING` | 503 | （内部）box ネットワークからホストへの入りが断られていない。VM を起こさない（D-293） |
 | `DISK_LOW` | 507 | ホストの空きディスクが足りない（3GB 未満。D-265） |
-| `STALE_CONTROL` | 409 | （内部）VM の世代・`control_epoch` が古い操作 |
+| `STALE_CONTROL` | 409 | （内部）VM の世代が古い操作・コマンド、`control_epoch` が古い画面の操作（コマンドは `control_epoch` を見ない：D-296） |
 | `CONTENT_CHANGED` | 409 | （内部）承認した中身と今の画面が違う |
 | `COMMAND_TIMEOUT` | 504 | （内部）コマンドが `timeoutSec` を超えた。本体は Claude に `ok = false` と打ち切りを返す（FR-086） |
 
@@ -106,7 +111,7 @@ flowchart LR
 | API-080 | POST | `/api/v1/agents` | したいことから1人作る | FR-072 / SCR-014 | — |
 | API-081 | DELETE | `/api/v1/agents/:agentId` | 論理削除（メインは 409 `MAIN_AGENT`） | FR-072 / SCR-014 | — |
 | API-087 | GET | `/api/v1/check` | 確認の一覧（API の書き込み・ブラウザ・交代の頼み・ルーチンの提案） | FR-077, FR-078, FR-081, FR-094 / SCR-019 | [vm](vm.md#api-087get-apiv1check) |
-| API-019 | POST | `/api/v1/approvals/:approvalId/decision` | API の書き込みの ○ / ×（今のまま） | FR-081 / SCR-019 | — |
+| API-019 | POST | `/api/v1/approvals/:approvalId/decision` | API の書き込みの ○ / ×。`turn_id` を持つ Intent は、× なら決めたのと、○ なら実行の結果を書くのと同じトランザクションで `approval_done` を入れる（D-248・D-275） | FR-081 / SCR-019 | — |
 | API-110 | POST | `/api/v1/browser-checks/:checkId/decision` | ブラウザの確認の ○ / × | FR-077 / SCR-019 | [vm](vm.md#api-110post-apiv1browser-checkscheckiddecision) |
 | API-142 | POST | `/api/v1/routine-proposals/:proposalId/decision` | ルーチンの提案の ○ / × | FR-094 / SCR-019 | [resident](resident.md#api-142post-apiv1routine-proposalsproposaliddecision) |
 | API-088 | GET | `/api/v1/vm` | VM の状態・世代・画面の番・操作する人・交代の頼み・最新のスクショ・ホームの大きさ | FR-074, FR-078 / SCR-022, 023 | [vm](vm.md#api-088get-apiv1vm) |
@@ -118,6 +123,7 @@ flowchart LR
 | API-134 | POST | `/api/v1/vm/restore` | 控えに戻す `{ snapshotId }` | FR-100 / SCR-023 | [vm](vm.md#api-133135vm-の控え戻す作り直す) |
 | API-135 | POST | `/api/v1/vm/rebuild` | 空から作り直す | FR-100 / SCR-023 | [vm](vm.md#api-133135vm-の控え戻す作り直す) |
 | API-138 | DELETE | `/api/v1/vm/browser-data` | ブラウザのデータを消す | FR-079 / SCR-023 | — |
+| API-145 | GET・POST | `/api/v1/vm/cleanup` | 掃除のための起動（タスクを受けない）・大きいフォルダの一覧・消す・終える（D-301） | FR-074 / SCR-023 | [vm](vm.md#api-145getpost-apiv1vmcleanup掃除のための起動) |
 | API-112 | GET | `/api/v1/shots/:file`・`/api/v1/files/:taskId/:name` | スクショの画像（7日を過ぎたら 404）・タスクの成果物。成果物は `Content-Disposition: attachment`・`X-Content-Type-Options: nosniff`・`Content-Security-Policy: sandbox; default-src 'none'; img-src data:; style-src 'unsafe-inline'` で返す。`?preview=1` は `inline` で同じ CSP（スクリプトは動かず、本体と別の出どころ扱い。D-243） | FR-075, FR-093 / SCR-019〜022 | — |
 | API-125 | GET・POST | `/api/v1/routines` | ルーチンの一覧・作る | FR-094 / SCR-026 | [resident](resident.md#api-125126ルーチン) |
 | API-126 | PATCH・DELETE | `/api/v1/routines/:routineId` | 直す・止める・消す | FR-094 / SCR-026 | [resident](resident.md#api-125126ルーチン) |
@@ -127,10 +133,11 @@ flowchart LR
 | API-128 | GET・POST | `/api/v1/webhooks` | 受け口の一覧・作る（秘密は作ったときだけ返す） | FR-096 / SCR-026 | [resident](resident.md#api-128getpost-apiv1webhooks) |
 | API-140 | PATCH・DELETE | `/api/v1/webhooks/:hookId` | 止める・消す | FR-096 / SCR-026 | — |
 | API-129 | POST | `:8443/hooks/:hookId`（Funnel → :8081） | webhook を受ける（署名で確かめる） | FR-096 | [resident](resident.md#api-129post-hookshookid) |
-| API-130 | GET | `/api/v1/memory` | プロフィールとログ（`?q=` で検索） | FR-097 / SCR-025 | [resident](resident.md#api-130132141記憶) |
-| API-141 | POST | `/api/v1/memory/facts` | 事実を足す | FR-097 / SCR-025 | [resident](resident.md#api-130132141記憶) |
-| API-131 | PATCH・DELETE | `/api/v1/memory/facts/:factId` | 事実を直す・消す | FR-097 / SCR-025 | [resident](resident.md#api-130132141記憶) |
-| API-132 | DELETE | `/api/v1/memory/log/:logId` | ログの行を消す | FR-097 / SCR-025 | [resident](resident.md#api-130132141記憶) |
+| API-130 | GET | `/api/v1/memory` | プロフィールとログ（`?q=` で検索） | FR-097 / SCR-025 | [resident](resident.md#api-130132141147記憶) |
+| API-141 | POST | `/api/v1/memory/facts` | 事実を足す | FR-097 / SCR-025 | [resident](resident.md#api-130132141147記憶) |
+| API-131 | PATCH・DELETE | `/api/v1/memory/facts/:factId` | 事実を直す・消す | FR-097 / SCR-025 | [resident](resident.md#api-130132141147記憶) |
+| API-132 | DELETE | `/api/v1/memory/log/:logId` | ログの行を消す | FR-097 / SCR-025 | [resident](resident.md#api-130132141147記憶) |
+| API-147 | POST | `/api/v1/memory/summary/:snapshotId/untaint` | 今の要約の「外の文を読んだ」印を消す（D-310） | FR-098 / SCR-025 | [resident](resident.md#api-130132141147記憶) |
 | API-137 | GET | `/api/v1/push/key` | VAPID の公開鍵 | FR-017 / SCR-023 | — |
 | API-031 | POST | `/api/v1/push-subscriptions` | 通知の購読（`{ endpoint, keys: { p256dh, auth } }`。`?test=1` で試しに送る） | FR-017 / SCR-023 | — |
 | API-032 | DELETE | `/api/v1/push-subscriptions/:subscriptionId` | 購読の削除 | FR-017 / SCR-023 | — |
@@ -157,4 +164,4 @@ flowchart LR
 
 
 ## このドキュメントで決まったこと
-- D-148、D-151、D-156、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-196、D-207、D-208、D-212、D-221〜D-223、D-229、D-233〜D-235、D-239（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-148、D-151、D-156、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-196、D-207、D-208、D-212、D-221〜D-223、D-229、D-233〜D-235、D-239、D-275（[00 決定事項ログ](../00_overview.md#決定事項ログ)）

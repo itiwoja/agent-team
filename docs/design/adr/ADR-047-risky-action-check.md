@@ -19,3 +19,4 @@
 - 確認は別の表 `browser_checks` に置き（ADR-052）、確認の一覧に並べる。操作の先が分からないときも確認に回すのはユーザーの決定（2026-10-24）。確認が多すぎるサイトは「確かめないドメイン」で外せる
 - 判定は完全ではない（R-76）。操作の記録で後から確かめられるようにする
 - `div` の擬似ボタンも T-3 の対象にする（Q-121 → D-173。box-agent の `clickable`）。
+- v1.2（VM 側のレビュー）：T-4 は Ctrl・Alt・Meta つきの Enter も含む（Shift+Enter だけ当たらない）。Enter を含む T-5 と canvas の T-6 は人に回す（D-297）。T-7 は標準のフォームの送信だけで、JS が `form.submit()`・`fetch` で送るものは DOM で分からず拾えない（R-76 の残る危険。D-298）。判定の材料（`form.method`・`editable`・`unresolvedKind`）を inspect に足した

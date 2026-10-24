@@ -1,5 +1,5 @@
 # 08. DB設計
-- プロジェクト：Agent-Team-Open ／ 版数：v1.1（2026-10-24） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、`apps/worker/src/db/schema.ts`
+- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、`apps/worker/src/db/schema.ts`
 
 > **3行で**
 > 1. DB は本体の SQLite のファイル1つ（`/data/makase.db`）。Cloudflare 版の WorkspaceDO のスキーマ（`schema.ts`）を使い、v0.6 の表（TBL-031〜040）を引き継ぎ、常駐の表（TBL-041〜055）を足す。
@@ -92,13 +92,15 @@ erDiagram
 ### 変える表
 | 表 | 変えるところ |
 |---|---|
-| `tasks` | 今の `schema.ts` に合わせる（D-254）。列を足す：`turn_id`（作ったターン、FK `turns`）・`tool_call_id`（UNIQUE）・`title`（40 字）・`brief`（4,000 字）・`delegate_reason`（100 字）・`budget_class`。`report`・`report_meta`（成果物と報告の状態を入れる）・`tainted`・`taint_sources` は今の列を使う（報告は 2,000 字までを本体で守る。CHECK は今の 50,000 のまま）。`job_id` は NULL を許し（振り分けのタスクは job を持たない）、`trigger_type` に `delegate` を足す。`ask_id` は NULL のまま使わない（D-235）。`status` の値は今の CHECK のまま（`completed` などを使う）。`halt_reason` に `vm_replaced` を足す。`status_detail` の値に `waiting_vm`・`waiting_screen`・`taken_over`・`waiting_takeover`・`running_command`・`auto_review`（列の制約は今の形で通る）。列 `paused_ms`（INTEGER NOT NULL DEFAULT 0）を足す：確認待ち・交代待ち（`awaiting_approval`・`waiting_takeover`・`taken_over`）で待った時間の合計。上限の判定は「経過時間 − `paused_ms`」（D-174） |
+| `tasks` | 今の `schema.ts` に合わせる（D-254）。列を足す：`turn_id`（作ったターン、FK `turns`）・`tool_call_id`（UNIQUE）・`title`（40 字）・`brief`（4,000 字）・`delegate_reason`（100 字）・`budget_class`。`report`・`report_meta`（成果物と報告の状態を入れる）・`tainted`・`taint_sources` は今の列を使う（報告は 2,000 字までを本体で守る。CHECK は今の 50,000 のまま）。`job_id` は NULL を許し（振り分けのタスクは job を持たない）、`trigger_type` に `delegate` を足す。`ask_id` は NULL のまま使わない（D-235）。今の NOT NULL と CHECK は変えずに満たす（D-283）：`requester_id` はメインのエージェントの ID、`agent_snapshot_id` は作るときに振り分け先の今の設定のスナップショット（`agent_snapshots`）を作って入れ、`report` を入れるときは `report_kind = 'normal'`（CHECK `(report IS NULL) = (report_kind IS NULL)`）。`status` の値は今の CHECK のまま（`completed` などを使う）。`halt_reason` に `vm_replaced` を足す。`status_detail` の値に `waiting_vm`・`waiting_screen`・`taken_over`・`waiting_takeover`・`running_command`・`auto_review`（列の制約は今の形で通る）。列 `paused_ms`（INTEGER NOT NULL DEFAULT 0）を足す：確認待ち・交代待ち（`awaiting_approval`・`waiting_takeover`・`taken_over`）で待った時間の合計。上限の判定は「経過時間 − `paused_ms`」（D-174） |
 | `sandbox_commands` | `session_id` を `box_id`（FK `boxes`）に変え、`output` を 64KB までにする（TBL-040） |
 | `task_events` | 事象の種類に `box_started`・`box_stopped`・`screen_acquired`・`screen_released`・`browser_checked`・`auto_reviewed`・`takeover_started`・`takeover_ended`・`steered`・`reported` |
 | `agents` | 列を足す：`kind`（`main`・`worker`。`main` は 1 行だけ：部分 UNIQUE）・`description`（「いつ使うか」200 字）・`created_by`（`owner`・`main`・`pack`）・`instruction_addendum`（メインの指示の手直し 2,000 字） |
-| `usage_records` | 列を足す：`turn_id`（FK `turns`）・`purpose`（`turn`・`task`・`review`・`memory`・`summary`・`prewarm`）・`budget_class`（`chat`・`auto`）・`cache_read_tokens`・`cache_write_5m_tokens`・`cache_write_1h_tokens`（D-263）・`cache_expected`（0/1：当たるはずだった）。`task_id` は NULL を許す |
-| `audit_logs` | 事象の種類に `wake.received`・`wake.dropped`・`turn.halted`・`auto_review.decided`・`routine.created`・`webhook.rejected`・`memory.changed`・`vm.snapshot`・`vm.restored`・`vm.rebuilt`・`cache.miss` |
-| `action_intents`・`approvals` | `turn_id`（FK `turns`）を足し、`task_id` と `job_id` を NULL 可にする。CHECK：`task_id` と `turn_id` のどちらか一方だけ（D-248）。`expire_reason` 相当の値に `task_cancelled`（D-250） |
+| `usage_records` | 列を足す：`turn_id`（FK `turns`）・`budget_class`（`chat`・`auto`）・`cache_read_tokens`・`cache_write_5m_tokens`・`cache_write_1h_tokens`（D-263）・`cache_expected`（0/1：当たるはずだった）。呼び出しの目的は `purpose` の列を作らず、`phase` に `turn`・`task`・`review`・`memory`・`summary`・`prewarm` を足して使う（今の値は古い行のために残す）。`provider` に `bedrock`・`vertex` を足す（FR-087）。SQLite は CHECK を ALTER できないので、`phase`・`provider` の CHECK は版 3（`USAGE_OWNER_RELAX`）と同じく表を作り直して変える。`task_id` は今も NULL 可。メインの呼び出し（ターン・記憶の更新・要約・先温め）は `agent_id` にメインの ID を入れ、今の持ち主の CHECK を満たす（D-283） |
+| `audit_logs` | 事象の種類に `wake.received`・`wake.dropped`・`turn.halted`・`auto_review.decided`・`routine.created`・`webhook.rejected`・`memory.changed`・`memory.untainted`（D-310）・`vm.snapshot`・`vm.restored`・`vm.rebuilt`・`cache.miss` |
+| `action_intents` | `turn_id`（FK `turns`）と `tool_call_id`（UNIQUE。メインのターンの書き込みのとき、再起動で探す：D-287）を足し、`task_id` と `job_id` を NULL 可にする。CHECK：`task_id` と `turn_id` のどちらか一方だけ（D-248）。`expire_reason` の `task_cancelled` は今の CHECK にあるので、それを使う（D-250） |
+| `approvals` | `turn_id`（FK `turns`）を足し、`task_id` を NULL 可にする（`job_id` の列はない）。CHECK：`task_id` と `turn_id` のどちらか一方だけ（D-248） |
+| `policy_decisions` | `turn_id`（FK `turns`）を足し、`task_id` を NULL 可にする。CHECK：`task_id` と `turn_id` のどちらか一方だけ。gateway・edge が書く判定の記録を、メインのターンでも残す（D-275） |
 
 ### 使わなくなるもの
 | 表 | 理由 | 扱い |
@@ -121,10 +123,10 @@ erDiagram
 | きっかけ（`wakes`） | 30 日 |
 | 文脈の先頭（`context_snapshots`） | 参照するターンが残っている間（最新は残す。D-262） |
 | Web Push の送り待ち | 終わってから 7 日 |
-| VM の控え | 3 世代（データのボリュームの中。バックアップと書き出しには入れない） |
+| VM の控え | 3 世代（控え専用のボリューム `makase-vm-snapshots` の中。box-manager だけがつなぐ。バックアップと書き出しには入れない：D-309） |
 | バックアップ | 毎日1回・7世代（NFR-070）。秘密の欄の文字は DB のどこにも平文で残らない |
 | VM のホーム（Chrome のプロフィールを含む） | 持ち主が消す・戻す・作り直すまで（BR-07） |
 
 ## このドキュメントで決まったこと
 - [ADR-052](../adr/ADR-052-browser-checks-table.md)：ブラウザの確認は別の表
-- D-144、D-145、D-147、D-151、D-153、D-159、D-161〜D-163、D-167、D-170、D-174〜D-178、D-205、D-207、D-215、D-217、D-221〜D-227、D-230、D-232、D-235、D-245〜D-251、D-254、D-256、D-259〜D-263、D-267（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-144、D-145、D-147、D-151、D-153、D-159、D-161〜D-163、D-167、D-170、D-174〜D-178、D-205、D-207、D-215、D-217、D-221〜D-227、D-230、D-232、D-235、D-245〜D-251、D-254、D-256、D-259〜D-263、D-267、D-275〜D-280、D-283〜D-285、D-287〜D-289（[00 決定事項ログ](../00_overview.md#決定事項ログ)）

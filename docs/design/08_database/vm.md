@@ -1,5 +1,5 @@
 # 08. DB設計：VM と確認の表（v0.6 から引き継ぐ表）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.1（2026-10-24） ／ 親：[08 DB設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ 親：[08 DB設計](README.md)
 
 > **3行で**
 > 1. v0.6 の TBL-031〜040 を引き継ぐ。`boxes` は「持ち主に 1 台の VM の 1 回の起動（世代）」になり、エージェントとタスクの列をなくして、画面の番（`screen_task_id`）を持つ。
@@ -12,15 +12,16 @@
 今の1行の表に列を足す。`owner_user_id`（D1 の利用者）は使わなくなり、`owner_login` で持ち主を表す。v0.6 の `max_boxes` は使わない（VM は 1 台）。
 
 <details>
-<summary>足す列（5列）</summary>
+<summary>足す列（6列）</summary>
 
 | カラム | 型 | NULL | デフォルト | 説明 |
 |---|---|---|---|---|
 | owner_login | TEXT | NO | — | Tailscale のログイン名。起動のとき `OWNER_LOGIN` と比べ、違えば止まる。`.env` に `OWNER_LOGIN_REPLACE=1` があるときだけ上書きして起動する（D-170） |
 | max_tasks | INTEGER | NO | 3 | 裏のタスクの同時数。CHECK 1〜5（D-217） |
 | snapshot_hour | INTEGER | NO | 4 | VM の控えを取る時刻（0〜23、`TZ`） |
-| vm_op | TEXT | NO | `'none'` | VM の操作：`none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding`（D-251）。`none` 以外の間は起こさない |
-| vm_op_started_at | TEXT | YES | — | |
+| vm_op | TEXT | NO | `'none'` | VM の操作：`none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding`（D-251）。`none` 以外の間は起こさない。遷移は [10 states](../10_diagrams/states.md#workspacevm_op) |
+| vm_op_started_at | TEXT | YES | — | `vm_op` を `none` 以外にした時刻。`none` のとき NULL。上限（`starting`・`stopping` 2 分、`snapshotting`・`restoring`・`rebuilding` 30 分）を超えたら打ち切る（D-294） |
+| vm_home_state | TEXT | NO | `'ok'` | VM のホームの状態：`ok`・`over_quota`（4GB を超えた。掃除のための起動だけ受ける：D-301）・`broken`（戻し・作り直しに失敗した。戻す・作り直すだけ受ける：D-294） |
 
 </details>
 
@@ -28,23 +29,24 @@
 持ち主に 1 台の VM の 1 回の起動。主なカラム：`id`, `status`, `control`, `screen_task_id`
 
 <details>
-<summary>カラム定義（15列）</summary>
+<summary>カラム定義（16列）</summary>
 
 | カラム | 型 | NULL | デフォルト | キー | 説明 |
 |---|---|---|---|---|---|
 | id | TEXT | NO | — | PK | UUIDv7。VM の世代 |
 | status | TEXT | NO | `'starting'` | | `starting`・`running`・`stopping`・`stopped`・`failed` |
+| mode | TEXT | NO | `'normal'` | | `normal`・`cleanup`（掃除のための起動。タスクの道具は受けない：D-301） |
 | control | TEXT | NO | `'agent'` | | `agent`・`handing_over`・`human` |
 | control_epoch | INTEGER | NO | 0 | | `control` を変えるたびに1増やす。box-agent は古い番号の画面の操作を断る |
-| screen_epoch | INTEGER | NO | 0 | | 画面の番が替わるたびに1増やす（D-258）。コマンドはどちらの番号も確かめない |
+| screen_epoch | INTEGER | NO | 0 | | 画面の番を取るたびに1増やす（取るときの 1 か所だけ。D-258・D-299）。比べるのは本体だけで、box-agent には渡さない。コマンドはどちらの番号も確かめない（D-296） |
 | screen_task_id | TEXT | YES | — | FK tasks | 画面の番を持つタスク（D-205） |
 | screen_since | TEXT | YES | — | | 番を取った時刻 |
 | container_name | TEXT | YES | — | | box-manager が付けた名前 |
-| stop_reason | TEXT | YES | — | | `idle`・`owner`・`restore`・`rebuild`・`snapshot`・`disk_quota`・`start_timeout`・`crashed`・`host_restart` |
+| stop_reason | TEXT | YES | — | | `idle`・`owner`・`restore`・`rebuild`・`snapshot`・`disk_quota`・`disk_low`（ホストの空きが 3GB を切った：D-300）・`start_timeout`・`sandbox_unavailable`（Chromium のサンドボックスが使えない：D-304）・`isolation_missing`（ホストへの入りが断られていない：D-293）・`crashed`・`host_restart` |
 | started_at | TEXT | NO | NOW | | |
 | last_activity_at | TEXT | NO | NOW | | 最後の操作・コマンド（人・エージェント） |
 | stopped_at | TEXT | YES | — | | |
-| home_bytes | INTEGER | YES | — | | 止めたときに測ったホームの大きさ |
+| home_bytes | INTEGER | YES | — | | box-manager が最後に測ったホームの大きさ（動いている間は毎分 API-109 から写す：D-309） |
 | profile_bytes | INTEGER | YES | — | | 止めたときに測った Chrome のプロフィールの大きさ（FR-079） |
 | created_at | TEXT | NO | NOW | | |
 
@@ -70,7 +72,7 @@
 | args | TEXT | NO | `'{}'` | | JSON。座標・キー・文字（秘密の欄なら `***`） |
 | page_url | TEXT | YES | — | | 操作のときのページ（クエリは外す） |
 | target | TEXT | YES | — | | JSON。タブ・フレーム・要素の種類・`type`・`autocomplete`・見えている名前・枠。分からなければ NULL |
-| tripwires | TEXT | NO | `'[]'` | | JSON の配列。当たった合図（`declared`・`T-1`〜`T-6`） |
+| tripwires | TEXT | NO | `'[]'` | | JSON の配列。当たった合図（`declared`・`T-1`〜`T-7`） |
 | verdict | TEXT | NO | — | | 判定：`allowed`・`reviewed`（オートレビューに回った）・`checked`（人の確認に回った） |
 | auto_review_id | TEXT | YES | — | FK auto_reviews | オートレビューに回ったとき（人に回り直しても残る） |
 | check_id | TEXT | YES | — | FK browser_checks | 確認に回ったとき |
@@ -164,7 +166,7 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 |---|---|---|---|---|---|
 | owner_kind | TEXT | NO | — | PK | `task`・`turn`（メインのターン）。v0.6 の `ask` は使わない |
 | owner_id | TEXT | NO | — | PK | タスクかターンの ID |
-| step_key | TEXT | NO | — | PK | 歩みの名前（`llm:<n>`・`tool:<callId>`・`box:<actionId>`・`review:<actionId>`・`memory`（記憶の更新）・`summary`（要約）） |
+| step_key | TEXT | NO | — | PK | 歩みの名前（`llm:<n>`・`tool:<callId>`・`box:<actionId>`・`review:<actionId>`・`input:<n>`（ターンに足した文。`result` に描いた文をそのまま：D-277）・`memory:<n>`（記憶の更新）・`summary:<n>`（呼び出し前の要約。`result` に作った `context_snapshot_id`：D-280）。`<n>` はその持ち主の中の歩みの番号。タイマーの要約と冷えた後の要約はターンの外なので書かない） |
 | status | TEXT | NO | — | | `started`・`done`（`done` の結果に `aborted`（交代で中止）がある） |
 | result | TEXT | YES | — | | JSON。`done` のとき必須。LLM の歩みは返った assistant の content をそのまま（思考のブロック・署名・`tool_use` の ID を含む。D-256）。画像は入れず、スクショのパスだけ（組み直すときに同じバイトになるよう、パスから元の画像を読む） |
 | repeatable | INTEGER | NO | 1 | | 0 なら、`started` のまま残っても繰り返さない（VM の操作・書き込み） |
@@ -182,25 +184,26 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 こわい操作の ○ / ×。主なカラム：`box_id`, `status`, `content_hash`
 
 <details>
-<summary>カラム定義（17列）</summary>
+<summary>カラム定義（18列）</summary>
 
 | カラム | 型 | NULL | デフォルト | キー | 説明 |
 |---|---|---|---|---|---|
 | id | TEXT | NO | — | PK | UUIDv7 |
 | task_id | TEXT | NO | — | FK tasks | |
 | box_id | TEXT | NO | — | FK boxes | VM の世代 |
+| screen_epoch | INTEGER | NO | — | | 確認を作ったときの `boxes.screen_epoch` を写す。○ の実行の直前に今の値と比べる（D-299） |
 | action_id | TEXT | NO | — | UNIQUE | 実行する操作の ID（`browser_actions.id`） |
 | status | TEXT | NO | `'pending'` | | `pending`・`executing`・`executed`・`rejected`・`expired`・`unknown_outcome` |
 | summary | TEXT | NO | — | | カードの要約（200字まで） |
 | action | TEXT | NO | — | | JSON。操作の引数（秘密は `***`） |
 | content | TEXT | NO | — | | JSON。タブ・フレーム・ページの URL・操作の先・フォームの値の要約（秘密の欄はハッシュ） |
 | content_hash | TEXT | NO | — | | `action`・`content`・`box_id` からの sha256 |
-| tripwires | TEXT | NO | `'[]'` | | 当たった合図 |
+| tripwires | TEXT | NO | `'[]'` | | 当たった合図（`declared`・`T-1`〜`T-7`） |
 | review_reason | TEXT | YES | — | | オートレビューが止めて人に回したときの理由（200字まで） |
 | screenshot_path | TEXT | YES | — | | 押す場所の印つきのスクショ |
 | policy_hash | TEXT | NO | — | | 判定に使ったポリシー |
 | expires_at | TEXT | NO | — | | 作ってから 30分 |
-| expire_reason | TEXT | YES | — | | `approval_timeout`・`page_changed`・`taken_over`・`box_restarted`・`core_restarted`・`task_cancelled`・`screen_lost` |
+| expire_reason | TEXT | YES | — | | `approval_timeout`・`page_changed`・`taken_over`・`box_restarted`・`core_restarted`・`task_cancelled`・`screen_lost`・`vm_replaced`（控えに戻した・作り直した：D-308） |
 | decided_at | TEXT | YES | — | | |
 | created_at | TEXT | NO | NOW | | |
 

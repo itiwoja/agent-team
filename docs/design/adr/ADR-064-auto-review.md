@@ -12,9 +12,9 @@
 |---|---|
 | T-1 秘密の欄・T-2 確認するドメイン・T-7 POST のフォームの送信 | 人 |
 | T-3 で `browser.human_words`（購入・支払・送信・投稿・削除・公開・確定・Submit など）に当たった | 人 |
-| T-6 のうちほかの出どころの iframe・ダイアログ・ブラウザの外、名前の取れない作動、`textarea` の Enter | 人 |
+| T-6 のすべて（ほかの出どころの iframe・ダイアログ・ブラウザの外・canvas）、名前の取れない作動、書ける欄（`textarea`・`contenteditable`）の Enter、Enter を含む T-5（Ctrl+Enter など） | 人 |
 | 申告（`confirm_action`）の `category` が `publish`・`pay`・`delete`・`send`・`account` | 人 |
-| それ以外（外に出ないと言い切れるもの：T-3 の `confirm_words`（次へ・検索）・ほかの T-4・T-5・canvas・申告の `other`） | オートレビュー |
+| それ以外（外に出ないと言い切れるもの：T-3 の `confirm_words`（次へ・検索）・ほかの T-4・Enter を含まない T-5・申告の `other`） | オートレビュー |
 | API の書き込み（カレンダー・GitHub） | 人（BR-10。今のまま） |
 
 - オートレビューは道具なしの Claude の呼び出し 1 回（既定 `claude-sonnet-5-5`）。渡すのは、仕事の `brief`・操作・確かめた中身・印つきのスクショだけで、エージェントの会話は渡さない。ページから来たものは信用しない材料の枠に入れる。答えは `pass` か `stop`（理由つき）。`pass` なら実行、`stop`・答えられない・時間切れ（20 秒）なら人の確認に回す。オートレビューは通すだけで、人の確認を取り消せない
@@ -28,3 +28,4 @@
 ## 影響
 - `auto_reviews`（TBL-051）に判断・理由・費用を残し、記録の画面に出す。費用は仕事の上限に含める
 - v1.1（Fable 5.1・Astra のレビュー）：`Submit`・決済の iframe などで BR-10 がすり抜けていたので、人に回すものを広げた（D-242）
+- v1.2（VM 側のレビュー）：canvas の T-6 と Enter を含む T-5（Gmail・Slack の Ctrl+Enter の送信）は外に出ないと言い切れないので人に回した。T-4 は修飾キーつきの Enter も含む（D-297）。`pass` からの実行の前にも、人の ○ と同じ直前の確かめをする（D-307）

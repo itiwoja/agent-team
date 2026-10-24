@@ -1,5 +1,5 @@
 # 04. 機能仕様
-- プロジェクト：Agent-Team-Open ／ 版数：v1.1（2026-10-24） ／ インプット：[03_use_cases](../03_use_cases.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.2（2026-10-24） ／ インプット：[03_use_cases](../03_use_cases.md)
 
 > **3行で**
 > 1. v1.0 で足したのは常駐の仕組み：受付とルーター（FR-090）・メインのターン（FR-091）・振り分けと報告（FR-092）・`send_to_owner`（FR-093）・ルーチン（FR-094）・予約した確認（FR-095）・webhook（FR-096）・記憶（FR-097）・文脈の組み方（FR-098）・Web Push（FR-017）。詳細は [resident.md](resident.md)。
@@ -11,7 +11,7 @@
 |---|---|---|---|---|---|
 | R-76 | リスク | ページに仕込まれた指示（プロンプトインジェクション）で、ログイン済みのブラウザを悪用される | — | 合図・確認するドメイン・汚染の扱い（BR-06）・操作の記録・オートレビューに会話を渡さない（FR-099）で抑える。残る危険は受け入れる（[11 §12](../11_tech_spec.md#12-リスクと対策)） | — |
 | R-90 | リスク | オートレビューがだまされる・見逃す | — | 外に出す・支払う・消す・秘密・POST の送信・別オリジンの iframe は必ず人（BR-14・D-242）。会話を渡さず、ページの文は信用しない材料として枠に入れる。迷ったら stop。記録で後から確かめる | — |
-| R-91 | リスク | 記憶が汚染される・作り話が入る | — | 材料を持ち主の言葉とメインの文に限る（BR-12）。情報として渡す。画面で直せる | — |
+| R-91 | リスク | 記憶が汚染される・作り話が入る | — | 材料を持ち主のメッセージに限る（BR-12・D-246）。情報として渡す。画面で直せる | — |
 
 ## 全体図
 ```mermaid
@@ -37,7 +37,7 @@ flowchart LR
 - きっかけはすべて `wakes` を通る。持ち主のチャットは動いているターンの次の歩みに入り、ほかは列の後ろ（[FR-090](resident.md#fr-090受付とルーター)）
 - メインは VM を使わない。振り分け先は 1 段だけで、報告は 2,000 字まで（[FR-091](resident.md#fr-091メインのターン)・[FR-092](resident.md#fr-092振り分けと報告)）
 - 地の文はチャットに出ない。話すのは `send_to_owner` だけ（[FR-093](resident.md#fr-093send_to_owner)）
-- プロフィールを書く材料は持ち主の言葉とメインの文だけ（[FR-097](resident.md#fr-097記憶)）
+- プロフィールを書く材料は持ち主のメッセージだけ（D-246。[FR-097](resident.md#fr-097記憶)）
 - 先頭は次の要約まで変えず、外れは記録する（[FR-098](resident.md#fr-098文脈の組み方)）
 - 合図の行き先は決定論。外に出す・支払う・消す・秘密・POST の送信は人（[FR-076](vm.md#fr-076こわい操作の見分け)・[FR-099](vm.md#fr-099オートレビュー)）
 - 画面の番は 1 つ。VM は 10 分で眠り、控えから戻せる（[FR-074](vm.md#fr-074vm-の起動と眠り)・[FR-100](vm.md#fr-100vm-の控えと作り直し)）
@@ -101,11 +101,13 @@ flowchart LR
 | 対象 | 値 | 意味 | 遷移先 |
 |---|---|---|---|
 | `wakes.status` | `queued` | 受けて並んでいる | attached, consumed, dropped |
-| | `attached` | 動いているターンに結びつけたが、まだ渡していない（D-247） | consumed, queued |
-| | `consumed` | ターン・タスクに渡した（終わり） | — |
-| | `dropped` | 上限・重複で捨てた（終わり） | — |
+| | `attached` | 動いているターンに結びつけたが、まだ渡していない（D-247） | consumed, queued（ターンが閉じた・再起動：D-276） |
+| | `consumed` | ターン・タスクに渡した | queued, dropped（失敗したターンから戻す。3 回目は `retry_exceeded`：D-276） |
+| | `merged` | 1 分の上限を超えた webhook の配達で、まとめに足した（終わり。D-284） | — |
+| | `dropped` | 日次の上限・行き先がない・戻した回数を超えた（終わり。重複は `source_key` の UNIQUE で行を作らない） | — |
 | `turns.status` | `running` | メインが歩んでいる | done, halted, failed |
 | | `done`・`halted`・`failed` | 終わり（`halted` は上限、`failed` は LLM の失敗） | — |
+| `turns.halt_reason` | `budget_exceeded`・`daily_budget_exceeded`・`steps_exceeded`・`timeout` | 1 ターンの $1・日次の上限・40 歩・10 分（D-289） | — |
 | `tasks.status` | 今の値のまま（`schema.ts` の CHECK：`queued`・`provisioning`・`running`・`awaiting_approval`・`executing`・`succeeded`・`completed`・`rejected`・`failed`・`cancelled`・`halted`）。振り分けのタスクの終わりは `completed`（報告の `done`・`blocked`）・`failed`・`halted`・`cancelled` を使う（D-254・D-257） | 今のまま | 今のまま |
 | `tasks.halt_reason`（足す値） | `vm_replaced`（控えに戻した・作り直した：D-268） | — | — |
 | `tasks.status_detail`（足す値） | `waiting_vm`・`waiting_screen`・`taken_over`・`waiting_takeover`・`running_command`・`auto_review` | VM の起動待ち・画面の番待ち・交代中・交代の頼み・コマンドを実行中・オートレビュー中（v0.6 の `waiting_box` は `waiting_vm` に） | — |
@@ -120,11 +122,11 @@ flowchart LR
 | `takeovers.status` | `requested` | エージェントが頼んだ | active, expired |
 | | `active` | 人が操作している | ended, expired |
 | | `ended` | 人が返した（終わり） | — |
-| | `expired` | 頼みのまま30分・交代中に15分操作がない・再起動（終わり） | — |
+| | `expired` | 頼みのまま30分・交代中に15分操作がない・再起動（終わり。放置のときはタスクを報告の `blocked` で閉じる：D-257） | — |
 | `browser_checks.status` | `pending` | 確認待ち | executing, rejected, expired |
 | | `executing` | 承認され、実行を頼んだ | executed, expired, unknown_outcome |
 | | `executed`・`rejected`・`expired`・`unknown_outcome` | 終わり | — |
-| `browser_checks.expire_reason` | `approval_timeout`・`page_changed`・`taken_over`・`box_restarted`・`core_restarted`・`task_cancelled`・`screen_lost` | 期限切れの理由 | — |
+| `browser_checks.expire_reason` | `approval_timeout`・`page_changed`・`taken_over`・`box_restarted`・`core_restarted`・`task_cancelled`・`screen_lost`・`vm_replaced`（控えに戻した・作り直した：D-308） | 期限切れの理由 | — |
 | `auto_reviews.verdict` | `pass`・`stop`・`error`（時間切れ・形が違う） | `stop`・`error` は人の確認に回る | — |
 | `sandbox_commands.status` | `queued` | 受け付けた | running |
 | | `running` | VM で実行中（再開時にこのままなら、やり直さず Claude に伝える） | done, expired |
@@ -132,8 +134,10 @@ flowchart LR
 | | `expired` | 世代が替わるなどで実行されなかった（終わり） | — |
 | `routines.enabled` | 1・0 | 動かす・止めた | — |
 | `scheduled_wakes.status` | `pending`・`fired`・`cancelled` | 待っている・起こした・消した | — |
-| `workspace.vm_op` | `none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding` | VM の操作は 1 つずつ（D-251） | — |
-| `push_outbox.status` | `pending`・`sent`・`failed`・`expired` | Web Push の送り待ち（D-267） | — |
+| `workspace.vm_op` | `none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding` | VM の操作は 1 つずつ（D-251）。失敗・打ち切りは `none` に戻す（D-294・D-295） | `none` → ほかの値 → `none`（[10 states](../10_diagrams/states.md#workspacevm_op)） |
+| `workspace.vm_home_state` | `ok`・`over_quota`・`broken` | VM のホームの状態。`over_quota` は掃除のための起動だけ、`broken` は戻す・作り直すだけ受ける（D-294・D-301） | [10 states](../10_diagrams/states.md#workspacevm_home_state) |
+| `boxes.mode` | `normal`・`cleanup` | 掃除のための起動はタスクの道具を受けない（D-301） | — |
+| `push_outbox.status` | `pending`・`sent`・`failed`・`expired`・`skipped` | Web Push の送り待ち。購読ごとの行（D-267・D-288）。`skipped` は見えている端末があって送らなかった | — |
 
 `action_intents` の値は今のまま（[08](../08_database/README.md#変える表)）。`asks.status` は使わない（D-235）。
 
@@ -147,4 +151,4 @@ flowchart LR
 - [ADR-054](../adr/ADR-054-terminal-in-vm.md)・[ADR-061](../adr/ADR-061-vm-no-judge-restore.md)：ターミナルは VM の中。確認は VM の外に効くものだけ
 - [ADR-056](../adr/ADR-056-llm-provider.md)：LLM の接続先
 - [ADR-058](../adr/ADR-058-resident-agent.md)〜[ADR-067](../adr/ADR-067-web-push-first.md)：常駐型の仕組み
-- D-141〜D-144、D-150〜D-153、D-157〜D-163、D-165〜D-167、D-171、D-173・D-174・D-176・D-178・D-180・D-181・D-185・D-186・D-187・D-191〜D-198、D-201〜D-238（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
+- D-141〜D-144、D-150〜D-153、D-157〜D-163、D-165〜D-167、D-171、D-173・D-174・D-176・D-178・D-180・D-181・D-185・D-186・D-187・D-191〜D-198、D-201〜D-238、D-275〜D-289（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
