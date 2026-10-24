@@ -1,5 +1,5 @@
 # 07. システムアーキテクチャ
-- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[05_non_functional](05_non_functional.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v0.6（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[05_non_functional](05_non_functional.md)
 
 > **3行で**
 > 1. 1台の Linux ホストの上で、Docker Compose で6種類のコンテナを動かす：Tailscale・本体・box-manager・Docker の中継・egress・VM（タスクごと）。

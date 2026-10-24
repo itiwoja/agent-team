@@ -1,5 +1,5 @@
 # 08. DB設計
-- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、`apps/worker/src/db/schema.ts`
+- プロジェクト：Agent-Team-Open ／ 版数：v0.6（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、`apps/worker/src/db/schema.ts`
 
 > **3行で**
 > 1. DB は本体の SQLite のファイル1つ（`/data/makase.db`）。Cloudflare 版の WorkspaceDO のスキーマ（`schema.ts`）を使い、表を6つ足して4つを変える（`sandbox_commands` は VM に付け替える）。

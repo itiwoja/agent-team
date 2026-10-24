@@ -1,5 +1,5 @@
 # 09. API設計
-- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[06_ux_design](06_ux_design.md)、`apps/worker/src/routes`
+- プロジェクト：Agent-Team-Open ／ 版数：v0.6（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec.md)、[06_ux_design](06_ux_design.md)、`apps/worker/src/routes`
 
 > **3行で**
 > 1. 画面向けの API は `/api/v1`。今の依頼・エージェントの API は旧 ID のまま移し、VM・確認・パック・設定・引っ越しの API を足す。
@@ -76,7 +76,7 @@ flowchart LR
 | API-082 | GET | `/api/health` | `ok` と版だけ（確かめなし） | FR-083 |
 | API-111 | GET | `/api/v1/host` | ホストの状態（版・DB・box-manager・VM の数・空きメモリ・空きディスク・`llm: { provider, model }`） | FR-083, FR-087 / SCR-023 |
 | API-083 | GET | `/api/v1/session` | 持ち主のログイン名・表示名 | FR-073 / 全画面 |
-| API-085 | GET | `/api/v1/events` | SSE（依頼・タスク・VM・確認の変化） | FR-018 / SCR-020, 021, 022 |
+| API-085 | GET | `/api/v1/events` | SSE（依頼・タスク・VM・確認の変化の合図。通し番号つき：D-196） | FR-018 / SCR-020, 021, 022 |
 | API-100 | GET | `/api/v1/counts` | 確認待ちなどの件数 | FR-018 / SCR-020 |
 | API-041 | GET | `/api/v1/agents` | エージェントの一覧（プロフィールの大きさを足す） | FR-072 / SCR-014 |
 | API-080 | POST | `/api/v1/agents` | したいことから1人作る | FR-072 / SCR-014 |
@@ -87,7 +87,7 @@ flowchart LR
 | API-073 | POST | `/api/v1/asks/:askId/answer` | 生成中の質問に答える | FR-061 / SCR-020 |
 | API-075 | GET | `/api/v1/asks/:askId` | 依頼のページ（VM の欄を足す） | FR-063 / SCR-021 |
 | API-076 | GET | `/api/v1/asks/:askId/messages` | 依頼の会話 | FR-063 / SCR-021 |
-| API-077 | POST | `/api/v1/asks/:askId/reply` | 回答への返事（旧 Node 版から移す） | FR-063 / SCR-020 |
+| API-077 | POST | `/api/v1/asks/:askId/reply` | 回答への返事（旧 Node 版から移す）。タスクが動いている間は次の歩みの頭に差し込む（D-195） | FR-063, FR-089 / SCR-020 |
 | API-016 | POST | `/api/v1/tasks/:taskId/cancel` | タスクを取り消す（VM も止める） | FR-074 / SCR-021 |
 | API-086 | GET | `/api/v1/boxes` | 動いている VM の一覧 | FR-074 / SCR-020, 023 |
 | API-088 | GET | `/api/v1/boxes/:boxId` | VM の状態・操作する人・依頼・交代の頼み・最新のスクショ | FR-078 / SCR-022 |
@@ -116,6 +116,16 @@ flowchart LR
 今の依頼・エージェントの API（API-041・072〜076・080・081）の中身は Cloudflare 版の `routes/` と `views/` のとおり。ここでは差分だけ書く。
 
 画面は今 `/api/v1/workspaces/w1/stream` を呼んでいるので、API-085 `/api/v1/events` への差し替えが画面側の変更になる。
+
+### API-085：SSE は合図（D-196）
+- 1 つの事象は `id:`（`workspace_events.id`。通し番号）と `data:`（`{ "type": "task.updated", "askId": "...", "taskId": "..." }` のように種類と対象の ID だけ）。中身（状態・スクショ・メッセージ）は載せない
+- 画面は合図を受けたら、対象を REST（API-075・076・086・087 など）で取りに行く。合図を落としても、次の合図か読み直しで追いつく
+- 番号が 1 つ飛んだら、その時点で開いている画面の対象をすべて読み直す。つなぎ直すときは `Last-Event-ID` を送り、本体は残っている事象から続きを流す。残っていなければ `event: reset` を送り、画面はすべて読み直す
+- `workspace_events` は 1 日で消す（今の掃除のまま）
+
+### API-077：送るときの ID（D-196）
+- 画面はメッセージの ID（UUIDv7）を作り、`Idempotency-Key` に入れて送る。送る前に自分のメッセージとして表示し、応答で確定させる（失敗なら「送れませんでした・再送」）
+- 本体は同じ `Idempotency-Key` の 2 回目を、1 回目の応答で返す（今の `idempotency_keys`）
 
 ### エンドポイント詳細
 
@@ -246,6 +256,7 @@ flowchart LR
 
 - box-agent は、同じ VM の中では操作を1つずつ実行する。`controlEpoch` が今の値と違えば 409 `STALE_CONTROL`。`actionId` が実行済みなら、前の結果をそのまま返す（2回目は実行しない）
 - `open_url` は `http`・`https` だけ受ける（`javascript:`・`file:`・`chrome:` などは 400 `VALIDATION_ERROR` で断る：D-158）
+- `read_page` は見るだけ。応答の `page` に、見えているボタン・リンク・入力欄・見出しの一覧（`role`・`name`・`center`・入力欄なら `value`）を最大 200 個入れる。秘密の欄の `value` は入れない（D-194）
 - `expect` があれば、確かめた中身のハッシュと比べ、違えば実行せずに 409 `CONTENT_CHANGED`
 - 応答：`{ "executed": true, "inspect": {...}, "screenshot": "<path>" }`。`inspect` は判定の材料（下）。判定が要る操作は、本体が先に `dryRun: true` で確かめだけを頼み、判定のあとに実行を頼む（そのときは `expect` に確かめたハッシュを入れる）
 
@@ -273,4 +284,4 @@ flowchart LR
 </details>
 
 ## このドキュメントで決まったこと
-- D-148、D-151、D-156、D-158、D-159、D-160、D-163、D-173（`clickable`）、D-176（パックの API）、D-178（VM のコマンド・ファイルの内部 API）、D-179（通知の API は次の版）（[00 決定事項ログ](00_overview.md#決定事項ログ)）
+- D-148、D-151、D-156、D-158、D-159、D-160、D-163、D-173（`clickable`）、D-176（パックの API）、D-178（VM のコマンド・ファイルの内部 API）、D-179（通知の API は次の版）、D-194（`read_page`）、D-195（動いているタスクへの返事）、D-196（SSE の合図と送るときの ID）（[00 決定事項ログ](00_overview.md#決定事項ログ)）

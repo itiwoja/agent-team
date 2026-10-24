@@ -1,5 +1,5 @@
 # 02. ユーザーストーリー
-- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[01_requirements](01_requirements.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v0.6（2026-10-24） ／ インプット：[01_requirements](01_requirements.md)
 
 > **3行で**
 > 1. 利用者は持ち主（P-1）だけ。OSS の利用者（自分の機械に置く開発者）も P-1。ストーリーは14本（US-049〜062）。

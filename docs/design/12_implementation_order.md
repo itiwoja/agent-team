@@ -1,5 +1,5 @@
 # 12. 実装の順番
-- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[11](11_tech_spec.md)、置き先の順番（D-190）
+- プロジェクト：Agent-Team-Open ／ 版数：v0.6（2026-10-24） ／ インプット：[11](11_tech_spec.md)、置き先の順番（D-190）
 
 > **3行で**
 > 1. 置き先は 3 段で進める：**段 1 手元の WSL2 の PC** → **段 2 クラウドの Linux VM（amd64）** → **段 3 ラズパイ（arm64）**。まず動かす場所を 1 つに絞り、不確かなところを早く測る。
@@ -55,10 +55,10 @@ flowchart LR
 ### 3. マイルストーン
 | MS | 段 | 作るもの | 確かめること | 対応する設計 |
 |---|---|---|---|---|
-| MS-1 VM の縦の 1 本 | 1 | VM のイメージ（Debian slim・Xvfb 1280×800・Chromium キオスク・x11vnc・noVNC・box-agent）。box-manager の最小（起こす・止める・API-103 の `dryRun` と `expect`）。本体なしで、CLI から computer use のループを回して試験ページを操作する | VM の起動時間と 1 歩の処理時間（amd64 の値）。スクショ 1 枚あたりの費用（R-82 の見積もりの根拠）。computer use のツールの版と画面の大きさの渡し方（NFR-063 の「実装時に決める」を回収）。Chromium の `SingletonLock`（D-171） | FR-074・075、[07 VM の中身](07_architecture.md#vm-の中身)、API-101〜103、ADR-043・044 |
-| MS-2 こわい操作 | 1 | `judgeBrowserAction`（合図 T-1〜T-6、`type` の改行、`open_url` のスキーム、`clickable` の T-3）。`browser_checks`（TBL-039）。承認を中身のハッシュに結びつけて `pending → executing` で 1 回だけ実行。画面が変わったら Claude に決め直させる（D-159） | 11 §11 の単体の観点がすべて緑。実の VM の試験ページ（パスワード欄・購入ボタン・同じ出どころとほかの出どころの iframe・canvas・JS のダイアログ・新しいタブ）で、確かめた先と実行した先が同じ | FR-076・077、ADR-047・052、API-110 |
-| MS-3 本体の移植と画面 | 1 | Node 24＋Hono＋`better-sqlite3`。`WsDb` のアダプターの作り直し（08 方針）。drive・runner・edge・kernel・repo の移植。歩みの記録（TBL-038）と再開の表（FR-084）。費用の予約と精算（FR-013）。SSE（API-085）。Tailscale の身元（FR-073）。Compose 一式（tailscale・本体・box-manager・Docker の中継・egress・VM）と開発用の上書き。画面は SCR-020・021・019・014・010 の差分と、新規の SCR-022・023 | 本体＋偽の box-manager で UC-046〜048 が通る。実行の途中で再起動して続く。交代と動いている呼び出しの重なり（D-163）。front だけで待ち受けていること（R-80） | [07](07_architecture.md)、[08](08_database.md)、[09](09_api.md)、ADR-042・046・049・051、FR-078・079・083・084 |
-| MS-4 パックとターミナル | 1 | パック（FR-085）と SCR-024。標準パック `announcement-page`（手順書 4 本：設計・制作・点検・仕上げ。D-186）。VM のターミナル（FR-086、API-117・118）とターミナルの許可リスト。GitHub の PR で届ける（FR-081、BR-10） | UC-052・053 が通る。告知ページ 1 件を PR まで届けられる。NFR-080 の打ち切りと出力の切り詰め | ADR-053・054、FR-085・086・081 |
+| MS-1 VM の縦の 1 本 | 1 | VM のイメージ（Debian slim・Xvfb 1280×800・Chromium キオスク・x11vnc・noVNC・box-agent）。box-manager の最小（起こす・止める・API-103 の `dryRun` と `expect`・`read_page`）。本体なしで、CLI から computer use のループを回して試験ページを操作する | VM の起動時間と 1 歩の処理時間（amd64 の値）。スクショ 1 枚あたりの費用（R-82 の見積もりの根拠）。computer use のツールの版と画面の大きさの渡し方（NFR-063 の「実装時に決める」を回収）。1 タスクの入力トークンと費用を、`read_page` あり・なしで比べる（Q-124 を決める材料）。Chromium の `SingletonLock`（D-171） | FR-074・075、[07 VM の中身](07_architecture.md#vm-の中身)、API-101〜103、ADR-043・044 |
+| MS-2 こわい操作 | 1 | `judgeBrowserAction`（合図 T-1〜T-6、`type` の改行、`open_url` のスキーム、`clickable` の T-3）。eval の土台（`eval:capture` と判定の eval。11 §11、D-199）。`browser_checks`（TBL-039）。承認を中身のハッシュに結びつけて `pending → executing` で 1 回だけ実行。画面が変わったら Claude に決め直させる（D-159） | 11 §11 の単体の観点がすべて緑。実の VM の試験ページ（パスワード欄・購入ボタン・同じ出どころとほかの出どころの iframe・canvas・JS のダイアログ・新しいタブ）で、確かめた先と実行した先が同じ | FR-076・077、ADR-047・052、API-110 |
+| MS-3 本体の移植と画面 | 1 | Node 24＋Hono＋`better-sqlite3`。`WsDb` のアダプターの作り直し（08 方針）。drive・runner・edge・kernel・repo の移植。歩みの記録（TBL-038）と再開の表（FR-084）。費用の予約と精算（FR-013）。SSE（API-085）。Tailscale の身元（FR-073）。Compose 一式（tailscale・本体・box-manager・Docker の中継・egress・VM）と開発用の上書き。道具とスキルの渡し方（FR-088）と動いているタスクへのメッセージ（FR-089）。Q-124 が採用なら子の文脈（ADR-057）。画面は SCR-020・021・019・014・010 の差分と、新規の SCR-022・023 | 本体＋偽の box-manager で UC-046〜048 が通る。実行の途中で再起動して続く。動いているタスクへの返事が次の歩みに入る（FR-089）。SSE の合図を落としても画面が追いつく（D-196）。交代と動いている呼び出しの重なり（D-163）。front だけで待ち受けていること（R-80） | [07](07_architecture.md)、[08](08_database.md)、[09](09_api.md)、ADR-042・046・049・051、FR-078・079・083・084 |
+| MS-4 パックとターミナル | 1 | パック（FR-085）と SCR-024。標準パック `announcement-page`（手順書 4 本：設計・制作・点検・仕上げ。D-186）。VM のターミナル（FR-086、API-117・118）とターミナルの許可リスト。GitHub の PR で届ける（FR-081、BR-10） | UC-052・053 が通る。告知ページ 1 件を PR まで届けられる。パックの通しの eval（依頼例 3 件）が回る。NFR-080 の打ち切りと出力の切り詰め | ADR-053・054、FR-085・086・081 |
 | MS-5 常時起動・隔離・手順書 | 2 | README（置く手順。Docker Engine の入れ方・`.env`・`tailscale serve`）。egress の全アドレスの判定とつなぐ先の固定（ADR-045）。`web_fetch` の同じ判定（D-164）。タイマー（期限・掃除・`VACUUM INTO`）。ログの JSON 行 | 11 §11 の隔離の試験（ほかの VM・本体・box-manager・ホストのブリッジ・192.168.x・100.64.x・`::1`・IPv4 入りの IPv6・DNS rebinding）。1 週間の放置。NFR-081 の予行 | NFR-064〜066・070〜073・079・081、R-79・80 |
 | MS-6 arm64 と実機の計測 | 3 | arm64 と amd64 の両方のイメージ（07「イメージは arm64・amd64 の両方」）。ラズパイの手順（Raspberry Pi OS 64bit・ディスクの暗号化の勧め：R-81） | NFR-062・067・068 の実測。外れたら画面を小さくする。4GB で本体＋VM 1 つ＋OS が入る | REQ-076、NFR-062・067・068・075、R-77・81 |
 | MS-7 Should | 3 のあと（段 1〜2 で手が空けば前倒し可） | 書き出し・取り込み（FR-082）。LLM の接続先 Bedrock・Vertex（FR-087）。接続先ごとの道具の宣言の切り替え | UC-050。接続先ごとのモデル名の形と道具の線引き（11 §11） | FR-082・087、ADR-056、R-87 |
@@ -74,6 +74,7 @@ MS-1 と MS-2 を本体より先に置く理由：設計のレビュー（[chang
 
 ### 5. 作りながら設計を直すとき
 - 設計と違う作りにしたとき、設計が「実装時に決める」としていたことを決めたとき（NFR-063 など）は、[00 決定事項ログ](00_overview.md#決定事項ログ) に D-xxx を 1 行足す。ADR を覆すときは新しい ADR
+- 動かして失敗したタスクは、直す前に eval のケースにする（`eval:capture`。11 §11、D-199）。直したら eval で確かめてから main に入れる
 - MS-1・MS-6 の実測の値は [05](05_non_functional.md) の NFR-067・068 の横に「実測」として書き足す
 - 画面や API を足したときは [06](06_ux_design.md)・[09](09_api.md) の表に行を足し、[00 トレーサビリティ表](00_overview.md#トレーサビリティ表) をつなぐ
 

@@ -1,5 +1,5 @@
 # 05. 非機能要件
-- プロジェクト：Agent-Team-Open ／ 版数：v0.5（2026-10-24） ／ インプット：[01_requirements](01_requirements.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v0.6（2026-10-24） ／ インプット：[01_requirements](01_requirements.md)
 
 > **3行で**
 > 1. いちばん小さいホストは「64bit・メモリ 4GB・空き 10GB」（ラズパイ 4/5 の 4GB）。このホストで VM を1つ動かせることを基準にする。
