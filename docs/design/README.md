@@ -39,7 +39,7 @@ flowchart LR
 | 常駐の仕組みを知りたい | [04 resident](04_functional_spec/resident.md) → [10 シーケンス図](10_diagrams/sequences.md#uc-054055きっかけからターン振り分け報告まで) | 15分 |
 | VM とこわい操作を知りたい | [04 vm](04_functional_spec/vm.md) → [10 シーケンス図](10_diagrams/sequences.md) | 15分 |
 | OSS と事業の方針を知りたい | [../oss-and-business.md](../oss-and-business.md) → [ADR-055](adr/ADR-055-agpl-license.md) | 10分 |
-| 実装する | [07](07_architecture.md) → [08](08_database/README.md) → [09](09_api/README.md) → [10](10_diagrams/README.md) | — |
+| 実装する | [07](07_architecture.md) → [08](08_database/README.md) → [09](09_api/README.md) → [10](10_diagrams/README.md) → [実装手順書](../implementation/README.md)（設計書の外。8 ステップ） | — |
 
 ## 主要な設計判断（ADR）
 | ADR | 決定 | 状態 |
