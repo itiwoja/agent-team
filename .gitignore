@@ -1,6 +1,7 @@
 node_modules
 dist
 coverage
+.output/
 *.tsbuildinfo
 
 # 秘密情報（値は手元の .env だけ。例は .env.example）
