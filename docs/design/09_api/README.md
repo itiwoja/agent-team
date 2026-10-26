@@ -1,10 +1,13 @@
 # 09. API設計
-- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
+- プロジェクト：Agent-Team-Open ／ 版数：v1.8（2026-10-26） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
 
 > **3行で**
 > 1. 画面向けの API は `/api/v1`（:8080・tailnet だけ）。依頼の API（API-072〜077・084）はやめ、チャット・タスク・きっかけ・記憶・VM・通知の API を足した。詳細は [resident.md](resident.md)（新しい API）と [vm.md](vm.md)（引き継ぐ API）。v1.6 で、外に出た通信・判定の規則・再実行・監査ログの検査・モデルの API（API-148〜152）を足した。v1.7 で、保管庫・家計簿・Home Assistant・チャットの添付・初回設定（API-153〜157）を足した。
 > 2. webhook の口は別の待ち受け（:8081）に `POST /hooks/:hookId`（API-129）だけ。Funnel で 8443 番だけを公開してそこに流し、身元ではなく署名で確かめる。画面と API の 443 番は公開しない（D-241）。「家の中だけで動かす」（`closed`）では Funnel を使わず、家や社内の GitLab・GHES から LAN の中で受ける（v1.6：D-341）。
 > 3. 本体と box-manager の間は内部 API（API-101〜109・113・117・118・143・144）。VM は 1 台（`box-browser`・`box-shell` の 2 つのコンテナの組）で、パスの `:boxId` は VM の世代。
+
+## 成長機構（v1.8）
+[API-158〜162：学習一覧・詳細・停止・実行詳細・設定](learning.md)。API-122のtask詳細にlearningRunIdを追加する。共通エラー定義に[LEARNING_*と冪等競合](learning.md#エラーコード)を含む。
 
 ## 🧭 判断してほしいこと
 なし

@@ -1,10 +1,13 @@
 # 10. ER図 / シーケンス図 / 状態遷移図
-- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ インプット：[08_database](../08_database/README.md)、[09_api](../09_api/README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.8（2026-10-26） ／ インプット：[08_database](../08_database/README.md)、[09_api](../09_api/README.md)
 
 > **3行で**
 > 1. シーケンス図は 17 本（[sequences.md](sequences.md)）。要約はターンを始めるときの 1 経路、VM は `box-browser` と `box-shell` の 2 コンテナの組で起きて眠り、本体の再起動では必ず新しい世代で起こし直す。v1.6 で、判定の詳細（Kernel・監査ログの鎖）と閉域の外向き・台帳を足した。v1.7 で、レシートの写真から家計簿まで（FR-112）と、家電の自動化を作る（FR-113）を足した。
 > 2. 状態遷移図は 13 個（[states.md](states.md)）。`wakes.status` は `queued`・`consumed`・`dropped`、`workspace.vm_home_state` は `ok`・`broken` の 2 状態。
 > 3. ER図は常駐の表と VM の表の 2 枚に分けて描き、VM の表の図に v1.6 の 4 表（`egress_events`・`policy_versions`・`audit_anchors`・`llm_models`）を、v1.7 で家の表の図（`vault_files`・`ledger_entries`・`home_devices`・`chat_attachments`）を足した（今の表の全体は `schema.ts`）。
+
+## 成長機構（v1.8）
+[UC-073〜076のシーケンス・program状態遷移](learning.md)と[新規5表のER図](../08_database/learning.md#全体図)を追加する。
 
 ## 🧭 判断してほしいこと
 なし

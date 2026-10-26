@@ -1,10 +1,16 @@
 # 07. システムアーキテクチャ
-- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ インプット：[04_functional_spec](04_functional_spec/README.md)、[05_non_functional](05_non_functional.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.8（2026-10-26） ／ インプット：[04_functional_spec](04_functional_spec/README.md)、[05_non_functional](05_non_functional.md)
 
 > **3行で**
 > 1. 1台の Linux ホスト（家に置くセットアップ済みのラズパイ「キット」も同じ）の上で、Docker Compose で 7 種類のコンテナを動かす：Tailscale・本体・box-manager・Docker の中継・egress・box-browser・box-shell（この2つの組が VM。持ち主に 1 台。止めても残るホームのボリュームつき）。キットではもう 1 つ、任意のサービスとして Home Assistant を入れる（v1.7）。
 > 2. 本体は Node＋SQLite の1プロセスで、受付・ルーター・メインのターン・裏のタスク・タイマー・記憶・文脈の組み立て・オートレビュー・Web Push を持つ。ループと状態はすべて本体にあり、VM には状態を置かない。
 > 3. 信頼の境界は3本：「画面と API の口には入口（Tailscale・Headscale・社内 LAN の直結）しか届かない」「webhook の口は `/hooks/` だけで、署名で確かめる」「VM（2 つのコンテナ）は外へ出られないネットワークにいて、外へは egress しか通れない」。v1.6 では、本体の外向きも窓口 `net` を通して許可リストと台帳に載せ、閉域モード（`network.mode = closed`。家の中だけで動かす）では許可した先にしか出ない。v1.7 では、家の保管庫（`makase-vault`）は本体だけがつなぎ、VM にはつながない。
+
+## 成長機構（v1.8）
+本体のNodeプロセスへTrace Recorder・Candidate Compiler・Validator・Program Registry・IR Executor・Hole Resolverを追加する。[レベル3の追加部品と接続](11_learning.md#全体図)を参照。
+レベル1・2の配置は既存ローカル構成を継承し、新しいサービスは増やさない。同期実行は同時1、検証はcheckpointでyieldし、32ノード・資源上限でラズパイを対象にする（NFR-099・100）。
+IRからの操作も既存Kernel・Intent・コネクタを経由する。Validatorは外部書込クライアントを持たない。候補生成LLMはIR候補のみ返し、検証oracle・採用状態を書けない。
+選定理由と代替案：[ADR-085](adr/ADR-085-learning-ir.md)・[ADR-086](adr/ADR-086-learning-activation.md)・[ADR-087](adr/ADR-087-learning-holes.md)。
 
 ## 🧭 判断してほしいこと
 | # | 種類 | 論点 | 選択肢 | おすすめ（理由） | 決まらないと止まるもの |

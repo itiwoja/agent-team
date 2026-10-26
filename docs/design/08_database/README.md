@@ -1,10 +1,13 @@
 # 08. DB設計
-- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、`apps/worker/src/db/schema.ts`
+- プロジェクト：Agent-Team-Open ／ 版数：v1.8（2026-10-26） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、`apps/worker/src/db/schema.ts`
 
 > **3行で**
 > 1. DB は本体の SQLite のファイル1つ（`/data/makase.db`）。Cloudflare 版の WorkspaceDO のスキーマ（`schema.ts`）を使い、v0.6 の表（TBL-031〜040）を引き継ぎ、常駐の表（TBL-041〜055。TBL-048・049 は作らない）を足す。v1.6 で、TBL-056〜059（外に出た通信の台帳・規則の版・監査ログの毎日の先頭・モデルの能力と単価）を足した。v1.7 で、家の保管庫の索引・家計簿・Home Assistant の機器の写し・チャットの添付（TBL-060〜063）を足した。
 > 2. 常駐の中心は `wakes`（きっかけ）・`turns`（メインのターン）・`chat_messages`（チャット）。依頼（`asks` まわり）は使わない（D-235）。記憶は 2 層：プロフィールの `memory_facts` と検索の `memory_search`（FTS5。ADR-070）。
 > 3. `boxes` は持ち主に 1 台の VM の世代（2 つのコンテナの組）で、画面の番を持つ。ブラウザの確認は今までどおり `browser_checks`（[ADR-052](../adr/ADR-052-browser-checks-table.md)）。判定には使った規則の版（`policy_sha256`）と入力（`verdict_input`）、誰が決めたか（`decided_by`）を残し、監査ログは鎖（`prev_hash`・`row_hash`）で改ざんを見つける。表の定義は [resident.md](resident.md)（新しい表）と [vm.md](vm.md)（引き継ぐ表）。
+
+## 成長機構（v1.8）
+[TBL-064〜068：観測・プログラム版・検証・run・hole](learning.md)を追加し、TBL-035へlearning設定を加える。自然言語のskill_proposalsやagent_skills.origin=learnedは復活させない。
 
 ## 🧭 判断してほしいこと
 | # | 種類 | 論点 | 選択肢 | おすすめ（理由） | 決まらないと止まるもの |
@@ -136,7 +139,7 @@ erDiagram
 | 表 | 理由 | 扱い |
 |---|---|---|
 | D1 の `users`・`memberships`・`sessions` | Tailscale の身元にした（ADR-046） | 作らない |
-| `skill_proposals`・`agent_evolution_events` | スキルが育つ仕組みを入れない（01 §7）。`agent_skills.origin` の `learned` も使わない（D-177） | 落とす |
+| `skill_proposals`・`agent_evolution_events` | 自然言語スキルの自動改変を入れない。`agent_skills.origin=learned`も使わない（D-177）。v1.8の実行IR学習はTBL-064〜068で別に持つ | 落とす |
 | `sandbox_sessions` | VM（`boxes`）に置き換わった（D-178）。`sandbox_commands` は `box_id` に付け替えて使う（TBL-040） | 使わない |
 | `asks`・`ask_pending_replies`・`ask_members`・`ask_messages` | チャット・きっかけ・ターン・タスクに置き換えた（D-235）。v0.6 から上げるときは、`asks` の文を `chat_messages` に写してから使わなくする | 使わない（落とすのは次のマイグレーション） |
 | TBL-036 `browser_profiles` | プロフィールは専用のボリュームに 1 つ（ADR-060・ADR-068） | 作らない |
