@@ -1,5 +1,5 @@
 // ベースイメージが digest で固定されているかの検査（SO-SC-02、D-50）
-// apps/*/Dockerfileの FROM と compose.yaml の image: が、@sha256:<64桁> つきか、前の段の名前であること。
+// apps/*/Dockerfile・docker/*/Dockerfileの FROM と compose.yaml の image: が、@sha256:<64桁> つきか、前の段の名前であること。
 // ARG の既定値は FROM の中で展開してから確かめる。使い方：node .github/scripts/check-image-digests.mjs
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -7,9 +7,11 @@ import { join } from "node:path";
 const root = join(import.meta.dirname, "..", "..");
 const DIGEST = /@sha256:[0-9a-f]{64}$/;
 
-const dockerfiles = readdirSync(join(root, "apps"), { withFileTypes: true })
-  .filter((d) => d.isDirectory())
-  .map((d) => join("apps", d.name, "Dockerfile"))
+const dockerfiles = ["apps", "docker"]
+  .filter((dir) => existsSync(join(root, dir)))
+  .flatMap((dir) => readdirSync(join(root, dir), { withFileTypes: true })
+    .filter((d) => d.isDirectory())
+    .map((d) => join(dir, d.name, "Dockerfile")))
   .filter((f) => existsSync(join(root, f)));
 
 const problems = [];
