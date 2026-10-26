@@ -34,3 +34,7 @@ VM は引き続き「持ち主に 1 台」と呼び、画面でも「VM」1 つ�
 - R-95・R-96・R-99 を消し、R-100（サンドボックスなしの Chromium）を足す
 - 隔離の試験（11 §11）は、消した仕掛けの試験を消し、`box-shell` から `box-browser` に届かないこと・`box-shell` の通信が許可リスト外に出られないこと・`shell:8000` だけが egress を通さず開けること・`box-browser` から shell-agent にトークンなしで何もできないことを入れる
 - 実装のときに確かめる：box-manager が egress に 2 つのアドレスを伝える方法（内部 API か固定アドレス）、Docker の既定の seccomp で Chromium のサンドボックスが動くかどうか
+
+## ステップ1.1の実測（2026-10-26）
+
+WSL2・amd64、Docker 29.8.1、Debian Chromium 156.0.8078.47で、既定seccompは`No usable sandbox!`で終了1、[専用seccomp](../../../docker/makase-browser-seccomp.md)は同じ非root・cap-drop ALL・read-only条件で起動した。rendererの入れ子のPID namespaceと追加seccompフィルタ、診断起動時の`chrome://sandbox`のPID/NET・Seccomp-BPF有効を確認した。[記録](../../implementation/records/step-1.1-wsl2.md)参照。arm64とegressの送り元識別は未検証。

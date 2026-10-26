@@ -413,6 +413,16 @@ flowchart LR
 
 </details>
 
+#### ステップ1.1で決めたこと（2026-10-26）
+
+D-391〜402は[成長機構の決定ログ](00_learning.md#決定事項ログ)。以下は実装時の選定であり、要件の緩和ではない。
+
+| ID | 決定内容 | 決定者 | 理由・確認先 |
+|---|---|---|---|
+| D-403 | box-browserはNode 24.21.0・Debian bookworm slimのmulti-platform digestを固定し、browserはuid/gid 10000。起動役は非rootのBash＋setsidとDockerのinit。`/tmp`は匿名volume、キャッシュ512MiBは1.7まで暫定 | 実装担当 | [起動手順](../../docker/box-browser/README.md)。amd64のread-only・cap-drop ALLで起動と終了を確認。arm64・容量実測は後続 |
+| D-404 | Docker 29.8.1が依存するMoby seccomp v0.2.3を土台に、Chromium用のnamespace・chrootの5規則を限定追加する | 実装担当 | [出典・差分](../../docker/makase-browser-seccomp.md)、[WSL2実測](../implementation/records/step-1.1-wsl2.md)。上流の既定拒否とclone3 ENOSYSを維持 |
+| D-405 | 1.1のnoVNCクライアントは公式v1.7.0のcommit固定ソースをホストの127.0.0.1で一時配信する | 実装担当 | 公式READMEに公式Dockerイメージの案内がない。[再現手順](../implementation/records/step-1.1-wsl2.md#画面確認の方法) |
+
 ### ID体系
 削除した旧設計書（94b6629 の前）の ID はコードのコメントに残っている。重ならないように続きから振り、今もある画面と API は旧 ID を引き継ぐ。v1.0 では v0.6 の ID を引き継ぎ、意味が変わったものは中身を書き換え、使わなくなったものは「使わない」と書いて残す（[changes/2026-10-24-resident-v1.md](changes/2026-10-24-resident-v1.md)）。
 

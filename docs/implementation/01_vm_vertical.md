@@ -30,12 +30,14 @@
 
 ## 手順
 ### 1.1 box-browser のイメージを単独で起こして VNC で見える
+進捗（2026-10-26）：[起動基盤](../../docker/box-browser/README.md)を実装し、WSL2で起動・表示・sandbox・終了・強制停止後の再作成を確認した（[実測記録](records/step-1.1-wsl2.md)）。**WebRTCの全面停止、ページズームの恒久的な100%固定は未達**。今回の確認は新規プロフィールの倍率1までであり、1.1の全記述やステップ1全体を完了扱いにはしない。
+
 いちばん分からないもの（Chromium が読み取りだけのルート・capability なしで立つか）から確かめる。box-manager も egress もまだ使わない。
 1. `docker/box-browser/Dockerfile` を書く。ベースは `apps/sandbox/Dockerfile` と同じく digest 固定。Debian の `chromium`・`xvfb`・`x11vnc`・`websockify`・`xdotool`・軽いウィンドウマネージャ・日本語フォントを入れ、利用者 `browser`（権限なし）を作る。`/home/browser` を `browser` の持ち物にしておく（名前つきボリュームの初回は、イメージ側の持ち主が引き継がれる）
 2. 仮の起動スクリプト（`docker/box-browser/start.sh`。イメージに入れ、`browser` 権限で動かす）で Xvfb（1280×800・24bit・`-nolisten tcp`）→ ウィンドウマネージャ → Chromium（キオスク・倍率 1・`--user-data-dir=/home/browser`・WebRTC と QUIC を切る・開発者ツールとダウンロードを切る）→ x11vnc＋websockify の順に起こす。起動の前に `SingletonLock`・`SingletonSocket`・`SingletonCookie` を消す（D-171）
 3. 本番と同じ制限で起こす：`docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --security-opt seccomp=docker/makase-browser-seccomp.json --shm-size 512m --memory 1.5g --cpus 1.5 --pids-limit 512 -v makase-browser-profile:/home/browser -p 127.0.0.1:6080:6080 <image>`。`/tmp` に書ける形にする。`/tmp` の置き方はキャッシュの置き場（D-321）が決まるまで未決で、「実装で決めること」で決める
-4. seccomp のファイルは、元になる Docker の既定のプロファイル（moby のリポジトリの `profiles/seccomp/default.json`。使う Docker の版に合う版を取る）に、`clone`・`unshare`・`setns` に `CLONE_NEWUSER` を許す項目を足して作る。外して起こし（既定のまま）、Chromium が「サンドボックスが使えない」で落ちること、足すと立つことを両方見る
-5. ホストから VNC を見る：使い捨ての noVNC を、公式のイメージの `docker run` でホスト側に起こし（イメージ名と版は起こすときに公式の README で確かめて固定する。box-browser のイメージには入れない。画面の作りは [06](../design/06_ux_design.md) のステップ 6）、`ws://127.0.0.1:6080` につなぐ
+4. seccomp のファイルは、使う Docker の版が依存する Moby の既定プロファイルを土台に、Chromium の USER/PID/NET namespace と内部の `chroot` に必要な規則を限定して足す。Docker 29.8.1 の出典・追加条件は [seccomp の説明](../../docker/makase-browser-seccomp.md)。外して起こし（既定のまま）、Chromium が「サンドボックスが使えない」で落ちること、足すと立つことを両方見る
+5. ホストから VNC を見る：noVNC の公式リリースをホストの127.0.0.1で一時配信し、`ws://127.0.0.1:6080` につなぐ。公式READMEには公式Dockerイメージの案内がないため、v1.7.0の静的ファイルを使う（[再現手順](records/step-1.1-wsl2.md#画面確認の方法)）。box-browser のイメージには入れない。画面への組み込みは [06](../design/06_ux_design.md) のステップ 6
 確かめ：noVNC に Chromium が全画面で映る。`docker inspect` で capability なし・`ReadonlyRootfs`・`no-new-privileges` が付いている。サンドボックスつきで立った/立たなかったの両方を、WSL2 のこの機械で記録した。
 
 ### 1.2 box-agent（スクショ・xdotool・CDP のパイプ・`read_page`・`open_url`）
