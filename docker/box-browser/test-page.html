@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'" />
+    <title>box-browser 日本語表示テスト</title>
+    <style>
+      * { box-sizing: border-box; }
+      body { margin: 0; background: #eef3f7; color: #17324d; font-family: "Noto Sans CJK JP", sans-serif; }
+      main { max-width: 1000px; margin: 56px auto; padding: 36px; background: white; border: 2px solid #b8cbdc; border-radius: 16px; }
+      h1 { font-size: 34px; margin: 12px 0 20px; }
+      p { line-height: 1.8; }
+      .label { color: #316245; font-weight: bold; }
+      label { display: block; margin-top: 24px; }
+      input, button { font: inherit; border-radius: 8px; padding: 12px 16px; }
+      input { display: block; width: 100%; max-width: 500px; margin: 8px 0 20px; border: 2px solid #6c849b; }
+      button { color: white; background: #175c9e; border: 2px solid #175c9e; cursor: pointer; }
+      button:focus-visible, input:focus-visible { outline: 3px solid #e69500; outline-offset: 4px; }
+      output { display: block; padding: 16px 0; font-weight: bold; }
+      footer { margin-top: 20px; border-top: 1px solid #b8cbdc; padding-top: 12px; font-size: 14px; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="label">手順 1.1 · ローカル試験ページ</div>
+      <h1>Chromium の画面が表示されています</h1>
+      <p>日本語表示の確認：こんにちは。漢字・ひらがな・カタカナ。<br />このページはコンテナ内のファイルです。外部サイト・画像・フォントへの通信は不要です。</p>
+      <p id="geometry">画面の大きさを確認しています。</p>
+      <label for="message">入力テスト（資格情報は入力しないでください）</label>
+      <input id="message" type="text" autocomplete="off" placeholder="ここに入力できます" />
+      <button id="count" type="button">クリックを確認</button>
+      <output id="result" aria-live="polite">クリック回数：0 回</output>
+      <footer>この表示だけではsandbox・policyの有効性を証明できません。実アカウントでは利用しないでください。</footer>
+    </main>
+    <script>
+      let count = 0;
+      document.getElementById("count").addEventListener("click", () => {
+        count += 1;
+        document.getElementById("result").textContent = `クリック回数：${count} 回`;
+      });
+      const showGeometry = () => {
+        document.getElementById("geometry").textContent =
+          `画面：${screen.width} × ${screen.height} ／ ページ：${innerWidth} × ${innerHeight} ／ 倍率：${devicePixelRatio}（期待値：1280 × 800・倍率 1）`;
+      };
+      window.addEventListener("resize", showGeometry);
+      showGeometry();
+    </script>
+  </body>
+</html>
