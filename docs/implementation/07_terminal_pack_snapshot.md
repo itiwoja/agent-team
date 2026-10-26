@@ -1,5 +1,5 @@
 # ステップ 7. ターミナル・パック・VM の控え
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[04 vm](../design/04_functional_spec/vm.md)（FR-079・086・100）、[04 tools](../design/04_functional_spec/tools.md)（FR-085・088・061）、[08 vm](../design/08_database/vm.md)、[08 resident](../design/08_database/resident.md)、[09 vm](../design/09_api/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)、[10 states](../design/10_diagrams/states.md)、[11](../design/11_tech_spec.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.3（2026-10-26） ／ 設計の版：v1.8 ／ インプット：[04 vm](../design/04_functional_spec/vm.md)（FR-079・086・100）、[04 tools](../design/04_functional_spec/tools.md)（FR-085・088・061）、[08 vm](../design/08_database/vm.md)、[08 resident](../design/08_database/resident.md)、[09 vm](../design/09_api/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)、[10 states](../design/10_diagrams/states.md)、[11](../design/11_tech_spec.md)
 
 > **3行で**
 > 1. 振り分け先のエージェントが VM のターミナルでコマンドを動かしてファイルを出し入れでき、パックを入れて使え、VM のホームを毎日控えて戻す・作り直す・ブラウザのデータを消すことができるようになる。

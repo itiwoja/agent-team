@@ -1,5 +1,5 @@
 # ステップ 3. 本体の土台
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 resident](../design/04_functional_spec/resident.md)（FR-101・103・107・116）・[04 vm](../design/04_functional_spec/vm.md)（FR-102・104・105・106）、[08 DB設計](../design/08_database/README.md)、[09 API設計](../design/09_api/README.md)、[04 tools](../design/04_functional_spec/tools.md)、[05 非機能](../design/05_non_functional.md)、[11 技術仕様書](../design/11_tech_spec.md)、[ADR-042](../design/adr/ADR-042-node-sqlite.md)・[046](../design/adr/ADR-046-tailscale-identity.md)・[049](../design/adr/ADR-049-docker-compose.md)・[074](../design/adr/ADR-074-closed-network.md)・[076](../design/adr/ADR-076-verifiable-decisions.md)・[078](../design/adr/ADR-078-llm-by-role.md)・[084](../design/adr/ADR-084-sign-in-with-chatgpt.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.3（2026-10-26） ／ 設計の版：v1.8 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 resident](../design/04_functional_spec/resident.md)（FR-101・103・107・116）・[04 vm](../design/04_functional_spec/vm.md)（FR-102・104・105・106）、[08 DB設計](../design/08_database/README.md)、[09 API設計](../design/09_api/README.md)、[04 tools](../design/04_functional_spec/tools.md)、[05 非機能](../design/05_non_functional.md)、[11 技術仕様書](../design/11_tech_spec.md)、[ADR-042](../design/adr/ADR-042-node-sqlite.md)・[046](../design/adr/ADR-046-tailscale-identity.md)・[049](../design/adr/ADR-049-docker-compose.md)・[074](../design/adr/ADR-074-closed-network.md)・[076](../design/adr/ADR-076-verifiable-decisions.md)・[078](../design/adr/ADR-078-llm-by-role.md)・[084](../design/adr/ADR-084-sign-in-with-chatgpt.md)・[成長機構](../design/11_learning.md)
 
 > **3行で**
 > 1. Cloudflare 版の `apps/worker` を Node 24＋Hono＋`better-sqlite3` の `apps/makase`（本体）に移し、Compose 一式（tailscale・makase・box-manager・docker-socket-proxy・egress・VM）で起動して、Tailscale の身元で入り、ホストと VM の状態が見えるところまで進める。依頼（asks）・Workflows・D1・Google ログインは外す。
@@ -191,7 +191,14 @@
 6. API-111 の `llm` を役割ごとの割り当てと状態（`openai_chatgpt` のつながり）に替える
 確かめ：`vision` のないモデルを `review` に、`computer_use = none` のモデルを `computer` に、単価が空のモデルをどれかに割り当てると 422 で、足りない能力が返る。`main` を `openai`（`OPENAI_API_KEY`）にして 1 回呼ぶと台帳に `llm_role = 'main'` の行が残る。ChatGPT の無料のアカウントでデバイスコードからサインインし、モデルの一覧が写り、`main` に割り当てて 1 回呼べる（R-113 の最初の確かめ。結果は「設計に戻すこと」）。リフレッシュのトークンが入れ替わる。`openai_chatgpt` を `computer` に選ぶと断られる。
 
+### 3.11 成長機構のDBとIRの土台（v1.8）
+[L3 本体の土台](learning.md#l3-本体の土台)を実施する。TBL-064〜068・learning設定、IR schema・固定演算・scope、独立した検証用oracleを追加する。
+
+確かめ：[S3-L01〜03](learning.md#終わる条件)が通る。マイグレーション番号は既存連番の次を使う。
+
 ## 終わる条件
+以下の表に加え、[S3-L01〜03](learning.md#終わる条件)を必須とする。
+
 | ID | 確かめること | 方法（コマンド・操作） | 設計の参照 |
 |---|---|---|---|
 | S3-01 | UC-042 の基本フロー：空のボリュームで `docker compose up -d` するだけで、DB が最新になり（前にバックアップ）、メインが作られ、VM のイメージの有無を確かめ、tailnet に入って画面の URL が開く | `.env` を埋めて起動→起動の記録（JSON の行）にマイグレーションの版・メインの作成・box-manager への到達が出る→`https://makase.<tailnet>.ts.net/` で `index.html`、`/api/health` が ok | UC-042、FR-083 |

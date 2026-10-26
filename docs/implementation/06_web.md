@@ -1,5 +1,5 @@
 # ステップ 6. 画面
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[06 画面・UX設計](../design/06_ux_design.md)、[09 API設計](../design/09_api/README.md)（[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)）、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[ADR-067](../design/adr/ADR-067-web-push-first.md)、v1.6・v1.7：[SCR-027〜029](../design/06_ux_design.md#scr-027外に出た通信)・[FR-101・103・107・116](../design/04_functional_spec/resident.md)・[FR-104〜106](../design/04_functional_spec/vm.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-076](../design/adr/ADR-076-verifiable-decisions.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.3（2026-10-26） ／ 設計の版：v1.8 ／ インプット：[06 画面・UX設計](../design/06_ux_design.md)、[09 API設計](../design/09_api/README.md)（[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)）、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[ADR-067](../design/adr/ADR-067-web-push-first.md)、v1.6・v1.7：[SCR-027〜029](../design/06_ux_design.md#scr-027外に出た通信)・[FR-101・103・107・116](../design/04_functional_spec/resident.md)・[FR-104〜106](../design/04_functional_spec/vm.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-076](../design/adr/ADR-076-verifiable-decisions.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)・[学習画面](../design/06_learning.md)
 
 > **3行で**
 > 1. スマホから頼む・見る・確認する・タップで交代するところまでが、`apps/web` だけでできるようになる。ステップ 3〜5 で curl が通った API（09 の画面向けの一覧）を、06 の画面（家の画面 SCR-030〜033 を除く）につなぐ。ステップ 7 で作る API（114〜116・133〜135・138）は、このステップでは画面の骨と `qa/` の架空データで作り、実 API での確かめはステップ 7。
@@ -145,7 +145,14 @@ P1の画面契約：T-1は通常の承認でなく交代カード。API-087のef
 5. 6.2〜6.6 の確かめを、Compose の本物の構成（ScriptedLlm と偽の box-manager、または実の VM）で通しで 1 回やる。06 の画面ごとの要素を下の「終わる条件」の表で潰す
 確かめ：Compose の本体をスマホで開き、頼む → 確認 → 画面を見て → タップで交代 → 返す、まで 1 回通る。PWA を更新したあと（`sw.js` の変更）古い画面が残らない
 
+### 6.8 学習した処理と実行詳細（v1.8）
+5.9を前提に[L6 画面](learning.md#l6-画面)を実施する。SCR-034・035を設定とタスク詳細から開き、検証根拠・期限・穴・費用・停止を表示する。
+
+確かめ：[S6-L01〜02](learning.md#終わる条件)が通る。学習画面は320px幅・キーボードでも操作できることを確認する。
+
 ## 終わる条件
+以下の表に加え、[S6-L01〜02](learning.md#終わる条件)を必須とする。
+
 | ID | 確かめること | 方法（コマンド・操作） | 設計の参照 |
 |---|---|---|---|
 | S6-01 | SCR-020：メッセージ（持ち主・メイン・`system`）・`text`/`file`/`choices`・タスクの帯・確認の件数・「考えています…」・空の例 3 つ・再送・上限で止まったときの設定へのリンクが出る | 6.2 の確かめ。360px と 1280px のスクショ | 06 SCR-020、FR-093、D-322 |

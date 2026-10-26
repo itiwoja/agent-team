@@ -1,5 +1,5 @@
 # ステップ 9. 隔離の試験・導入手順書・段 2 と 3・キット
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[11 技術仕様書](../design/11_tech_spec.md)（§10・§11・§12）、[05 非機能](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)（デプロイ構成・コンテナ表）、[01 要件](../design/01_requirements.md)（§2・REQ-076・077）、[UC-042](../design/03_use_cases.md)、[ADR-041](../design/adr/ADR-041-linux-host.md)・[045](../design/adr/ADR-045-egress.md)・[049](../design/adr/ADR-049-docker-compose.md)・[055](../design/adr/ADR-055-agpl-license.md)・[065](../design/adr/ADR-065-webhook-funnel.md)・[074](../design/adr/ADR-074-closed-network.md)・[079](../design/adr/ADR-079-home-agent-kit.md)・[083](../design/adr/ADR-083-classify-and-local-on-pi.md)・[084](../design/adr/ADR-084-sign-in-with-chatgpt.md)、[FR-101](../design/04_functional_spec/resident.md#fr-101閉域モード)・[FR-109](../design/04_functional_spec/resident.md#fr-109キットの初回設定)・[FR-116](../design/04_functional_spec/resident.md#fr-116chatgpt-でサインイン)、[運用契約](../design/11_operations.md)（閉域・キットの作り方と手渡し・ChatGPT のサインインと枠・Home Assistant の更新）
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.3（2026-10-26） ／ 設計の版：v1.8 ／ インプット：[11 技術仕様書](../design/11_tech_spec.md)（§10・§11・§12）、[05 非機能](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)（デプロイ構成・コンテナ表）、[01 要件](../design/01_requirements.md)（§2・REQ-076・077）、[UC-042](../design/03_use_cases.md)、[ADR-041](../design/adr/ADR-041-linux-host.md)・[045](../design/adr/ADR-045-egress.md)・[049](../design/adr/ADR-049-docker-compose.md)・[055](../design/adr/ADR-055-agpl-license.md)・[065](../design/adr/ADR-065-webhook-funnel.md)・[074](../design/adr/ADR-074-closed-network.md)・[079](../design/adr/ADR-079-home-agent-kit.md)・[083](../design/adr/ADR-083-classify-and-local-on-pi.md)・[084](../design/adr/ADR-084-sign-in-with-chatgpt.md)、[FR-101](../design/04_functional_spec/resident.md#fr-101閉域モード)・[FR-109](../design/04_functional_spec/resident.md#fr-109キットの初回設定)・[FR-116](../design/04_functional_spec/resident.md#fr-116chatgpt-でサインイン)、[運用契約](../design/11_operations.md)（閉域・キットの作り方と手渡し・ChatGPT のサインインと枠・Home Assistant の更新）・[学習の評価・運用](../design/11_learning.md)
 
 > **3行で**
 > 1. 段 1（WSL2）でステップ 1〜8 が終わった構成を、(a) 11 §11 の隔離の試験を全体の構成で全部通し、(b) 設計が「手順書に書く」とした項目を集めてルートの `README.md`（導入手順書）に書き、(c) 段 2（クラウドの amd64 の Linux VM）で 1 週間放置し、(d) 段 2 で `closed` を 1 日動かし、(e) 段 3（ラズパイの arm64）で実機の計測をし、キット（セットアップ済みのラズパイ 5）のイメージを作って家の機能と ChatGPT の無料アカウントを実機で確かめ、(f) キットと README の第三者テスト・eval (4)・リリース前の確かめで閉じる。
@@ -210,7 +210,14 @@ README の約束（`TARGETARCH` 依存は arm64 の分岐も書く・Compose と
 
 確かめ：上の 1〜6 がすべて OK で、一覧に残してある。
 
+### 9.13 学習機構の効果測定と運用（v1.8）
+6.8までの学習機構とステップ8を前提に[L9 評価とリリース](learning.md#l9-評価とリリース)を実施する。採用試験と分離したholdoutで品質・推論削減・学習込み費用を測り、ラズパイ5 16GBで性能と再開を測る。保持・停止・結果不明・バックアップ復旧の手順を導入資料へ追加する。
+
+確かめ：[S9-L01〜03](learning.md#終わる条件)とNFR-098〜101を満たす。実モデル評価・実機計測の未実施は未完了として残す。
+
 ## 終わる条件
+以下の表に加え、[S9-L01〜03](learning.md#終わる条件)を必須とする。
+
 README の段ごとの終わる条件、11 §11 の隔離・VM・実機・eval の行、05 の測り方の表を ID つきで 1 つにした表。
 
 | ID | 確かめること | 方法 | 設計の参照 |

@@ -1,5 +1,5 @@
 # ステップ 5. きっかけと外とのつながり
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[FR-094〜096・FR-017・FR-090・FR-091](../design/04_functional_spec/resident.md)、[FR-081・FR-083](../design/04_functional_spec/tools.md)、[常駐の DB（TBL-041・044〜046・054・055）](../design/08_database/resident.md)、[VM の DB（TBL-037）](../design/08_database/vm.md)、[変える表](../design/08_database/README.md)、[API](../design/09_api/README.md)、[UC-049・056・057 と BR-13](../design/03_use_cases.md)、[NFR-064・085・086](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)、[11 §10・§11](../design/11_tech_spec.md)、v1.6・v1.7：[FR-101](../design/04_functional_spec/resident.md#fr-101閉域モード)・[FR-116 の 6](../design/04_functional_spec/resident.md#fr-116chatgpt-でサインイン)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)（D-342・D-389）
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.3（2026-10-26） ／ 設計の版：v1.8 ／ インプット：[FR-094〜096・FR-017・FR-090・FR-091](../design/04_functional_spec/resident.md)、[FR-081・FR-083](../design/04_functional_spec/tools.md)、[常駐の DB（TBL-041・044〜046・054・055）](../design/08_database/resident.md)、[VM の DB（TBL-037）](../design/08_database/vm.md)、[変える表](../design/08_database/README.md)、[API](../design/09_api/README.md)、[UC-049・056・057 と BR-13](../design/03_use_cases.md)、[NFR-064・085・086](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)、[11 §10・§11](../design/11_tech_spec.md)、v1.6・v1.7：[FR-101](../design/04_functional_spec/resident.md#fr-101閉域モード)・[FR-116 の 6](../design/04_functional_spec/resident.md#fr-116chatgpt-でサインイン)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)（D-342・D-389）・[成長機構](../design/11_learning.md)
 
 > **3行で**
 > 1. 時刻（ルーチン・予約した確認）と外の出来事（GitHub などの webhook）でメインが起き、留守の間の知らせが Web Push でスマホに届き、カレンダーと GitHub の書き込みが確認つきで通って、決まるとメインが `approval_done` で起きる。
@@ -143,7 +143,14 @@ gateway の「移す元 → 移す先」（開いて確かめた。`apps/gateway
 5. 自動のきっかけと ChatGPT の枠（D-389）：ルーチン（5.1）・予約（5.2）・webhook（5.3）で始まるターンと、そこから `delegate` したタスクは、`llm.chatgpt_allow_auto = false` のあいだ `openai_chatgpt` を呼ばない。ステップ 4 の `clientFor` の口を使い、割り当てが `openai_chatgpt` のときは呼ばずに、きっかけを `dropped`（`chatgpt_auto_off`）にして `role = 'system'` の知らせを 1 日 1 回出す（日次の上限で `auto` を捨てるのと同じ扱い：4.2 の 5）。`true` にすれば使う
 確かめ：(1) `closed` にして受け口を作っても、tailnet の外からの `curl -m 10 -si https://<host>:8443/hooks/<hookId>` がつながらず、API-128 の `funnel` が `off`。(2) `closed` で `send_to_owner` を呼んでも `push_outbox` の行ができず、SSE の `chat.created` は出る。(3) 窓口 `net` の台帳に、カレンダーの呼び出しが目的 `tool` で 1 行ずつ残る。(4) メインを偽の `openai_chatgpt` に割り当て、ルーチンを今すぐ動かす（API-136）と、偽の接続先の呼び出しが 0 件で、きっかけが `dropped`（`chatgpt_auto_off`）と `system` の行。チャットから頼むと呼ばれる。`chatgpt_allow_auto = true` にするとルーチンでも呼ばれる
 
+### 5.9 学習IRのカレンダー接続と管理API（v1.8）
+4.11と5.6を前提に[L5 外部接続とAPI](learning.md#l5-外部接続とapi)を実施する。既存Intentへのpreflight・effect key・結果照合を追加し、API-158〜162とAPI-122のlearningRunId、SSEをつなぐ。
+
+確かめ：[S5-L01〜04](learning.md#終わる条件)とUC-073〜076が通る。送信後の結果不明を通常経路で作り直さない。
+
 ## 終わる条件
+以下の表に加え、[S5-L01〜04](learning.md#終わる条件)を必須とする。
+
 | # | 確かめること | 方法（コマンド・操作） | 設計の参照 |
 |---|---|---|---|
 | S5-01 | UC-056 基本フロー：毎分のタイマーが `next_run_at` を過ぎたルーチンと `at` を過ぎた予約からきっかけ（`routine`・`scheduled`）を作り、ルーチンの次の時刻を計算し直す | 5.1・5.2 の確かめ。`wakes` の行と `next_run_at` を見る | UC-056、FR-094・095 |

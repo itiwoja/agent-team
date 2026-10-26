@@ -1,5 +1,5 @@
 # ステップ 4. 常駐の仕組み
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[常駐の機能仕様](../design/04_functional_spec/resident.md)・[道具の機能仕様](../design/04_functional_spec/tools.md)・[VM の機能仕様](../design/04_functional_spec/vm.md)・[常駐の表](../design/08_database/resident.md)・[VM の表](../design/08_database/vm.md)・[常駐の API](../design/09_api/resident.md)・[状態遷移](../design/10_diagrams/states.md)・[シーケンス](../design/10_diagrams/sequences.md)・[ユースケース](../design/03_use_cases.md)・[技術仕様 §7・§11](../design/11_tech_spec.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)（v1.6・v1.7：FR-107・108・116）
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.3（2026-10-26） ／ 設計の版：v1.8 ／ インプット：[常駐の機能仕様](../design/04_functional_spec/resident.md)・[道具の機能仕様](../design/04_functional_spec/tools.md)・[VM の機能仕様](../design/04_functional_spec/vm.md)・[常駐の表](../design/08_database/resident.md)・[VM の表](../design/08_database/vm.md)・[常駐の API](../design/09_api/resident.md)・[状態遷移](../design/10_diagrams/states.md)・[シーケンス](../design/10_diagrams/sequences.md)・[ユースケース](../design/03_use_cases.md)・[技術仕様 §7・§11](../design/11_tech_spec.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)（v1.6・v1.7：FR-107・108・116）・[成長機構](../design/11_learning.md)
 
 > **3行で**
 > 1. チャットで頼むと、メインが答えるか `delegate` で振り分け、タスクが VM で仕事をして `report` し、メインが起きて `send_to_owner` で持ち主に伝えるところまで動く。確かめは curl と SSE（画面はステップ 6）。
@@ -134,7 +134,14 @@
 5. 自動のきっかけで ChatGPT を使わない（D-389）の判定の口：`clientFor` が `budgetClass` を受け、`auto` で `llm.chatgpt_allow_auto = false` なら `openai_chatgpt` を返さない（理由つきで `halted`）。ルーチン・予約・webhook で実際に確かめるのはステップ 5。
 確かめ：(1) 役割ごとに別の ScriptedLlm（接続先ごとの偽のクライアント）を差し、ターン・タスク・computer use・要約・記憶の更新がそれぞれ割り当てた方に届く。(2) `openai_compatible` を割り当てたターンで `cache_control` が付かず、先頭のバイトは `anthropic` のときと同じ。(3) 偽の `openai_chatgpt` が 429 をストリームの途中で返すと、タスクが `halted`・`system` の行と `push_outbox` が出て、ほかの接続先の呼び出しが 0 件。(4) 実の VM の試験ページ（ステップ 2）で、`computer` を Claude と OpenAI に替えて同じ操作を頼み、どちらも `dryRun` で確かめた先と実行した先が同じ（有料。`LLM_SESSION_BUDGET_MICRO_USD` で上限をかける）。
 
+### 4.11 実行履歴からの学習と再利用（v1.8）
+3.11を前提に[L4 常駐と学習](learning.md#l4-常駐と学習)を実施する。型付き受付と観測、候補生成・独立検証・自動採用、IR実行と穴、停止・失効・保持・再開を既存の本体へ接続する。この段階は偽のカレンダーとScriptedLlmを使い、実接続は5.9で行う。
+
+確かめ：[S4-L01〜05](learning.md#終わる条件)が通る。通常のタスク再開だけではIR再利用の完了としない。
+
 ## 終わる条件
+以下の表に加え、[S4-L01〜05](learning.md#終わる条件)を必須とする。
+
 | ID | 確かめること | 方法（コマンド・操作） | 設計の参照 |
 |---|---|---|---|
 | S4-01 | UC-044：チャットで頼むと `wakes`（`chat`）が入り、202 が返る。`choices` のボタンの返事が `text`＋`reply_to` で入る | `curl -X POST /api/v1/messages`（`Idempotency-Key`・`Origin`・`X-Makase-Request: 1`・`Tailscale-User-Login` を付ける）と `curl -N /api/v1/events` | UC-044・API-119 |

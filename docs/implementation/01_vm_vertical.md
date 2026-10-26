@@ -1,5 +1,5 @@
 # ステップ 1. VM の縦の 1 本
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)（v1.6 の [FR-102](../design/04_functional_spec/vm.md#fr-102内部ホストの許可) の固定の除外）、[04 resident の FR-103](../design/04_functional_spec/resident.md#fr-103外に出た通信の台帳)（egress の記録）、[09 vm](../design/09_api/vm.md)、[08 vm](../design/08_database/vm.md)、[ADR-068](../design/adr/ADR-068-browser-shell-split.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.3（2026-10-26） ／ 設計の版：v1.8 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)（v1.6 の [FR-102](../design/04_functional_spec/vm.md#fr-102内部ホストの許可) の固定の除外）、[04 resident の FR-103](../design/04_functional_spec/resident.md#fr-103外に出た通信の台帳)（egress の記録）、[09 vm](../design/09_api/vm.md)、[08 vm](../design/08_database/vm.md)、[ADR-068](../design/adr/ADR-068-browser-shell-split.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)
 
 > **3行で**
 > 1. 本体（`makase`）なしで、CLI から Claude の computer use のループを回し、VM（`box-browser`・`box-shell` の組）の中の Chromium で試験ページを操作できるようになる。
