@@ -1,10 +1,10 @@
 # 04. 機能仕様：道具とそのほか
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[04 機能仕様](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ 親：[04 機能仕様](README.md)
 
 > **3行で**
 > 1. 上限（FR-013）はタスクに加えてメインのターンにもかかり、日次は全体（`daily_usd`）と自動のきっかけ用（`daily_auto_usd`）の 2 つを持つ。
 > 2. 振り分け先の選び方（FR-061）・エージェントの作成（FR-072）・パック（FR-085）は、メインの振り分けの材料になる。道具は安い順に試し、スキルとコネクタの詳細は要るときだけ読む（FR-088）。
-> 3. 持ち主の確かめ（FR-073）・カレンダーと GitHub（FR-081）・状態（FR-083）は v0.6 を引き継ぎ、常駐型の分を足した。
+> 3. 持ち主の確かめ（FR-073）・カレンダーと GitHub（FR-081）・状態（FR-083）は v0.6 を引き継ぎ、常駐型の分を足した。v1.6 で、LLM の接続先ごとの道具の宣言（FR-087）を書き、閉域・パスキー・単価の宣言を各 FR に足した。v1.7 で、家の保管庫の道具（`vault_*`）と Home Assistant の道具（`home_*`）の宣言を足し（[下](#保管庫と-home-assistant-の道具v17)）、どれが Kernel の判定を通るかを決めた（D-373・378）。
 
 ## 全体図
 ```mermaid
@@ -13,11 +13,14 @@ flowchart LR
  M -->|"安い順 FR-088"| T1["知っていること・スキル"]
  M --> T2["コネクタ FR-081"]
  M --> T3["Web FR-080"]
+ M --> T5["保管庫 vault_*<br/>HA home_*（v1.7）"]
+ T5 -->|"Kernel が判定"| K["機器の区分 BR-15"]
  L --> T4["VM（04 vm）"]
+ L --> T5
  M -.->|"上限 FR-013"| B["費用・歩数・時間"]
  L -.-> B
 ```
-見てほしいところ：VM（4 番目の手段）を使うのは振り分け先だけ。上限はメインにも振り分け先にもかかる。
+見てほしいところ：VM（4 番目の手段）を使うのは振り分け先だけ。上限はメインにも振り分け先にもかかる。保管庫と家電の道具はメインも振り分け先も使えるが、Kernel の判定を通る（v1.7）。
 
 ---
 
@@ -26,7 +29,7 @@ flowchart LR
 |---|---|---|
 | タスク（振り分け先） | $3・200 歩・操作 300 回・55 分（外側の打ち切り 60 分）・コマンド 200 回（D-141・D-175） | `halted`（`budget_exceeded`・`timeout`）。メインに報告 |
 | メインのターン | $1・40 歩・10 分（D-230） | `halted`（`budget_exceeded`・`steps_exceeded`・`timeout`。D-289）。持ち主に知らせる（FR-091） |
-| 日次（全体） | `daily_usd` $10（メイン・振り分け先・オートレビュー・記憶の更新・要約のすべての合計） | 下の「費用の区分」 |
+| 日次（全体） | `daily_usd` $10（メイン・振り分け先・オートレビュー（入れたときだけ）・記憶の更新・要約のすべての合計。接続先ごとに宣言した単価で計算する：FR-087・D-355） | 下の「費用の区分」 |
 | 日次（自動のきっかけ） | `daily_auto_usd` $7（`routine`・`scheduled`・`webhook` で始まったターンと、そこから生まれたタスク・オートレビュー・要約の合計） | 下の「費用の区分」 |
 
 - 費用の区分（D-322）：ターンの区分 `turns.budget_class`（`chat`・`auto`）は、ターンを始めるときに決めて以後変えない。まとめたきっかけに `chat`・`approval_done`・`steer`（持ち主から）が 1 つでもあれば `chat`、それ以外は `auto`。タスク・オートレビュー・要約の費用は、それを生んだターンの区分を引き継ぐ（`usage_records.budget_class` は集計のための印）
@@ -35,11 +38,12 @@ flowchart LR
  - 動いているタスクは、その区分の上限に届いたら `halted`（`budget_exceeded`）、ターンは `halted`（`daily_budget_exceeded`。D-289）
  - `delegate` の確かめ（FR-092）：そのターンの区分で使える今日の残りがタスクの上限（$3）に届かなければ、エラー「今日の上限が近いので始められない」
 - 時間は確認待ち・交代待ちを除いて数える（`paused_ms`：D-174）
-- LLM を呼ぶ前に見積もりの費用を予約し、終わったら精算する（D-153）。キャッシュの読み・5 分の書き・1 時間の書きのトークンもそれぞれの単価で数える（D-263）
+- LLM を呼ぶ前に見積もりの費用を予約し、終わったら精算する（D-153）。単価は `llm_models`（TBL-059）に宣言した値で、ローカル LLM は 0。単価が空のモデルは動かさない（FR-107・D-353・355）。キャッシュの読み・5 分の書き・1 時間の書きのトークンもそれぞれの単価で数える（D-263）
 - 上限は設定（API-096）で変えられ、次のタスク・ターンから効く（D-151）。変えたことは、ポリシーの新しい版（`workspace_policies`）として残る
 
 ### FR-016：監査ログ
 - ハッシュの鎖つきの追記だけのログ（Cloudflare 版 `db/audit.ts` を引き継ぐ）。足す事象は [移植元](#移植元) の表
+- v1.6：行に `prev_hash`・`row_hash`（SHA-256）を持ち、毎日 0 時の末尾を `audit_anchors`（TBL-058）に残す。鎖の検査と控えは [FR-106](vm.md#fr-106監査ログの鎖と検査)（D-350）。判定の行には `policy_sha256`・`verdict_input`・`decided_by` が付く（FR-104・105）
 
 ### FR-018：進捗の配信
 - SSE（API-085）で、画面に「何か変わった」の合図だけを流す。中身は画面が REST で取りに行く（D-196）。チャット・ターン・タスク・VM・確認・交代の変化を流す
@@ -57,18 +61,18 @@ flowchart LR
 - メインの指示は消せないが、持ち主が「手直し」（指示の後ろに足す文、2,000 字まで）を書ける
 
 ### FR-080：Web 検索・取得
-- `web_search` は Claude の Web 検索ツール（最新版）。`web_fetch` は本体の実装で、egress と同じアドレスの判定をかける（D-164）。どちらの結果も汚染する
+- `web_search` は接続先のサーバー側の Web 検索ツール（Anthropic・OpenAI にある）を使う。サーバー側の道具がない接続先（OpenAI 互換・`closed`）では出さない（FR-087）。`web_fetch` は本体の実装で、egress と同じアドレスの判定をかけ、外向きは台帳に残る（FR-103。D-164）。`closed` では `network.allow_hosts` の先しか取れない。どちらの結果も汚染する
 
 ### FR-073：持ち主の確かめ
 - 入力：`/api/v1/*` のすべてのリクエスト
 - 処理：
  1. 画面向けの待ち受けは front ネットワークの口だけ。そこに届くのは Tailscale のコンテナだけ（[07](../07_architecture.md#レベル2コンテナ図)）。ほかのコンテナとは同じ口を共有しない
- 2. ヘッダー `Tailscale-User-Login` が設定 `OWNER_LOGIN` と一致するか（大文字小文字は区別しない）
+ 2. 入口が Tailscale・Headscale のとき：ヘッダー `Tailscale-User-Login` が設定 `OWNER_LOGIN` と一致するか（大文字小文字は区別しない。Headscale でも `tailscale serve` が同じヘッダーを付ける）。入口が社内 LAN の直結のとき（D-358）：本体のパスキー（WebAuthn）でログインし、HttpOnly・Secure・SameSite=Strict のセッション Cookie（12 時間）を確かめる。最初のパスキーは `docker compose exec makase makase owner-enroll` が出す 1 回限りの URL で登録する（NFR-064。FR-101）
  3. GET 以外は、`Origin` が自分の URL であり、ヘッダー `X-Makase-Request: 1` があることを確かめる。WebSocket の開始も `Origin` を確かめる
 - エラー：
  | 条件 | 挙動 | code |
  |---|---|---|
- | ログイン名がない・違う | 403 | `NOT_OWNER` |
+ | ログイン名がない・違う（LAN 直結ではセッションがない・切れた） | 403 | `NOT_OWNER` |
  | Origin・専用ヘッダーが違う | 403 | `CSRF_REJECTED` |
 - 補足：`GET /api/health`（API-082）だけは確かめない。返すのは `ok` と版だけ。ホストの状態は API-111（確かめあり）
 - webhook の口（:8081）は別の待ち受けで、`POST /hooks/:hookId`（API-129）しか置かない。Funnel が公開するのは 8443 番だけで、それを :8081 に流す。画面と API の 443 番（:8080）は Funnel にしない（Funnel の公開はポート単位なので。D-241）。Funnel の通信には `Tailscale-User-Login` が付かないので、ここでは身元を見ず、署名で確かめる（FR-096・ADR-065）。:8081 に `/api/*` が届いたら 404
@@ -85,7 +89,7 @@ flowchart LR
 
 ### FR-083：起動と状態
 - 起動の確かめ：64bit・空きメモリ・必須の設定・DB のマイグレーション（前にバックアップ）・VM のイメージ
-- 状態（API-111・SCR-023）：版・DB・box-manager・VM（動いているか・世代・画面の番・ホームの大きさ・最後の控え・今の VM の操作（`vm_op`）・「ブラウザのサンドボックスなし」の表示）・空きディスク（3GB を切ったら警告：D-265）・空きメモリ・動いているターンとタスクの数・今日の費用・キャッシュの当たり率と外れの件数（直近 24 時間。FR-098）・Funnel の状態（受け口があるか・公開されているか）
+- 状態（API-111・SCR-023）：版・DB・box-manager・VM（動いているか・世代・画面の番・ホームの大きさ・最後の控え・今の VM の操作（`vm_op`）・「ブラウザのサンドボックスなし」の表示）・空きディスク（3GB を切ったら警告：D-265）・空きメモリ・動いているターンとタスクの数・今日の費用・キャッシュの当たり率と外れの件数（直近 24 時間。FR-098）・Funnel の状態（受け口があるか・公開されているか）・閉域の状態（`network.mode`、許可リスト外への外向きの件数、台帳の書き漏れの件数：FR-101・103）・オートレビューを入れているか（`review.auto.enabled`。既定は切る：D-351）・判定の規則の今の版（`policy_sha256`）
 
 ### FR-085：パック
 - 入力：パックの JSON ファイル。`/opt/makase/packs/*.json`（イメージに同梱の標準パック）と `/data/packs/*.json`（持ち主が置くパック。データのボリューム）。DB には持たない。入れる・外すは API-115・116
@@ -130,10 +134,53 @@ flowchart LR
 - 補足：手で書いたスキル（`agent_skills`）は残す。`origin` は `pack` だけ使い、`learned` は使わない（D-177）。方針は D-176・ADR-053
 
 ### FR-087：LLM の接続先
-- 使わない（次の版。v1.4：D-315）
-- 接続先は Anthropic の API 直だけ。`llm/claude.ts` のクライアント作成を 1 か所にまとめ、差し替えの口だけ残す
-- computer use は `computer_toolset_20260801`、`web_search` は最新版、コネクタの道具の遅い読み込み（tool search・`defer_loading`）は使う
-- 費用の見積もりと精算（FR-013）は Anthropic 直の単価で行う
+- v1.4 の「使わない（Anthropic 直だけ。D-315）」は、v1.6：D-352 で置き換えた。接続先は `anthropic`・`openai`・`openai_compatible`（`base_url`）と、v1.7 で足した `openai_chatgpt`（D-385。[FR-116](resident.md#fr-116chatgpt-でサインイン)）。Bedrock・Vertex は次の版。モデルの選び方と能力の照合は [FR-107](resident.md#fr-107役割ごとのモデルと能力の照合)
+- 道具は接続先ごとに宣言する（クライアントの作成は `llm/` の 1 か所にまとめる）：
+ | 道具 | `anthropic` | `openai` | `openai_compatible`（`closed` を含む） |
+ |---|---|---|---|
+ | computer use | `computer_toolset_20260801`（`computer_use = claude`） | OpenAI の computer use（`openai`） | 本体の道具（スクショ＋座標。`generic`）。`llm.experimental_generic_computer = true` のときだけ。試し扱い |
+ | `web_search` | Anthropic のサーバー側の Web 検索 | OpenAI のサーバー側の Web 検索 | 出さない |
+ | コネクタの道具の遅い読み込み（`defer_loading`） | 使う（FR-088） | 使わない（名前と引数を最初から渡す） | 使わない |
+ | 古いスクショを消す context editing・思考ブロックの署名 | 使う | 使わない。送るときの投影で古い画像を外す（履歴の原本は追記だけ） | 同じ（D-364） |
+ | プロンプトキャッシュ | `cache_control` | 自動 | 使えれば（`llm_models.prompt_cache`） |
+- `openai_chatgpt`（v1.7：D-385・390）は Responses API だけで、`store: false`・`stream: true`。上の表の列には入れず、次のとおりにする：
+ |  道具 | `openai_chatgpt` |
+ |---|---|
+ | computer use | 出さない（`computer` の役割には選べない。確かめてから足す：D-390） |
+ | `web_search` | 出さない（サーバー側の道具＝Web 検索・ファイル検索・Code Interpreter など、保存した会話や提供元のサーバー側が要るものは使えない） |
+ | コネクタの道具の遅い読み込み | 使わない（名前と引数を最初から渡す） |
+ | 古いスクショを消す仕組み・思考ブロックの署名 | 使わない（送るときの投影で外す） |
+ | プロンプトキャッシュ | 自動（宣言は使えるモデルごと） |
+ | 本体の道具（`web_fetch`・ターミナルなど） | 同じ。`tools`（道具の呼び出し）だけを宣言する |
+ | 画像の入力（`vision`） | 確かめるまで宣言しない（D-390） |
+ - 単価は 0 と記録する（枠は持ち主の ChatGPT のもの：D-388）。鍵は `.env` でなく、サインインのトークン（本体に暗号化して置く：D-386）
+- computer use の接続先ごとの呼び出しは、本体の中で同じ作動の形に直してから確かめ・Kernel に渡す（[FR-108](vm.md#fr-108画面操作の道具を同じ作動の形に直す)。D-354）。`web_fetch`・`read_page`・ターミナルなど本体の道具は接続先によらず同じ
+- 費用の見積もりと精算（FR-013）は、`llm_models` に宣言した単価で行う（ローカルは 0 を明示。D-353・355）
+- 鍵は `.env`：`ANTHROPIC_API_KEY`・`OPENAI_API_KEY`・`OPENAI_COMPATIBLE_API_KEY`（任意。ローカルで要らなければ空：D-361）。本体の外向きは窓口 `net` を通り、`closed` では `network.allow_hosts` の先だけ（FR-101）
+
+### 保管庫と Home Assistant の道具（v1.7）
+- v1.7：D-373・377・378。道具の約束事は FR-088 のまま（ターンの途中で足し外ししない。使えないときは道具を残してエラーを返し、次にやることを文に書く）。保管庫と Home Assistant は本体の中の部品で、資格情報（Home Assistant の長期トークン）は VM に置かない
+- 保管庫の道具（FR-110）：対象は `makase-vault` の決まったフォルダ（`写真`・`書類`・`レシート`・`書き出し`・`ゴミ箱`）の中だけ。外のパス（`..` やリンクで外へ出るもの）は断る：
+ | 道具 | 何をする | 引数 | Kernel の判定 |
+ |---|---|---|---|
+ | `vault_list` | フォルダの中を一覧する（パス・種類・撮影日・場所・タグ） | `path`、絞り込み | 通す（読むだけ） |
+ | `vault_read` | ファイルを読む（画像は縮小版。文書は本文） | `path` | 通す（読むだけ）。読んだ内容は汚染として扱う（BR-06） |
+ | `vault_write` | ファイルを書く。上書きは前の版を `.versions` に 30 日残す | `path`、内容 | 通す（前の版が残る）。VM への出し入れはこの道具で行う（VM には保管庫をつながない） |
+ | `vault_move` | ファイルを移す・名前を変える（撮影日のフォルダへ、など） | `from`、`to` | 通す（中身は変わらない） |
+ | `vault_trash` | ファイルを `ゴミ箱` へ移す（30 日で自動で消える） | `path` | 通す（30 日は戻せる）。ただし完全に消す道具はない |
+ - ゴミ箱を空にする・30 日より前に消す・戻すは道具にしない。画面（SCR-030）と API-153 で、持ち主だけが行う（必ず人）
+ - 写真の並べ替え・重複の検出・縮小版は本体のプログラムが行い、LLM を使わない（FR-111）
+- Home Assistant の道具（FR-113）。Home Assistant は内部ホストとして自動で登録する（D-377）：
+ | 道具 | 何をする | 引数 | Kernel の判定 |
+ |---|---|---|---|
+ | `home_state` | 機器の状態を読む（`home_devices` の写しか HA に問い合わせる） | `entity_id`、区分の絞り込み | 通す（読むだけ） |
+ | `home_call` | 機器を動かす（サービスを呼ぶ） | `entity_id`、`service`、引数 | 機器の区分（BR-15）で決まる。鍵（`lock`）・空調と暖房（`climate`・`water_heater`）・バルブ（`valve`）・警報（`alarm_control_panel`）・シャッターやガレージ（`cover`）・「こわい」に印を付けた家電は必ず人。それ以外は通す |
+ | `home_automation_put` | 自動化を作る・直す（HA の設定に入れる） | 自動化の中身（JSON） | 既定で人の確認。設定で「こわくない機器だけなら通す」にできる。こわい機器に触る自動化は設定にかかわらず必ず人 |
+ | `home_automation_delete` | 自動化を消す | 自動化の ID | 既定で人の確認。こわい機器に触る自動化を消すのは必ず人 |
+ - 機器の区分は Kernel の規則（規則の版に入る：D-369）で決め、判断モデルや LLM では決めない（BR-15・16）。区分の印（`human_device_classes`）の付け替えは画面（SCR-032）で持ち主が行う
+ - 自動化の中身を調べて「どの機器に触るか」を数えるのは本体のプログラム（LLM なし）。数えられない自動化（テンプレートなどで機器が決まらないもの）はこわいものとして扱う
+ - 人の確認は FR-077 の流れ（○ / ×、30 分で期限切れ。BR-04）。確認のカードには機器名・操作・自動化の中身を出す
+- `classify`（D-379）：仕分けの役割 `classify` は**道具ではない**。レシートの費目・知らせる価値・振り分けの下ごしらえ・家電への短い指示の機器と操作の選びに、本体の中で使う（FR-115）。LLM が呼ぶ道具の一覧には出さない。選んだあとの判定は Kernel（BR-15・16）
 
 ### FR-088：道具とスキルの渡し方
 - 誰が何を持つか：メインの道具は [FR-091](resident.md#fr-091メインのターン)、振り分け先の道具は [FR-092](resident.md#fr-092振り分けと報告)。どちらも、つないでいないコネクタの道具は最初から出さない
@@ -141,7 +188,7 @@ flowchart LR
  | 順 | 方法 | 道具 |
  |---|---|---|
  | 1 | すでに知っていること・手順書 | 会話・`read_skill` |
- | 2 | アプリの API（コネクタ） | カレンダー・GitHub（FR-081） |
+ | 2 | アプリの API（コネクタ）・家の道具 | カレンダー・GitHub（FR-081）・保管庫 `vault_*`・Home Assistant `home_*`（v1.7） |
  | 3 | Web 検索・ページの取得 | `web_search`・`web_fetch`（FR-080） |
  | 4 | VM のブラウザ | `read_page` → computer use（FR-075） |
  | 5 | 人に聞く | メインは `send_to_owner` の `choices`・文、振り分け先は報告の `blocked`・`request_takeover`（FR-078） |
@@ -152,7 +199,7 @@ flowchart LR
  1. 最初に渡すのは、そのエージェントのスキルの名前と `description` の一覧だけ。`description` は「〜のときに使う」の形で書く（パックの手順書も同じ。200 字まで）
  2. 本文は道具 `read_skill(name)` で読む。読んだ本文は会話に残る。`agent_skills.last_used_at` を更新する
  3. パックの JSON の検証（FR-085）で、`description` が空・200 字を超えるものは `PACK_INVALID`
-- コネクタの道具（D-193）：カレンダー・GitHub の道具は、名前と 1 行の説明だけ先に渡し、詳細（引数の形）は使うと決めたときに読み込む（Claude の tool search ツールと `defer_loading`）。つないでいないコネクタの道具は名前も出さない
+- コネクタの道具（D-193）：カレンダー・GitHub の道具は、名前と 1 行の説明だけ先に渡し、詳細（引数の形）は使うと決めたときに読み込む（Claude の tool search ツールと `defer_loading`。接続先が `anthropic` のときだけ。OpenAI・OpenAI 互換では最初から全部渡す：FR-087・D-364）。つないでいないコネクタの道具は名前も出さない
 - 道具の約束事（D-238）：ターンとタスクの途中で道具を足し外ししない（キャッシュを壊さない：FR-098）。使えないとき（つながりが切れた・VM が作り直し中）は道具を残したままエラーを返し、文に次にやること（例：「GitHub がつながっていない。持ち主に `send_to_owner` でつなぎ直しを頼む」）を書く。道具の説明とスキーマは 1 つ 4,000 字まで
 - 画面の操作を親子の文脈に分ける案（ADR-057）は、メインと振り分け先に分けたので使わない（ADR-059）
 
@@ -161,16 +208,17 @@ flowchart LR
 |---|---|---|
 | FR-013 | Cloudflare 版 `edge/spend.ts`・`limits.ts` | 操作の回数・時間の上限（確認待ち・交代待ちは時間に含めない：`paused_ms`。D-174）。呼び出しの前に見積もりの費用を予約する（並んだタスクで日次を超えない） |
 | FR-016 | Cloudflare 版 `db/audit.ts` | 新しい事象：`box.started`・`box.stopped`・`browser.checked`・`takeover.started`・`takeover.ended`・`profile.cleared`。一覧の API は旧 Node 版から |
-| FR-017 | 旧 Node 版の push（`push_subscriptions`・VAPID） | v1.0 で最初の版に入れる（D-207）。送るものを絞る（D-229） |
+| FR-017 | 旧 Node 版の push（`push_subscriptions`・VAPID） | v1.0 で最初の版に入れる（D-207）。送るものを絞る（D-229）。`closed` では切る（D-342） |
 | FR-018 | Cloudflare 版の SSE の設計（第5段で予定） | 本体のプロセスから流す（API-085）。チャット・ターン・タスク・VM・交代の事象 |
 | FR-061 | Cloudflare 版 `workflows/plan-ask.ts`（設定プランナーのエージェントの選び方） | メインの振り分けの手がかり（振り分け先の一覧）に使う。`asks/` の依頼の流れは使わない（D-235） |
 | FR-072 | Cloudflare 版 `agents/` | 削除のときも VM のログインとファイルは消さない（共有のため。BR-07） |
-| FR-080 | 新規（Cloudflare 版は 4f で予定だった） | `web_search` は Claude の Web 検索ツール（最新版）、`web_fetch` は旧 Node 版の edge と汚染のルール（`edge/web-seen.ts`） |
-| FR-087 | 新規 | 使わない（次の版。v1.4：D-315） |
+| FR-080 | 新規（Cloudflare 版は 4f で予定だった） | `web_search` は接続先のサーバー側の Web 検索ツール（Anthropic・OpenAI。互換と `closed` では出さない：FR-087）、`web_fetch` は旧 Node 版の edge と汚染のルール（`edge/web-seen.ts`） |
+| FR-087 | 新規 | 接続先ごとの道具の宣言（v1.4 の「使わない」を v1.6：D-352 で置き換え）。クライアントは `llm/` の 1 か所に集める |
 | FR-088 | 新規 | 道具の順番の指示・`read_skill`・コネクタの道具の遅い読み込み。スキルの表は今の `agent_skills` |
 | FR-089 | Cloudflare 版 `ask_pending_replies` の考え方 | `wakes`（`chat`・`steer`）に置き換える。歩みの頭でまとめて読む |
 | FR-081 | 旧 Node 版の gateway・gcal・github・connectors | 本体の中の部品にする（[ADR-051](../adr/ADR-051-gateway-in-core.md)）。確認の一覧・○ / × の API も旧 Node 版から |
 | FR-085 | Cloudflare 版 `pack_installs`・`asks.pack_id`・planner の pack の節 | 用途（`purpose`・`examples`）で振り分ける。定義はファイルで持つ |
 | FR-086 | 旧 Node 版 sandbox（`packages/sandbox` の tar・executor、`edge/sandbox-command.ts` の道具名） | 判定は使わない |
-| FR-073〜079・083・084・090〜100 | 新規 | ターンの耐久性は FR-084 の歩みの記録（`owner_kind = 'turn'`）を使う。記憶の検索は SQLite の FTS5（D-225） |
+| FR-110・113 | 新規（v1.7） | 保管庫の道具 `vault_*` と Home Assistant の道具 `home_*`（上の節）。Kernel の規則に機器の区分を足す（D-378） |
+| FR-073〜079・083・084・090〜115 | 新規 | ターンの耐久性は FR-084 の歩みの記録（`owner_kind = 'turn'`）を使う。記憶の検索は SQLite の FTS5（D-225） |
 

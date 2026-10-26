@@ -1,10 +1,10 @@
 # 10. 図：状態遷移図
-- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[10 図](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ 親：[10 図](README.md)
 
 > **3行で**
-> 1. `wakes.status` は `queued`・`consumed`・`dropped` の 3 つ。`turns.status` の `halted` には `context_exceeded`（入力が 20 万トークン超）がある。
+> 1. `wakes.status` は `queued`・`consumed`・`dropped` の 3 つ。`turns.status` の `halted` には `context_exceeded`（入力が上限超。上限は 20 万トークンか、モデルの文脈の長さ × 0.9 の小さいほう：D-363）がある。
 > 2. `boxes.status`・`boxes.control`・`takeovers.status`・`browser_checks.status`・`sandbox_commands.status` は、VM（`box-browser` と `box-shell` の 2 コンテナの組）が眠って起きる形で描いた。
-> 3. 値の意味は [04 ステータス定義](../04_functional_spec/README.md#ステータス定義)。`workspace.vm_op` と `workspace.vm_home_state`（`ok`・`broken` の 2 状態）も描いた。
+> 3. 値の意味は [04 ステータス定義](../04_functional_spec/README.md#ステータス定義)。`workspace.vm_op` と `workspace.vm_home_state`（`ok`・`broken` の 2 状態）も描いた。v1.7 で、保管庫のファイル（ある → ゴミ箱 → 消えた／戻す）を足した。
 
 ---
 
@@ -167,3 +167,16 @@ stateDiagram-v2
  broken --> ok : 戻し・作り直しが終わった
 ```
 `broken` の間は戻す・作り直すだけを受ける（FR-100）。ホームが 4GB を超えたときは box-manager が VM を止め（`stop_reason = 'disk_quota'`）、超えている間はタスクのために VM を起こさない。持ち主はブラウザのデータを消す（FR-079）・控えに戻す・作り直す（FR-100）のどれかで戻す。
+
+### 保管庫のファイル（v1.7：FR-110）
+```mermaid
+stateDiagram-v2
+ [*] --> ある : vault_write・添付を置く
+ ある --> ある : 上書き（前の版を .versions に 30 日残す）
+ ある --> ゴミ箱 : vault_trash
+ ゴミ箱 --> ある : 戻す
+ ゴミ箱 --> 消えた : 30 日で自動で消える
+ ゴミ箱 --> 消えた : 空にする（人が 30 日より前に消す）
+ 消えた --> [*]
+```
+消す＝`ゴミ箱` へ移すだけ。ゴミ箱を空にする・30 日より前に消すのは必ず人（FR-077）。上書きで残した前の版も 30 日で消える（D-373）。

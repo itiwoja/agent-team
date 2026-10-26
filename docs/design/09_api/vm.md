@@ -1,10 +1,10 @@
 # 09. API設計：VM・確認・設定の API（v0.6 から引き継ぐ API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ 親：[09 API設計](README.md)
 
 > **3行で**
 > 1. VM は 1 台なので、画面向けの VM の API は `/api/v1/vm/*` になった（v0.6 の `/boxes/:boxId`）。控え・戻す・作り直す（API-133〜135）を足した。VM の実体は `box-browser`・`box-shell` の 2 つのコンテナの組で、画面向けの API では 1 つの VM として見せる。
 > 2. ブラウザの確認の ○ / × は、API の書き込みの承認（API-019）とは別の口（API-110）。実行は1回だけで、中身が同じときだけ。
-> 3. パック・設定・つなぎ方は v0.6 の形のまま、v1.0 の欄を足した。内部 API は [下](#内部-apibox-manager)。
+> 3. パック・設定・つなぎ方は v0.6 の形のまま、v1.0 の欄を足した。内部 API は [下](#内部-apibox-manager)。v1.6 で、設定（API-096）に `network`・`review`・`llm` の欄を足し、持ち主の確かめ（API-083）に、社内 LAN の直結のパスキーのログインを足した（新しい API 番号は振らない）。v1.7 で、保管庫（API-153）と Home Assistant（API-155）を足し、確認（API-087）に家電・保管庫・家計簿のカードを、設定（API-096）に `vault`・`home`・`classify` の欄を足した。
 
 ---
 
@@ -55,7 +55,7 @@
 - エラー：404 `SNAPSHOT_NOT_FOUND`、交代中は 409 `ALREADY_TAKEN_OVER`
 
 ### API-087：GET /api/v1/check
-- 概要：確認待ちのもの。今の書き込みのカードに、`kind: "browser"`・`kind: "takeover"`・`kind: "routine"`（ルーチンの提案：API-142）を足す。ブラウザのカードには `taskId`・`taskTitle`・オートレビューが止めた理由（`reviewReason`）を入れる
+- 概要：確認待ちのもの。今の書き込みのカードに、`kind: "browser"`・`kind: "takeover"`・`kind: "routine"`（ルーチンの提案：API-142）を足す。v1.7：`kind: "home"`（家電）・`kind: "vault"`（保管庫）・`kind: "ledger"`（家計簿の読み取りの確認）を足す（下）。ブラウザのカードには `taskId`・`taskTitle`・オートレビューが止めた理由（`reviewReason`）を入れる
 - browserカードには `effectiveAction`（TBL-039.contentから取得、安全な完全絶対URLまたは非送信のnull）を追加。T-1はbrowserカードでなくtakeoverカード（IMP-002・004）。
 - レスポンス（200）：
 <details>
@@ -80,12 +80,24 @@
    "expiresAt": "2026-10-23T10:30:00Z"
   },
   { "kind": "takeover", "boxId": "0193...", "taskId": "0193...", "reason": "ログインしてください", "requestedAt": "2026-10-23T10:00:00Z" },
+  { "kind": "home", "approvalId": "0193...", "taskTitle": "朝の支度", "summary": "玄関の鍵を開けます", "entityId": "lock.front_door", "name": "玄関の鍵", "deviceClass": "human", "action": "unlock", "reasons": ["BR-15"], "expiresAt": "2026-10-26T10:30:00Z" },
+  { "kind": "vault", "approvalId": "0193...", "taskTitle": "写真の整理", "summary": "写真 120 枚をゴミ箱に移します（30 日は戻せます）", "count": 120, "sample": ["写真/2026/10/IMG_0001.jpg"], "reasons": ["bulk_trash"], "expiresAt": "2026-10-26T10:30:00Z" },
+  { "kind": "vault", "approvalId": "0193...", "taskTitle": "写真の分類", "summary": "写真 300 枚をクラウドの LLM に送って分類します", "count": 300, "estimate": { "usd": 0.9, "yenApprox": 140 }, "reasons": ["cloud_vision_estimate"], "expiresAt": "2026-10-26T10:30:00Z" },
+  { "kind": "ledger", "entryId": "0193...", "summary": "レシートの金額を確かめてください", "store": "○○スーパー", "entryDate": "2026-10-25", "amountYen": 3280, "lowConfidence": ["amount"], "receiptThumbUrl": "/api/v1/chat/attachments/0193.../thumb", "expiresAt": "2026-11-02T10:00:00Z" },
   { "kind": "routine", "proposalId": "0193...", "name": "週次の PR のまとめ", "schedule": "0 9 * * 1", "scheduleText": "毎週月曜 9:00", "prompt": "先週の PR を…", "expiresAt": "2026-10-31T10:00:00Z" }
  ]
 }
 ```
 
 </details>
+
+- v1.7 のカード（D-373・375・378）：
+ | `kind` | いつ出るか | ○ / × | 備考 |
+ |---|---|---|---|
+ | `home` | 区分が `human` か「こわい」の印つきの機器を動かす、またはそれらに触る自動化を作る・変える（BR-15）。自動化を作る・変える・消すのも、既定で出る（`home.automation_confirm`） | API-019 | `reasons` は `BR-15`（こわい機器）・`automation_confirm`（自動化の確認）。区分は Kernel の規則で決める。判断モデル・LLM では決めない（BR-16） |
+ | `vault` | 一度に 20 枚以上をゴミ箱へ移す・保管庫の外へ出す、画像の中身での分類をクラウドに送る（件数と費用の見積もり：D-374） | API-019 | 上限（`budget`）の中でしか行わない。送った枚数は台帳に残る。ゴミ箱を空にするのはカードでなく人が画面で行う（API-153） |
+ | `ledger` | レシートの金額・日付の読み取りの自信が下限より低い（`low_confidence = 1`） | 直して決める：API-154 の `PATCH`・`POST /ledger/entries/:id/confirm` | 7 日で消える（そのままの値で `needs_check` が残る） |
+ 家電と保管庫のカードの ○ を押したあと、状況が変わっていたら「状況が変わったので実行しませんでした」と出して消える（D-307 と同じ）。
 
 ### API-110：POST /api/v1/browser-checks/:checkId/decision
 - リクエスト：`{ "decision": "approve" | "reject" }`
@@ -97,9 +109,73 @@
 - API-094：期限 10分・1回限りの `state` を作り、HttpOnly・Secure・SameSite=Lax の Cookie にも入れる。Google は PKCE の `code_challenge` を付ける
 - API-095：`state`・Cookie・PKCE（Google）、インストールの ID（GitHub）を確かめる。合わなければ 400 `CONNECT_STATE_INVALID`。使った `state` は消す
 
+### API-083：GET /api/v1/session（持ち主の確かめ。v1.6 の拡張：D-358）
+入口によって、持ち主の確かめ方が違う。新しい API 番号は振らず、API-083 の下に足す。
+| 入口 | 確かめ方 |
+|---|---|
+| Tailscale・Headscale | 今のまま。`tailscale serve` が付ける `Tailscale-User-Login` を `OWNER_LOGIN` と比べる（Headscale でも `tailscale serve` が同じヘッダーを付ける）。違えば 403 `NOT_OWNER` |
+| 家の LAN の直結（家で作った CA の TLS。企業の社内 LAN なら社内 CA） | 本体のパスキー（WebAuthn）でログインする。成功すると、HttpOnly・Secure・SameSite=Strict のセッション Cookie（12 時間）を付ける。Cookie の署名には `workspace.session_epoch` を入れ、上げると全部切れる |
+- GET `/api/v1/session`：200 `{ "login": "...", "displayName": "...", "auth": "tailscale" | "passkey" }`。LAN 直結でセッションがなければ 401 `LOGIN_REQUIRED`（画面はパスキーのログイン画面を出す）
+- POST `/api/v1/session/passkey/options`：ログインの `challenge` と `allowCredentials` を返す（`challenge` は本体のメモリに 5 分だけ置く）
+- POST `/api/v1/session/passkey/verify`：`{ assertion }` を `workspace.owner_passkeys` の公開鍵で確かめ、`sign_count` を更新して Cookie を付ける（200）。合わなければ 401 `PASSKEY_INVALID`。失敗は 1 分に 5 回まで（超えたら 429）
+- POST `/api/v1/session/passkey/enroll/options`・`/enroll/verify`：パスキーの登録。最初の 1 つは、`docker compose exec makase makase owner-enroll` が出す 1 回限りの URL（15 分。`workspace.owner_enroll`）の鍵がボディにあるときだけ受ける（鍵が違えば 403 `ENROLL_TOKEN_INVALID`）。2 つ目からは、ログイン済みの画面から足す（5 件まで）
+- DELETE `/api/v1/session`：ログアウト（Cookie を消す）
+- CSRF は共通仕様のまま（Origin と `X-Makase-Request: 1`）。`closed` では Tailscale の SaaS を使わないので、LAN 直結か Headscale で入る（D-341）
+- 監査ログに `session.login`・`session.enrolled`（失敗は `session.login_failed`）を残す
+
 ### API-096：GET・PATCH /api/v1/settings
-- PATCH のボディ：`{ "budget": { "daily_usd": 10, "daily_auto_usd": 7 }, "browser": { "confirmDomains": [...], "skipUnresolvedDomains": [...], "humanWords": [...], "confirmWords": [...], "autoReview": { "enabled": true } }, "maxTasks": 3 }`（部分）
-- 副作用：ポリシーの新しい版を作る（`workspace_policies`）。効くのは次のタスク・ターンから（動いているものは始まるときのポリシーのまま）
+- PATCH のボディ：
+ ```json
+ {
+  "budget": { "daily_usd": 10, "daily_auto_usd": 7 },
+  "browser": { "confirmDomains": [], "skipUnresolvedDomains": [], "humanWords": [], "confirmWords": [] },
+  "network": { "mode": "closed", "allow_hosts": ["llm.corp.example"], "internal_hosts": { "browser": [{ "host": "10.20.0.0/24", "on_use": "confirm" }], "terminal": [] } },
+  "review": { "auto": { "enabled": false } },
+  "llm": { "roles": { "main": { "provider": "anthropic", "model": "claude-opus-5-5" }, "classify": { "provider": "decision", "model": "…" } }, "experimental_generic_computer": false },
+  "vault": { "trash_days": 30, "versions_days": 30, "backup": { "enabled": true, "target": "smb://nas.local/backup" } },
+  "home": { "human_device_classes": ["lock", "climate", "water_heater", "valve", "alarm_control_panel", "cover", "switch"], "automation_confirm": "always" },
+  "classify": { "min_confidence": 0.8 },
+  "maxTasks": 3
+ }
+ ```
+ （どの欄も部分でよい）。v1.6：`browser.autoReview` は `review.auto.enabled` に移した（既定は `false`：D-351）。`network` は D-340・343、`llm` は D-352。v1.7：`vault`（D-373）・`home`（D-378）・`classify`（D-379）の欄を足した（どれも部分でよい）。`vault.trash_days`・`vault.versions_days` は 30 より短くできない（422 `VALIDATION_ERROR`）。`home.human_device_classes` は既定の 6 つ（`lock`・`climate`・`water_heater`・`valve`・`alarm_control_panel`・`cover`）を外せない（足すだけ。外そうとしたら 422 `HOME_CLASS_FIXED`）。`classify.min_confidence` は 0.5〜0.99
+- GET の応答は、同じ形の今の値。`network` に固定の除外（本体・box-manager・tailnet・ホスト自身・クラウドのメタデータ）の一覧を `fixedExclusions` として添える
+- 副作用：ポリシーの新しい版を作る（`workspace_policies`）。効くのは次のタスク・ターンから（動いているものは始まるときのポリシーのまま）。`browser`・`terminal`・`network`・`review.auto.enabled` を変えたときは、[API-149](resident.md#api-149apiv1policy) と同じ手順（試験 → 版を足す）を通り、試験が外れたら 422 `POLICY_TESTS_FAILED`。`home.human_device_classes`・`home.automation_confirm` も規則の版に入り、同じ手順を通る（TBL-057）。`budget`・`llm`・`vault`・`classify`・`maxTasks` は版を足さない（D-369）。v1.7：`llm.chatgpt_allow_auto`（既定 false：ChatGPT の枠を自動のきっかけで使ってよいか。D-389）も `llm` 欄の一部で、版を足さない。`llm` の割り当ては [API-152](resident.md#api-152apiv1llmmodelsapiv1llmroles) と同じ照合を通る（422 `LLM_CAPABILITY_MISSING` など）
+- `network.mode` を `closed` にするとき、今の `llm` の接続先が `allow_hosts` に入っていなければ 422 `LLM_HOST_NOT_ALLOWED`（入れ忘れで本体が LLM に届かなくなるのを防ぐ）。`closed` では `terminal.allow_hosts` は `allow_hosts` と `internal_hosts.terminal` に入っている先だけが効く（D-366）
+- 監査ログに `network.mode_changed`（`mode` を変えたとき）・`policy.changed`（規則の欄）・`llm.role_changed` を残す。`llm.roles.classify` の割り当ては `cap_decision` を照合する（なければ 422 `LLM_CAPABILITY_MISSING`）。v1.7：スマホの画面では、`network.mode = 'closed'` を「家の中だけで動かす」と呼ぶ
+
+### API-153：/api/v1/vault（保管庫）
+家の保管庫（`makase-vault`）のファイルを見る・縮小版・ゴミ箱・戻す・空にする（TBL-060。FR-110・111・SCR-030）。エージェントが道具（`vault_list`・`vault_read`・`vault_write`・`vault_move`・`vault_trash`）で扱うのとは別に、持ち主が画面から扱う口。**消すのはゴミ箱へ移すだけ**（30 日で自動で消える）。空にする・30 日より前に消すのは、この API の持ち主の操作だけ。
+| メソッド | パス | 中身 |
+|---|---|---|
+| GET | `/api/v1/vault/status` | 保管庫の状態：`{ connected, kind: "usb"｜"smb", totalBytes, freeBytes, indexedCount, trashCount, trashBytes, nextPurgeAt, backup: { enabled, lastAt } }`。つながっていなければ `connected: false` |
+| GET | `/api/v1/vault/files` | 一覧。`?folder=photos｜documents｜receipts｜exports｜trash&sort=taken｜created｜name&order=desc&from=&to=&place=&tag=&duplicates=1&q=&cursor=&limit=`（`from`・`to` は日付。既定は `sort=taken`・`limit` 20・最大 100）。応答 `{ items: [{ id, path, folder, name, mime, sizeBytes, takenAt, place, tags, thumbUrl, duplicateOf, trashedAt, purgeAt, versions: [{ savedAt, purgeAt }] }], nextCursor }` |
+| GET | `/api/v1/vault/files/:id` | 1 件の中身のメタデータ |
+| GET | `/api/v1/vault/files/:id/content` | 元のファイル。`Content-Disposition: attachment`・`X-Content-Type-Options: nosniff`・`Content-Security-Policy: sandbox`。`?preview=1` は画像・PDF だけ `inline` |
+| GET | `/api/v1/vault/files/:id/thumb` | 縮小版（長辺 512px・JPEG）。なければ作って返す |
+| POST | `/api/v1/vault/files/:id/trash` | ゴミ箱へ移す。複数は `POST /api/v1/vault/trash/batch`（`{ ids: [...] }`、200 件まで）。応答に `purgeAt`。監査ログ `vault.trashed` |
+| POST | `/api/v1/vault/files/:id/restore` | ゴミ箱から元の場所へ戻す。元の場所に同名があれば `名前 (1)` にする。前の版の戻しは `{ "version": "<savedAt>" }`。監査ログ `vault.restored` |
+| DELETE | `/api/v1/vault/trash` | **ゴミ箱を空にする**。ボディ `{ "confirm": "empty", "count": 42 }`。`count` は画面に見せた件数で、今の件数と違えば 409 `VAULT_TRASH_CHANGED`（見せた件数と違うものは消さない）。`confirm` がなければ 422 `VAULT_CONFIRM_REQUIRED`。監査ログ `vault.emptied`（件数・合計の大きさ） |
+| DELETE | `/api/v1/vault/trash/:id` | ゴミ箱の 1 件を 30 日より前に消す。同じく `{ "confirm": "delete" }` が要る |
+- 空にする・30 日より前に消すのは、エージェントの道具からは呼べない（Kernel が断る）。画面は「元に戻せません。42 件を空にしますか？」と件数を見せて、[ やめる ] と [ 空にする ] を出す（SCR-030）
+- 保管庫がつながっていないとき：一覧と縮小版は索引から返す（実体を読むものは 503 `VAULT_NOT_MOUNTED`）。書き込み・ゴミ箱・空にするは 503 `VAULT_NOT_MOUNTED`
+- パスは API で受けない（`id` だけ）。`..` や保管庫の外を指す入力はそもそも通らない
+- エラー：404 `VAULT_FILE_NOT_FOUND`、503 `VAULT_NOT_MOUNTED`、409 `VAULT_TRASH_CHANGED`、422 `VAULT_CONFIRM_REQUIRED`、持ち主以外は 403 `NOT_OWNER`
+
+### API-155：/api/v1/home（Home Assistant）
+HA につなぐ・機器の一覧・「こわい」の印（TBL-062。FR-113・SCR-032）。機器を動かす・自動化を作る/変える/消すのは、エージェントの道具で行い（判定は Kernel と BR-15）、この API にはない。
+| メソッド | パス | 中身 |
+|---|---|---|
+| GET | `/api/v1/home/status` | `{ connected, baseUrl, haVersion, deviceCount, humanCount, lastSyncedAt, lastError }`。つながっていなければ `connected: false` |
+| PUT | `/api/v1/home/connection` | つなぐ。`{ baseUrl, token }`（HA の長期トークン）。本体が HA を 1 回呼んで確かめてから、トークンを暗号化して置き（VM には置かない）、`baseUrl` のホストを内部ホストに自動で登録する（`on_use` は `confirm`）。確かめに外れたら 422 `HA_TOKEN_INVALID`、届かなければ 502 `HA_UNREACHABLE`。応答にトークンは出さない |
+| DELETE | `/api/v1/home/connection` | 外す（トークンを消す。`home_devices` の行は残し、`removed_at` を入れる） |
+| POST | `/api/v1/home/sync` | 今すぐ HA から写し直す |
+| GET | `/api/v1/home/devices` | 機器の一覧。`?area=&domain=&class=human｜normal&flagged=1&q=&cursor=&limit=`。応答 `{ items: [{ entityId, name, area, domain, deviceClass, humanFlag, lastState, lastChangedAt }], nextCursor }` |
+| PATCH | `/api/v1/home/devices/:entityId` | 「こわい」の印を付ける・外す：`{ "humanFlag": true }`。`device_class = 'human'` の機器の印は外せない（422 `HOME_CLASS_FIXED`）。監査ログ `home.flag_changed` |
+| GET | `/api/v1/home/automations` | 自動化の一覧：`{ items: [{ entityId, name, enabled, createdBy, targets: [{ entityId, name, deviceClass, humanFlag }], touchesHuman, lastTriggeredAt }] }`。`touchesHuman` は印つきの機器に触るもの（画面で赤い印を付ける） |
+- 機器の区分（`deviceClass`）は Kernel の規則で決まる（規則の版に入る）。判断モデルや LLM では決めない（BR-16）。「こわい」の印は区分より強くはならない（外せないものは外せない）
+- 同期は本体が自動で行う（状態の変化を受ける）。`sync` は画面の [ 読み直す ] 用
+- エラー：404 `HOME_DEVICE_NOT_FOUND`、503 `HOME_NOT_CONNECTED`、422 `HA_TOKEN_INVALID`、502 `HA_UNREACHABLE`、422 `HOME_CLASS_FIXED`
 
 ### API-114：GET /api/v1/packs
 - 概要：置き場（イメージの `/opt/makase/packs/*.json` と、データのボリュームの `/data/packs/*.json`）にあるパックと、入っているパック（`pack_installs`）の一覧
@@ -204,3 +280,5 @@
 ## このドキュメントで決まったこと
 - D-151、D-158〜D-160、D-163、D-173、D-176、D-178、D-194、D-202、D-205、D-215、D-237、v1.2：D-294〜D-296、D-298〜D-300、D-306〜D-309（[00 決定事項ログ](../00_overview.md#決定事項ログ)）
 - v1.4：D-316（書き出し・取り込みを消す）、D-319（掃除のための起動を消す）、D-322（`budget` は `daily_usd`・`daily_auto_usd`）、D-323（要約の印を消す）、D-326（2 コンテナ）、D-327（本体の再起動は新しい世代）
+- v1.6：D-340・343（`network`）、D-351（`review.auto`）、D-352（`llm`）、D-358（パスキーのログイン）、D-366・369
+- v1.7：D-373（保管庫：API-153）、D-374（分類の見積もり）、D-377・378（HA・機器の区分：API-155）、D-379（`classify` の欄）

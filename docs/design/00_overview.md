@@ -1,13 +1,14 @@
 # 00. プロジェクト概要
-- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ インプット：ヒアリング（2026-10-23・24）、[参考資料/](../../参考資料/index.md)（GrokBot の講義の解説動画）、v0.6 の設計書、`apps/worker`・`apps/web` の実装
+- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ インプット：ヒアリング（2026-10-23・24）、[参考資料/](../../参考資料/index.md)（GrokBot の講義の解説動画）、v0.6 の設計書、`apps/worker`・`apps/web` の実装
 
 > **3行で**
-> 1. Agent-Team-Open を**常駐型**にする。持ち主は自分の Linux ホストに `docker compose up` で置き、PC やスマホから Tailscale 経由で、1 本のチャットで**メイン**のエージェントと話す。メインは小さな質問に自分で答え、重い仕事は用途に合うエージェントへ**裏で振り分け**、短い報告だけを受け取る。
+> 1. Agent-Team-Open は**家に置く常駐エージェント**。セットアップ済みのラズパイ（キット）か自分の Linux ホストに置き、スマホや PC から Tailscale 経由で、1 本のチャットで**メイン**のエージェントと話す。非エンジニアでも、写真の整理・レシートからの家計簿・Home Assistant 経由の家電の自動化を頼める。メインは小さな質問に自分で答え、重い仕事は用途に合うエージェントへ**裏で振り分け**、短い報告だけを受け取る。
 > 2. エージェントは、持ち主のチャットだけでなく、ルーチン・予約した確認・webhook・裏の作業の完了でも起き、用がなければ眠る。ループと状態（会話・記憶・ルーチン）は本体に置き、作業は持ち主に 1 台の **VM**（ブラウザとターミナル。止めても残る）で行う。記憶は 2 層（プロフィールと検索）。持ち主に話すのは `send_to_owner` を呼んだときだけで、伝える価値がなければ黙る。
-> 3. こわい操作は Kernel の合図で止め、外に出す・支払う・消す・秘密は人が、それ以外はオートレビューが確かめる。OSS（AGPL-3.0）、LLM は Claude だけ。Cloudflare・複数人・Slack やメールの窓口・声・支払いの代行・エージェントがスキルを書き足す仕組みはやらない（[01 §7](01_requirements.md#7-スコープ外wont)）。
+> 3. こわい操作（支払い・送信・削除、鍵や暖房などの家電、保管庫のファイルを消す）は Kernel の規則で止め、人が確かめる（オートレビューは既定で切る）。OSS（AGPL-3.0）。大手の常駐エージェント（Dots・Grok Bot・Muse）はクラウドから家の中に届かない。家の中だけで動かせ（A）、判定を確かめられ（B）、モデルを選べ（C）、仕分けは家の中の判断モデルで 0 円。Cloudflare・複数人（家族は次の版の候補）・Slack やメールの窓口・声・支払いの代行・ストア配布はやらない（[01 §7](01_requirements.md#7-スコープ外wont)）。
 
 ## 🧭 判断してほしいこと
-未決はなし。v0.6 の Q-124 は D-201（[ADR-059](adr/ADR-059-main-agent-delegates.md)）で決着した。常駐型への作り直しの決定は D-200〜D-211（ユーザー）と D-212〜D-240（Claude判断）。Fable 5.1 と Astra のレビューを受けた v1.1 の決定は D-241〜D-274（D-248 はユーザー、ほかは Claude判断）。v1.1 の直しを読み直した v1.2 の決定は D-275〜D-310（D-310 はユーザー、ほかは Claude判断）。v1.2 の Claude判断を見直した v1.3 の決定は D-311〜D-314（Claude判断）。2026-10-24 のレビューで過剰な設計を削った v1.4 の決定は D-315〜D-328（D-328 だけ Claude判断、ほかはユーザー）。[README](README.md#claude判断で決めたこと見直してほしいもの) に一覧。リスク（R-76〜R-100。R-87・R-95・R-96・R-99 は v1.4 で消した）は各ドキュメントと [README](README.md#-判断してほしいこと全ドキュメントから集約) にある。
+**v1.7**：家に置く常駐エージェントにした（D-371〜D-384、[変更レポート](changes/2026-10-26-home-agent.md)）。判断してほしいのは、キットの推奨（ラズパイ 5 の 16GB）と、判断モデル・4B を実機で測る順番。
+未決はなし。v0.6 の Q-124 は D-201（[ADR-059](adr/ADR-059-main-agent-delegates.md)）で決着した。常駐型への作り直しの決定は D-200〜D-211（ユーザー）と D-212〜D-240（Claude判断）。Fable 5.1 と Astra のレビューを受けた v1.1 の決定は D-241〜D-274（D-248 はユーザー、ほかは Claude判断）。v1.1 の直しを読み直した v1.2 の決定は D-275〜D-310（D-310 はユーザー、ほかは Claude判断）。v1.2 の Claude判断を見直した v1.3 の決定は D-311〜D-314（Claude判断）。2026-10-24 のレビューで過剰な設計を削った v1.4 の決定は D-315〜D-328（D-328 だけ Claude判断、ほかはユーザー）。差別化の軸 A・B・C を足した v1.6 の決定は D-340〜D-370（[変更レポート](changes/2026-10-26-differentiation-abc.md)。チームで 1 台は v1.7 で不採用：[ADR-075](adr/ADR-075-team-sharing-proposal.md)）。[README](README.md#claude判断で決めたこと見直してほしいもの) に一覧。リスク（R-76〜R-106。R-87・R-95・R-96・R-99 は v1.4 で消した）は各ドキュメントと [README](README.md#-判断してほしいこと全ドキュメントから集約) にある。
 
 ## 全体図
 ```mermaid
@@ -18,8 +19,12 @@ flowchart LR
  A -.->|"短い報告"| M
  A -->|"ブラウザ・ターミナル"| VM["VM（持ち主に 1 台）"]
  VM --> WEB(["Web サイト"])
- M --> C[["Claude API"]]
+ M --> C[["LLM（役割ごと）<br/>Claude・OpenAI・家の中のモデル"]]
+ M --> HA(["Home Assistant<br/>家電"])
+ M --> V[("家の保管庫<br/>写真・書類・レシート")]
  A --> G(["Google カレンダー・GitHub"])
+ VM -.->|"許可した家の機械だけ"| IN(["家の機械<br/>NAS・自宅サーバー"])
+ M -.->|"外に出た通信を全部記録"| L[("台帳")]
 ```
 見てほしいところ：持ち主が話す相手はメインだけ。VM を触るのは振り分け先のエージェントで、メインの文脈にはスクショも作業の記録も入らない。
 
@@ -29,8 +34,12 @@ flowchart LR
 - VM は持ち主に 1 台。ファイル・ツール・ログインが残る。画面は 1 つで順番に使う（[ADR-060](adr/ADR-060-one-persistent-vm.md)）。中のコマンドは判定せず、控えから戻せる（[ADR-061](adr/ADR-061-vm-no-judge-restore.md)）
 - 持ち主に話す道具は `send_to_owner` だけ。知らせは Web Push（[ADR-062](adr/ADR-062-send-to-owner.md)・[ADR-067](adr/ADR-067-web-push-first.md)）
 - 記憶は 2 層：プロフィールと検索（[ADR-070](adr/ADR-070-memory-two-layers.md)）。費用は自動のきっかけ用の別上限で守る（[ADR-069](adr/ADR-069-daily-auto-budget.md)）
-- VM は `box-browser`・`box-shell` の 2 コンテナの組（[ADR-068](adr/ADR-068-browser-shell-split.md)）。LLM は Anthropic の API 直だけ
-- こわい操作は合図 → オートレビュー → 人（[ADR-064](adr/ADR-064-auto-review.md)）。成果物を外に出す操作は必ず人（BR-10）
+- VM は `box-browser`・`box-shell` の 2 コンテナの組（[ADR-068](adr/ADR-068-browser-shell-split.md)）。LLM は役割ごとに Claude・OpenAI・OpenAI 互換から選ぶ（[ADR-078](adr/ADR-078-llm-by-role.md)）
+- こわい操作は合図 → 人。オートレビューは既定で切り、入れたときだけ間に挟む（[ADR-064](adr/ADR-064-auto-review.md)・[ADR-077](adr/ADR-077-auto-review-off-by-default.md)）。成果物を外に出す操作は必ず人（BR-10）
+- 家に置く常駐エージェント。非エンジニアにはセットアップ済みのラズパイで届ける（[ADR-079](adr/ADR-079-home-agent-kit.md)）。家の保管庫（[ADR-080](adr/ADR-080-home-vault.md)）・Home Assistant（[ADR-081](adr/ADR-081-home-assistant.md)）・家計簿（[ADR-082](adr/ADR-082-household-ledger.md)）。仕分けは家の中の判断モデル、ラズパイでは 4B 級まで（[ADR-083](adr/ADR-083-classify-and-local-on-pi.md)）
+- 閉域モード（家の中だけで動かす）で外向きを許可リストに絞り、許可した社内システムにだけ届く。外に出た通信は全部台帳に残る（[ADR-074](adr/ADR-074-closed-network.md)）
+- 判定の規則は版つきで、試験が通らないと変えられない。判定は再実行で同じ結果になり、監査ログはハッシュの鎖で改ざんが分かる（[ADR-076](adr/ADR-076-verifiable-decisions.md)）
+- キットの選び方：ラズパイ 5 の 8GB が最低、16GB が推奨（NFR-092）。チームで 1 台は不採用（[ADR-075](adr/ADR-075-team-sharing-proposal.md)）
 - 文脈はキャッシュの先頭を変えない形に組み、ターンを始める前に長すぎる履歴を要約する（[ADR-066](adr/ADR-066-prompt-cache-layout.md)）。webhook は Funnel で受け口だけ公開（[ADR-065](adr/ADR-065-webhook-funnel.md)）
 
 ---
@@ -38,7 +47,7 @@ flowchart LR
 ## 詳細
 
 ### エレベーターピッチ
-自分の機械で AI エージェントに仕事を任せたい開発者のための Agent-Team-Open は、「頼んだときしか動かず、API のないサイトは人が手を動かす」問題を、手元の Linux ホストに常駐するメインのエージェントと、ブラウザとターミナルを持つ専門のエージェントで解決する、自分だけのエージェント基盤である。OSS（AGPL-3.0）で、ソースを読め、自分のサーバーで動き、API キーは自分持ち。寝ている間に進め、朝に短く知らせる。
+自分の機械で AI エージェントに仕事を任せたい開発者のための Agent-Team-Open は、「頼んだときしか動かず、API のないサイトは人が手を動かす」問題を、手元の Linux ホストに常駐するメインのエージェントと、ブラウザとターミナルを持つ専門のエージェントで解決する、自分だけのエージェント基盤である。OSS（AGPL-3.0）で、ソースを読め、自分のサーバーで動き、API キーは自分持ち。寝ている間に進め、朝に短く知らせる。大手の常駐エージェントと違い、家の中（家の LAN・家のファイル・家電）に手が届き、家の外に出さずに動かせ、判定を後から確かめられ、モデルを選べる。セットアップ済みのラズパイなら、非エンジニアもスマホだけで使い始められる。
 
 ### 背景と目的
 - v0.6 までは「持ち主がチャットで頼むと、1 人のエージェントが 1 つの文脈で仕事をする」形だった。留守の間は進まず、長く話すとスクショと作業の記録で文脈が膨らむ。
@@ -46,23 +55,23 @@ flowchart LR
 - 目的は、持ち主が一言頼むか予定を置いておけば、API のないサイトの仕事やコードの修正まで、留守の間に進むようにすること。
 
 ### 対象ユーザー
-ホストの持ち主1人（[02 P-1](02_user_stories.md#p-1-持ち主)）。OSS として公開するので、同じ立場の開発者（自分の機械に置いて使う人）も P-1。非エンジニアの一般向けには配らない。企業導入（組織の共有ホスト）は次の版（D-184）。
+ホストの持ち主1人（[02 P-1](02_user_stories.md#p-1-持ち主)）。OSS として公開するので、同じ立場の開発者（自分の機械に置いて使う人）も P-1。非エンジニアの一般向けには配らない。v1.7 から、家の人（非エンジニアを含む）も持ち主にする。届け方はセットアップ済みのラズパイ（[ADR-079](adr/ADR-079-home-agent-kit.md)・D-371・372）。家族で使うのは次の版の候補。同じものを社内に置くこともできる（A・B・C）。チームで 1 台は不採用（D-383）。
 
 ### スコープ（In / Out）
 | In（今回） | Out（Won't） |
 |---|---|
-| Linux ホストへの配置（Compose）、Tailscale での接続、webhook の受け口だけの公開（Funnel） | Cloudflare への配置、画面と API のインターネットへの公開 |
+| Linux ホストへの配置（Compose）、Tailscale・Headscale・社内 LAN での接続、webhook の受け口だけの公開（Funnel。閉域では LAN の中）、閉域モード・内部ホストの許可・外に出た通信の台帳 | Cloudflare への配置、画面と API のインターネットへの公開 |
 | 1 本のチャットでメインと話す・メインの振り分け・エージェントの作成と削除・用途ごとのパック | エージェントごとの会話、振り分け先のさらに下への振り分け、仕事どうしの連絡板 |
 | きっかけ（チャット・ルーチン・予約した確認・webhook・裏の作業の完了）・眠る／起きる | Slack・メール・電話・会議・声の窓口 |
 | VM（持ち主に 1 台、ブラウザとターミナル、控えと作り直し）・画面の共有と交代 | VM でブラウザとターミナル以外のアプリ（GUI）を使う、メモリのスナップショット、エージェントごとの VM |
-| こわい操作の確認（合図 → オートレビュー → 人） | すべての操作の確認 |
+| こわい操作の確認（合図 → 人。オートレビューは入れたときだけ）・判定の規則の版と試験・判定の再実行・監査ログの鎖 | すべての操作の確認 |
 | 記憶（2 層）・手で書いたスキル・パックの手順書 | エージェントがスキルを書き足す仕組み（スキルの案・整理） |
-| `send_to_owner`・Web Push・Web 検索・Google カレンダー・GitHub | 支払いの代行と本人確認、パスワード管理ツールでの自動入力 |
-| 費用と回数の上限・監査ログ・標準パック「告知ページ制作」 | 複数人・ホスト間の同期、他社の LLM、Bedrock・Vertex 経由の Claude、書き出しと取り込み、非エンジニアの一般向けの配布 |
+| `send_to_owner`・Web Push・Web 検索・Google カレンダー・GitHub・家の保管庫（写真・書類）・家計簿・Home Assistant 経由の家電・チャットの画像の添付・家の中の判断モデル・セットアップ済みのラズパイ（キット） | 支払いの代行と本人確認、パスワード管理ツールでの自動入力 |
+| 費用と回数の上限・監査ログ・標準パック「告知ページ制作」・役割ごとのモデル（Claude・OpenAI・OpenAI 互換） | 複数人（家族は次の版の候補、チームで 1 台は不採用）・顔で人を見分ける・マイコンのプログラムを書く・ホスト間の同期、Claude・OpenAI・OpenAI 互換以外の LLM、Bedrock・Vertex 経由の Claude、書き出しと取り込み、ストア配布・ホスティング版・API の肩代わり（v1.7：キットで届ける） |
 
 ### 用語集
 <details>
-<summary>用語集（41語）</summary>
+<summary>用語集（50語）</summary>
 
 | 用語 | コード上の名前 | 定義 |
 |---|---|---|
@@ -95,13 +104,22 @@ flowchart LR
 | shell-agent | shell-agent（`box-shell` の中のプロセス） | コマンドの実行と tar の出し入れ（API-117・118）の受け手 |
 | box-browser | box-browser（コンテナ） | VM のうちブラウザ側。Xvfb・Chromium・VNC・box-agent を持つ。利用者 `browser`、ボリューム `makase-browser-profile` |
 | box-shell | box-shell（コンテナ） | VM のうちターミナル側。bash・git・Node・Python・shell-agent を持つ。利用者 `agent`、ボリューム `makase-vm-home` |
-| egress | egress（コンテナ。HTTP(S) プロキシ） | VM から外への通信をすべて通す中継。許可リストは送り元のコンテナで分ける（`box-browser` はアドレスの判定だけ、`box-shell` は許可リスト。ADR-045・068）。家の LAN・tailnet・本体へは通さない |
+| egress | egress（コンテナ。HTTP(S) プロキシ） | VM から外への通信をすべて通す中継。許可リストは送り元のコンテナで分ける（`box-browser` はアドレスの判定だけ、`box-shell` は許可リスト。ADR-045・068）。本体・box-manager・tailnet・ホスト自身・クラウドのメタデータへは通さない。社内の機械は持ち主が書いた内部ホストだけ（v1.6：D-343） |
 | コンピューターユース | computer use | 画面のスクショを見て、マウスとキーボードで操作すること（Claude の computer use ツール） |
 | 操作 | browser action | VM への1回のクリック・入力・キー・スクロールなど |
 | こわい操作 | risky action | 支払い・購入・送信・削除・公開・アカウントの設定の変更 |
 | 申告 | `confirm_action` | エージェントが「この操作の前に確認して」と出す道具。`category` つき（D-228） |
 | 合図 | tripwire | プログラムが申告なしでも止める条件（T-1〜T-6） |
-| オートレビュー | auto review（`auto_reviews`） | 合図に当たった操作のうち、人に回さないものを別の Claude の呼び出しが確かめること（ADR-064） |
+| オートレビュー | auto review（`auto_reviews`） | 合図に当たった操作のうち、人に回さないものを別の LLM の呼び出しが確かめること（ADR-064）。既定で切る（ADR-077） |
+| 閉域モード | `network.mode = closed` | 本体と VM の外向きを許可リストの先だけに絞る置き方（ADR-074） |
+| 内部ホスト | `network.internal_hosts` | VM から届いてよい社内のホスト。既定は空（ADR-074） |
+| 台帳 | egress ledger（`egress_events`） | 外に出た通信を全部残した記録。中身は残さない（ADR-074） |
+| 規則の版 | policy version（`policy_versions`） | 判定の規則の 1 版。SHA-256 で名指しし、試験の例を持つ（ADR-076） |
+| 役割 | LLM role | モデルを割り当てる単位。`main`・`worker`・`computer`・`review`・`summary`・`classify`（ADR-078・083） |
+| キット | kit | セットアップ済みのラズパイ。電源と LAN をつなぎ、スマホで QR を読めば使い始められる（ADR-079） |
+| 家の保管庫 | vault（`makase-vault`） | 写真・書類・レシートを置く USB の SSD か NAS。本体の道具で扱い、消すのはゴミ箱へ（ADR-080） |
+| 機器の区分 | `human_device_classes` | 鍵・暖房・ガスなど、動かすのに必ず人の確認が要る家電の種類（ADR-081・BR-15） |
+| 判断モデル | decision model | 文章を生成せず、選択・点数・はい/いいえを型つきで返す小さなモデル。仕分けにだけ使う（ADR-083） |
 | 確認 | check | 人が ○ / × を押すカード。API の書き込みと、人に回したこわい操作で出る |
 | 交代 | takeover | 人が VM の操作をエージェントから代わること。代わっている間、エージェントは待つ |
 | Kernel | `packages/kernel` | 書き込みとこわい操作を「通す・確認・止める」に分ける決定論のコード |
@@ -114,7 +132,7 @@ flowchart LR
 代替案があった判断は ADR に書き、ここには1行とリンクだけ置く。旧設計書の D-120 までの続きから振る。v1.0 で置き換わった行には、決定内容の末尾に印を付けた（行は消さない）。
 
 <details>
-<summary>決定事項（D-121〜D-328）</summary>
+<summary>決定事項（D-121〜D-390）</summary>
 
 | ID | 決定内容 | 決定者 | 理由 | 影響範囲 | ADR |
 |---|---|---|---|---|---|
@@ -181,7 +199,7 @@ flowchart LR
 | D-181 | 最初の版は PC での交代を優先。スマホは頼む・確認・見る・タップまで Must、交代中の文字入力は次の版 | ユーザー | まず PC で動くこと | REQ-083、SCR-022、NFR-074 | — |
 | D-182 | 呼び名を正式名称にする：箱→VM、箱の管理役→box-manager、箱の中の操作役→box-agent、出口の見張り→egress。VM の実体は Docker コンテナ | ユーザー | やさしい言い換えのほうが分かりにくい | 全体 | — |
 | D-183 | OSS として公開する。ライセンスは AGPL-3.0。`package.json` の `license` は `AGPL-3.0-only` | ユーザー | 今の最大のリスクは「真似される」ではなく「存在を知られない」。企業導入の道は AGPL で残す | 01 §3・§6、11 §1、README、LICENSE | [ADR-055](adr/ADR-055-agpl-license.md) |
-| D-184 | 非エンジニアの一般向けには配らない。収益化するなら企業導入（導入支援・専門パック作成・運用契約）。企業導入で要る複数人・組織は次の版 | ユーザー | 一般向けの浸透は配布・サポート・課金の体制が要る。当面は作り切る | 01 §4・§7、02 P-1 | [ADR-055](adr/ADR-055-agpl-license.md) |
+| D-184 | 非エンジニアの一般向けには配らない。収益化するなら企業導入（導入支援・専門パック作成・運用契約）。企業導入で要る複数人・組織は次の版（v1.7 で見直し：D-382） | ユーザー | 一般向けの浸透は配布・サポート・課金の体制が要る。当面は作り切る | 01 §4・§7、02 P-1 | [ADR-055](adr/ADR-055-agpl-license.md) |
 | D-185 | LLM の接続先に Bedrock・Vertex 経由の Claude を足す（Should）。`.env` の `LLM_PROVIDER` で選ぶ。接続先で使えない道具は宣言から外す（v1.4 で D-315 に置き換え） | ユーザー（足す）／ Claude判断（道具の線引き） | 企業導入では AWS・Google Cloud の契約の中で Claude を使いたい会社が多い | REQ-095、FR-087、11 §10 | [ADR-056](adr/ADR-056-llm-provider.md) |
 | D-186 | 最初の標準パックは「告知ページ制作パック」（`announcement-page`）。デモの 4 人は 1 人のエージェントの手順書 4 本（設計・制作・点検・仕上げ）にする（v1.0：「1 件 1 人」は ADR-059 の振り分けに読み替える） | ユーザー（パック）／ Claude判断（1 人の形） | デモの実績があり、レビューの商品仕様・第三者テストの対象にそのまま使える。1 件 1 人は ADR-050 | FR-085、01 §2 | — |
 | D-187 | 成果物を外に出す操作（公開・送信・push・PR・外部 API への書き込み）は必ず人が最終承認する。点検役の AI は承認の代わりにならない | Claude判断（レビューの指摘） | BR-03・BR-08 ですでに守られているが、方針として明文化する | BR-10 | — |
@@ -203,7 +221,7 @@ flowchart LR
 | D-203 | きっかけは 5 つ：持ち主のチャット・ルーチン・予約した確認・webhook・裏の作業の完了 | ユーザー | 留守の間にも進めたい | REQ-096〜100、FR-090 | [ADR-058](adr/ADR-058-resident-agent.md) |
 | D-204 | 記憶は 4 層（プロフィール・ログ・メモ・検索）を最初の版に入れる（v1.4 で D-325 に置き換え） | ユーザー | 好みを毎回言い直さない | REQ-101、FR-097 | [ADR-063](adr/ADR-063-memory-four-layers.md) |
 | D-205 | 画面と Chrome は 1 つで全員が使う。画面を使う仕事は順番。ログインは全員で共通 | ユーザー | いちばん軽い。ラズパイでも動く | FR-074・079、TBL-032 | [ADR-060](adr/ADR-060-one-persistent-vm.md) |
-| D-206 | 合図に当たった操作の後にオートレビューを挟む。外に出す・支払う・消す・秘密の欄は必ず人 | ユーザー | 留守の間に止まる回数を減らす。BR-10 は変えない | REQ-103、FR-099 | [ADR-064](adr/ADR-064-auto-review.md) |
+| D-206 | 合図に当たった操作の後にオートレビューを挟む。外に出す・支払う・消す・秘密の欄は必ず人（v1.6 で既定は切る：D-351） | ユーザー | 留守の間に止まる回数を減らす。BR-10 は変えない | REQ-103、FR-099 | [ADR-064](adr/ADR-064-auto-review.md) |
 | D-207 | Web Push を最初の版に入れる（D-179 を覆す） | ユーザー | 留守の間の知らせが要る | REQ-091、FR-017 | [ADR-067](adr/ADR-067-web-push-first.md) |
 | D-208 | webhook は Tailscale Funnel で `/hooks/` だけを公開して受ける（D-128 の例外） | ユーザー | GitHub の出来事ですぐ起きる | REQ-099、FR-096、NFR-064・085 | [ADR-065](adr/ADR-065-webhook-funnel.md) |
 | D-209 | VM の中のコマンドは判定しない。資格情報を置かず、外へは egress の許可リストだけ、毎日の控えから戻せるようにする | ユーザー | 開発の仕事で止めない。壊れたら戻す | FR-086・100、BR-08 | [ADR-061](adr/ADR-061-vm-no-judge-restore.md) |
@@ -312,7 +330,7 @@ flowchart LR
 | D-312 | API-096 で日次の上限か `reserve_chat_usd` が変わったら、ルーターが待っているきっかけを今すぐ評価し直す（下げても同じ）。D-282 の知らせに「設定で日次の上限を上げればすぐ再開します」と SCR-023 へのリンクを入れる。変えた記録はポリシーの新しい版（v1.4 で D-322 に置き換え） | Claude判断（見直し） | 上限を上げたときに再開するかが書かれておらず、知らせにも上げ方がなかった | FR-013・091、SCR-020・023、API-096、UC-054 | — |
 | D-313 | Chromium の HTTP キャッシュはホームの外の `/tmp/chromium-cache`（`browser`・700）に置き、`--disk-cache-dir`・`--disk-cache-size` で 512MB まで。`/tmp` は VM 専用の名前なしボリューム（tmpfs にせずメモリに数えない）で、ホームの測りにも控えにも入らない。プロフィールの中に残る CacheStorage・IndexedDB は D-301 の掃除で扱う。フラグの効き方は実装で確かめる（v1.4 で D-321 に置き換え） | Claude判断（見直し） | キャッシュの置き場と大きさが決まっておらず、育つとホームの 4GB を超えて VM が止まり、控えにも写る | FR-074・079、NFR-062・066、07 | ADR-043・060・061 |
 | D-314 | WSL2 の置き先は WSL のディストリの中の Docker Engine を手順書の正とし、確かめる構成はこれだけ。Docker が別の VM にある置き先（Docker Desktop・OrbStack・Colima）ではホスト側の規則を入れず、`isolated` モードの box ネットワークを作れたときだけ VM を起こす。作れなければ `HOST_ISOLATION_MISSING` と「Docker Engine に入れ替える」節。別の VM かは `docker info` などで見分ける（項目は実装で確かめる）（v1.4 で D-326 に置き換え） | Claude判断（見直し） | Docker Desktop の Docker は Windows 側の別の VM で動き、D-293 の規則を WSL の中で入れても効かない。最初の置き先が WSL2 | NFR-075・081、API-101、UC-042、07 | ADR-044・045 |
-| D-315 | Bedrock・Vertex の接続先を初版から外す。LLM は Anthropic の API 直だけ。REQ-095 は Won't、FR-087 は使わない。クライアントの作成は `llm/claude.ts` の 1 か所にまとめ、差し替えの口だけ残す | ユーザー | 企業導入は最初の 1 社が来たら考える。その前に接続先 3 つ分の設計を持つのは重い | REQ-095、FR-087、API-111、11 §10 | [ADR-056](adr/ADR-056-llm-provider.md)（取り下げ） |
+| D-315 | Bedrock・Vertex の接続先を初版から外す。LLM は Anthropic の API 直だけ（v1.6 で D-352 に置き換え。Bedrock・Vertex は次の版のまま）。REQ-095 は Won't、FR-087 は使わない。クライアントの作成は `llm/claude.ts` の 1 か所にまとめ、差し替えの口だけ残す | ユーザー | 企業導入は最初の 1 社が来たら考える。その前に接続先 3 つ分の設計を持つのは重い | REQ-095、FR-087、API-111、11 §10 | [ADR-056](adr/ADR-056-llm-provider.md)（取り下げ） |
 | D-316 | 書き出しと取り込みを外す（REQ-089 は Won't）。引っ越しは `makase-data` と VM のホームのボリュームのコピーを手順書に書く | ユーザー | ホスト 1 台なので手順書で足りる | REQ-089、FR-082、API-097・098、SCR-023 | — |
 | D-317 | 先温めを外す。API-121（心拍）は残し、用途は「画面が見えているか」だけ | ユーザー | 先温めの効きより仕掛けが重い | FR-098、NFR-082、API-121 | — |
 | D-318 | webhook は 1 受け口あたり 1 分 60 件を超えたら 429 を返して何も残さない。まとめ・`merged`・本文ハッシュの重複捨てを消す。重複は `source_key` の UNIQUE だけ | ユーザー | まとめの仕掛けが複雑 | FR-096、NFR-085、TBL-041、R-92 | [ADR-065](adr/ADR-065-webhook-funnel.md) |
@@ -337,6 +355,57 @@ flowchart LR
 | D-337 | IMP-009：副作用確定/不明後のLLM失敗は停止通知、元依頼を再受付しない | ユーザー明示決定 | 新tool_call_idによる重複を防ぐ | FR-091、TBL-041・042・055 | [ADR-072](adr/ADR-072-stop-after-side-effects.md) |
 | D-338 | IMP-010：動的VMを導入labelで停止/削除、非使用確認後コピー | 承認済み改善案 | Compose外の書き手を確実に止める | NFR-070、11運用契約 | — |
 | D-339 | IMP-011：ComposeとVM2イメージのdigest一組を公開し明示pull | 承認済み改善案 | 新規/更新ホストでVMを起動可能にする | FR-074、NFR-077、11運用契約 | — |
+| D-340 | 閉域モード `network.mode`（`standard`・`closed`）。`closed` では本体と VM の外向きを `network.allow_hosts` の先だけにする | ユーザー（軸 A）・Claude判断 | 大手のクラウド型が届かない社内で使える | REQ-106、FR-101、NFR-089 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-341 | 入口は Tailscale・Headscale・社内 LAN の直結から選ぶ。`closed` では Tailscale の SaaS・Funnel を使わず、webhook は LAN の中で受ける | Claude判断 | 調整サーバーと Funnel も外に出る | FR-101、NFR-064 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-342 | `closed` では Web Push を切り、画面の中の通知と社内の ntfy に送る | Claude判断 | Push のサービスに宛先と時刻が出る | FR-017・101、R-102 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-343 | 内部ホストの許可 `network.internal_hosts`（既定は空、`browser`・`terminal` で別）。本体・box-manager・tailnet・ホスト・メタデータは固定で断る。作動は既定 `confirm`（人） | Claude判断 | 社内システムに届かせつつ、ページの仕掛けから社内に広がらない | REQ-107、FR-102、NFR-066、R-106 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-344 | 外に出た通信の台帳 `egress_events`。宛先・目的・バイト数・許可/拒否・トークン数。中身は残さない。行 90 日・集計は無期限 | Claude判断 | 「外に出ない」を見せて確かめられるように | REQ-108、FR-103、TBL-056、API-148、SCR-027 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-345 | チームで 1 台は提案（次の版の候補）。メンバーごとにメイン・記憶・VM、規則・費用の総額・監査は共有、管理者の二人の確認（v1.7 で不採用：D-383） | ユーザー（案を作る）・Claude判断 | 企業導入の形を先に示す。今の版は持ち主 1 人のまま | REQ-111、R-105 | [ADR-075](adr/ADR-075-team-sharing-proposal.md)（提案） |
+| D-346 | 容量の目安：ラズパイ 4/5（4GB）1 人、ラズパイ 5（8GB）2〜3 人、（16GB）4〜5 人、PC 16GB 5〜8 人、32GB 10〜15 人、64GB 20〜30 人。実機で測って直す（v1.7 でキットの選び方に作り直し：D-383） | ユーザー（明確にする）・Claude判断（数字） | ホストの選び方を示す | NFR-092 | [ADR-075](adr/ADR-075-team-sharing-proposal.md) |
+| D-347 | 判定の規則を正規化した JSON にし、`policy_versions` に版・SHA-256 を残す。判定ごとに版のハッシュを残す。書き出し・取り込み | ユーザー（軸 B）・Claude判断 | どの規則で判定したかを後から示す | REQ-109、FR-104、TBL-057、API-149 | [ADR-076](adr/ADR-076-verifiable-decisions.md) |
+| D-348 | 規則の試験の例を持ち、全部通らないと保存できない。過去 30 日への試し当て | Claude判断 | 規則の変更で行き先が知らずに変わらない | FR-104、SCR-028 | [ADR-076](adr/ADR-076-verifiable-decisions.md) |
+| D-349 | 判定の入力を保存し、再実行で同じ結果になる。Kernel の判定は純粋な関数（時刻・乱数・LLM・ネットワークなし） | Claude判断 | 決定論を確かめられる形にする | FR-105、NFR-090、API-150 | [ADR-076](adr/ADR-076-verifiable-decisions.md) |
+| D-350 | `audit_logs` に `prev_hash`・`row_hash`。毎日の末尾を `audit_anchors` に残して書き出す。検査で切れ目を見つける | Claude判断 | DB を直接書き換えても分かる | FR-106、NFR-091、TBL-058、API-151、R-103 | [ADR-076](adr/ADR-076-verifiable-decisions.md) |
+| D-351 | オートレビューは既定で切る（`review.auto.enabled = false`）。入れたときは ADR-064 のまま。判定ごとに `decided_by` を残す | ユーザー | 既定で LLM を判定に入れない | REQ-103、FR-099、TBL-051 | [ADR-077](adr/ADR-077-auto-review-off-by-default.md) |
+| D-352 | LLM は役割（`main`・`worker`・`computer`・`review`・`summary`）ごとに、`anthropic`・`openai`・`openai_compatible` から選ぶ。D-315 を置き換える | ユーザー（軸 C・範囲） | 1 社に縛られない。閉域で社内の推論サーバーを使える | REQ-110、FR-107 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-353 | `llm_models` に能力と単価を宣言する。能力が足りない役割には選べない。単価が空なら動かさない | Claude判断 | 合わないモデルや費用の分からないモデルで動かない | FR-107、TBL-059、API-152、SCR-029 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-354 | Claude・OpenAI の computer use を同じ作動の形に直してから確かめ・Kernel へ。`openai_compatible` は `generic` の道具で試し扱い | Claude判断 | Kernel と VM を接続先から切り離す | FR-108、R-101・104 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-355 | 文脈は接続先によらず先頭を変えない形。費用の上限は宣言した単価で計算する | Claude判断 | ADR-066・069 をそのまま使う | FR-098・013 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-356 | `closed`＋全役割を社内の `openai_compatible` にすると外向き 0。カレンダー・GitHub.com・Web 検索は使えない | Claude判断 | 完全な閉域の姿を示す | REQ-106、NFR-089 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-357 | ローカル LLM の推論サーバーはラズパイに置かない。同じ PC なら容量の目安から引く（v1.7 で D-380 に置き換え） | Claude判断 | ラズパイのメモリと CPU が足りない | NFR-092・093 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-358 | 持ち主の確かめ：Tailscale・Headscale は `Tailscale-User-Login` と `OWNER_LOGIN`。社内 LAN の直結は本体のパスキー（WebAuthn）とセッション Cookie（12 時間）。最初の登録は `makase owner-enroll` の 1 回限りの URL | Claude判断 | LAN の直結には身元のヘッダーがない | FR-073・101、NFR-064、API-083 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-359 | egress の記録は egress が溜め（最大 1 万件）、box-manager が毎分取りに行って本体に渡す。本体の外向きは本体の中の窓口 `net` が許可リストで絞って台帳に書く | Claude判断 | VM のネットワークから本体へは戻らない | FR-103、07 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-360 | 台帳に書けないとき・egress の溜まりが満杯のとき：`closed` は新しい外向きを断る、`standard` は通して欠けの件数を残し状態欄に出す | Claude判断 | 閉域では「記録のない外向き」を作らない | FR-101・103、NFR-089 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-361 | `openai_compatible` のキーは `.env` の `OPENAI_COMPATIBLE_API_KEY`（任意）。OpenAI は `OPENAI_API_KEY` | Claude判断 | ローカルはキーが要らないことが多い | FR-107、11 §10 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-362 | 役割の既定：`main`・`worker`・`computer` は `claude-opus-5-5`、`review`・`summary` は `claude-sonnet-5-5`。OpenAI・互換の既定はない | Claude判断 | 今の動きを既定に残す | FR-107、TBL-059 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-363 | 要約を始める長さ ＝ min（6 万, 文脈の長さ × 0.5）、呼び出し前の上限 ＝ min（今の値, 文脈の長さ × 0.9） | Claude判断 | 32k 級のローカルでも溢れない | FR-098・107 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-364 | context editing と思考ブロックの署名は Anthropic のときだけ。ほかは送るときの投影で古い画像を外す（原本は追記だけ） | Claude判断 | 接続先ごとに API の機能が違う | FR-098・107 | [ADR-078](adr/ADR-078-llm-by-role.md) |
+| D-365 | 内部ホストの `confirm`／`auto` はブラウザの作動だけ。ターミナルは egress の許可だけ（BR-08 のまま） | Claude判断 | ターミナルは Kernel で判定しない | FR-102 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-366 | `closed` では `terminal.allow_hosts` は `network.allow_hosts` と `internal_hosts.terminal` の中だけ効く | Claude判断 | 閉域の許可リストを 1 か所で決める | FR-101・102 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-367 | 社内の GitHub Enterprise Server・GitLab のコネクタは次の版。初版はターミナルの `git` で扱う | Claude判断 | コネクタを足すと API の確認の設計が増える | FR-081・102 | [ADR-074](adr/ADR-074-closed-network.md) |
+| D-368 | 日ごとの集計 `egress_daily` は TBL-056 の付属の表 | Claude判断 | 台帳と一緒に読む | TBL-056 | — |
+| D-369 | 規則の版の本文は `browser`・`terminal`・`network`・`review.auto.enabled` と行き先の表。`budget`・`llm` は入れない。今の値は `workspace_policies` に置き、保存のたびに同じトランザクションで版を足す | Claude判断 | 行き先に効くものだけを再実行の対象にする | FR-104、TBL-035・057 | [ADR-076](adr/ADR-076-verifiable-decisions.md) |
+| D-370 | REQ-103（オートレビュー）の優先度を Should に下げる | Claude判断 | 既定で切るため | REQ-103 | [ADR-077](adr/ADR-077-auto-review-off-by-default.md) |
+| D-371 | 対象を家の人（非エンジニアを含む）に広げる。持ち主 1 人は変えない | ユーザー | Muse・Dots が届かないのは家の中。便利さで差をつける | REQ-112、02 | [ADR-079](adr/ADR-079-home-agent-kit.md) |
+| D-372 | 届け方はセットアップ済みのラズパイ（推奨 16GB・最低 8GB・USB の SSD）。入口は Tailscale。初回は QR とパスキーと API キーの 5 段 | ユーザー（キット）・Claude判断（手順） | SD への書き込みは非エンジニアに難しい | REQ-112、FR-109、NFR-094、SCR-033 | [ADR-079](adr/ADR-079-home-agent-kit.md) |
+| D-373 | 家の保管庫 `makase-vault`。本体の道具で扱い Kernel が判定。消すのはゴミ箱へ（30 日。1 回で 20 件以上は人）、上書きは前の版、空にするのは人。VM にはつながない | Claude判断 | 家の写真は取り返しがつかない。ADR-061 を崩さない | REQ-113、FR-110、NFR-095、TBL-060、API-153、SCR-030 | [ADR-080](adr/ADR-080-home-vault.md) |
+| D-374 | 写真の並べ替え・重複・縮小版は本体のプログラム。中身での分類は画像を読める役割（既定クラウド）で見積もってから。顔の識別はやらない | ユーザー（画像はクラウド既定）・Claude判断 | 0 円でできることは LLM を使わない | FR-111、R-108 | [ADR-080](adr/ADR-080-home-vault.md) |
+| D-375 | 家計簿：レシートの写真 → 読み取り → `classify` で費目 → `ledger_entries` → カレンダーと照らす → 自信が低ければ確認のカード | ユーザー（家計簿）・Claude判断 | 家の外に置きたくない情報 | REQ-114、FR-112、NFR-097、TBL-061、API-154、SCR-031 | [ADR-082](adr/ADR-082-household-ledger.md) |
+| D-376 | チャットに画像を添付（10 枚・20MB まで）。縮めて送り、元は保管庫。汚染の印を付ける | Claude判断 | 写真の整理と家計簿の入口 | REQ-116、FR-114、TBL-063、API-156 | [ADR-080](adr/ADR-080-home-vault.md) |
+| D-377 | Home Assistant を同じラズパイに入れ、本体のコネクタが長期トークンで呼ぶ。HA は内部ホストに自動で登録 | ユーザー（HA 経由） | 市販の機器が使え、配線が要らない | REQ-115、FR-113、TBL-062、API-155、SCR-032 | [ADR-081](adr/ADR-081-home-assistant.md) |
+| D-378 | 鍵・空調と暖房・バルブ・警報・シャッターと印を付けた機器を動かす・それらに触る自動化は必ず人。自動化の変更は既定で人。区分は Kernel の規則 | Claude判断 | 物理的な害は取り返しがつかない | FR-113、BR-15、R-107 | [ADR-081](adr/ADR-081-home-assistant.md) |
+| D-379 | 役割 `classify`（判断モデル、接続先 `decision`）。間違えても困らない仕分けだけ。Kernel には使わない。自信 0.8 未満は LLM へ | ユーザー（判断モデルを使う）・Claude判断（線引き） | 家の中で 0 円・一瞬で仕分ける | REQ-117、FR-115、BR-16、R-109 | [ADR-083](adr/ADR-083-classify-and-local-on-pi.md) |
+| D-380 | ラズパイ 5 では 4B 級までの生成モデルを `summary` と短い文章に。8GB では VM を起こしている間は止める。実機で測ってから既定に。D-357 を置き換え | ユーザー（4B を売りに）・Claude判断 | ネットが切れても家の中で片付く | FR-107・115、NFR-092・096、R-112 | [ADR-083](adr/ADR-083-classify-and-local-on-pi.md) |
+| D-381 | A・B・C を家向けの言葉に（閉域モード＝家の中だけで動かす、内部ホスト＝家の機械）。コード上の名前は変えない | Claude判断 | 統制の話を便利さの話にする | 全体 | — |
+| D-382 | 「非エンジニアの一般向けには展開しない」を見直す。キットで少数から手渡し・販売。ストア配布・ホスティング版・API の肩代わりはやらない | ユーザー | 家に置く形なら配布の重さを抑えられる | `docs/oss-and-business.md`、01 §7 | [ADR-079](adr/ADR-079-home-agent-kit.md) |
+| D-383 | チームで 1 台（ADR-075）は不採用。NFR-092 はキットの選び方に作り直す | ユーザー | 会社で 1 人 1 台の VM は要らない | REQ-111、NFR-092 | [ADR-075](adr/ADR-075-team-sharing-proposal.md) |
+| D-384 | API キーは最初は持ち主が自分で取る（スマホで貼る画面と写真つきの手順書）（v1.7 の追加で更新：D-387。ChatGPT でサインインを先に） | ユーザー | こちらがサービス提供者にならない | FR-109、SCR-033 | [ADR-079](adr/ADR-079-home-agent-kit.md) |
+| D-385 | 接続先 `openai_chatgpt`（Sign in with ChatGPT。OSS の自分での登録）を足す。Responses API・`store: false`・`stream: true`。モデルはトークンで一覧を取る | ユーザー（使う） | API キーの壁を取る。OSS は無料の人も使える見込み | REQ-110、FR-107・116、TBL-059、API-152 | [ADR-084](adr/ADR-084-sign-in-with-chatgpt.md) |
+| D-386 | サインインはデバイスコード（スマホで承認）。トークンは本体に暗号化、VM には置かない。切れたら知らせて再サインイン | Claude判断 | キットはヘッドレス。戻り先が `127.0.0.1` だけでは届かない | FR-116、API-157、NFR-072 | [ADR-084](adr/ADR-084-sign-in-with-chatgpt.md) |
+| D-387 | キットの初回設定では「ChatGPT でサインイン」を先に。API キーは別の道。どちらもなくても家の中のモデルで動く（D-384 を更新） | ユーザー（この形で入れる） | 非エンジニアの最初の一歩を軽く | FR-109、SCR-033、NFR-094 | [ADR-084](adr/ADR-084-sign-in-with-chatgpt.md) |
+| D-388 | 403 は選べない。429・途中の失敗はほかの支払いに切り替えず止めて知らせる。費用 0 円で回数とトークンを記録 | Claude判断 | OpenAI は自動で切り替えない。止まったと分かるように | FR-116、`usage_records` | [ADR-084](adr/ADR-084-sign-in-with-chatgpt.md) |
+| D-389 | 自動のきっかけでは ChatGPT の枠を既定で使わない（`llm.chatgpt_allow_auto = false`） | Claude判断 | 無料の枠を守る。常駐での使い方が許されるか分からない | FR-107・116 | [ADR-084](adr/ADR-084-sign-in-with-chatgpt.md) |
+| D-390 | 能力は `tools` だけから。画像・computer use は確かめてから。非公式の OAuth は使わない | Claude判断 | 公式の文書に書かれていない | FR-116、R-113 | [ADR-084](adr/ADR-084-sign-in-with-chatgpt.md) |
 
 </details>
 
@@ -345,15 +414,15 @@ flowchart LR
 
 | 接頭辞 | v1.0 の番号 | 引き継いだ旧 ID・使わなくなった ID |
 |---|---|---|
-| REQ | REQ-076〜105 | — |
-| US | US-049〜072 | — |
-| UC | UC-042〜061 | — |
-| FR | FR-072〜100 | 引き継ぎ：FR-013 上限、FR-016 監査ログ、FR-017 通知（v1.0 で Must）、FR-018 進捗の配信、FR-061 振り分け先の選び方。使わない：FR-063（→ FR-093 に統合） |
-| NFR | NFR-061〜088 | — |
-| SCR | SCR-022〜026 | 引き継ぎ：SCR-010 記録、SCR-014 エージェント、SCR-019 確認、SCR-020 チャット、SCR-021 タスク（v0.6 の「依頼」） |
-| TBL | TBL-031〜055 | 引き継ぎ：TBL-007 `task_events`。使わない：TBL-036 `browser_profiles` |
-| API | API-082〜147 | 引き継ぎ：API-016・019・023・031・032・041・080・081。使わない：API-072・073・075・076・077・084（依頼）、API-086（VM の一覧）、API-092（エージェントのプロフィールを消す） |
-| ADR / D / Q / R / BR | ADR-041〜070 / D-121〜328 / Q-114〜124（すべて決着） / R-76〜100（R-87・95・96・99 は v1.4 で消した） / BR-01〜14 | — |
+| REQ | REQ-076〜118 | — |
+| US | US-049〜083 | — |
+| UC | UC-042〜072 | — |
+| FR | FR-072〜116 | 引き継ぎ：FR-013 上限、FR-016 監査ログ、FR-017 通知（v1.0 で Must）、FR-018 進捗の配信、FR-061 振り分け先の選び方。使わない：FR-063（→ FR-093 に統合） |
+| NFR | NFR-061〜097 | — |
+| SCR | SCR-022〜033 | 引き継ぎ：SCR-010 記録、SCR-014 エージェント、SCR-019 確認、SCR-020 チャット、SCR-021 タスク（v0.6 の「依頼」） |
+| TBL | TBL-031〜063 | 引き継ぎ：TBL-007 `task_events`。使わない：TBL-036 `browser_profiles` |
+| API | API-082〜157 | 引き継ぎ：API-016・019・023・031・032・041・080・081。使わない：API-072・073・075・076・077・084（依頼）、API-086（VM の一覧）、API-092（エージェントのプロフィールを消す） |
+| ADR / D / Q / R / BR | ADR-041〜084 / D-121〜390 / Q-114〜124（すべて決着） / R-76〜113（R-87・95・96・99 は v1.4 で消した） / BR-01〜16 | — |
 
 旧 ID の中身は、引き継いだものに限ってこの設計書のほうを正とする。ほかの旧 ID（コードのコメントにあるもの）は、旧設計書の時点の意味のまま。
 
@@ -392,9 +461,22 @@ flowchart LR
 | REQ-102 伝える価値があるときだけ話す | US-063 | UC-054 | FR-093 | SCR-020 | API-119, 120 | TBL-043 |
 | REQ-103 オートレビュー | US-069 | UC-059 | FR-099 | SCR-010, SCR-021 | API-023 | TBL-051, 035 |
 | REQ-104 VM が残り、戻せる | US-071 | UC-061 | FR-074, FR-100 | SCR-023 | API-088, 133〜135, 143 | TBL-032, 052 |
+| REQ-106 閉域で動く（Should） | US-073 | UC-062 | FR-101 | SCR-023, SCR-027 | API-111, 148 | TBL-035, 056 |
+| REQ-107 社内システムに届く（Should） | US-074 | UC-063 | FR-102 | SCR-023 | API-111 | TBL-035 |
+| REQ-108 外に出た通信が見える | US-075 | UC-064 | FR-103 | SCR-027 | API-148 | TBL-056 |
+| REQ-109 判定を確かめられる | US-076 | UC-065 | FR-104, FR-105, FR-106 | SCR-010, SCR-028 | API-149, 150, 151 | TBL-057, 058, `audit_logs` |
+| REQ-110 モデルを選べる | US-077 | UC-066 | FR-107, FR-108, FR-116 | SCR-029 | API-111, 152 | TBL-059, 035 |
+| REQ-111 チームで 1 台（不採用） | — | — | — | — | — | — |
+| REQ-112 キットで始められる | US-078 | UC-067 | FR-109 | SCR-033 | API-157 | — |
+| REQ-113 家の保管庫 | US-079 | UC-068 | FR-110, FR-111 | SCR-030 | API-153 | TBL-060 |
+| REQ-114 家計簿（Should） | US-080 | UC-069 | FR-112 | SCR-031 | API-154 | TBL-061 |
+| REQ-115 家電・IoT | US-081 | UC-070 | FR-113 | SCR-032 | API-155 | TBL-062 |
+| REQ-116 チャットで写真を送れる | US-082 | UC-071 | FR-114 | SCR-020 | API-156 | TBL-063 |
+| REQ-117 家の中で仕分ける（Should） | US-083 | UC-072 | FR-115 | SCR-029 | API-152 | TBL-059 |
+| REQ-118 家族で使う（次の版の候補） | — | — | — | — | — | — |
 | REQ-105 安く速く（キャッシュ・要約） | US-072 | UC-060 | FR-098 | SCR-023 | API-111, 121 | TBL-053, `usage_records` |
 
 </details>
 
 ### ドキュメント索引・決定
-読む順と各文書の索引は[README](README.md)。今回の決定はD-329〜339、影響IDと受入条件は[変更レポート](changes/2026-10-25-p1-review-fixes.md)。既存決定D-121〜328は上のログに保持する。
+読む順と各文書の索引は[README](README.md)。今回（v1.7）の決定は D-371〜390（D-385〜390 は Sign in with ChatGPT の追加。[変更レポート](changes/2026-10-26-home-agent.md)）。v1.6 の決定 D-340〜370 は[差別化 A・B・C の変更レポート](changes/2026-10-26-differentiation-abc.md)。v1.5 の決定 D-329〜339 は[P1 の変更レポート](changes/2026-10-25-p1-review-fixes.md)。既存決定 D-121〜339 は上のログに保持する。

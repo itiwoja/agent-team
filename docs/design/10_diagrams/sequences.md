@@ -1,8 +1,8 @@
 # 10. 図：シーケンス図
-- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[10 図](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.7（2026-10-26） ／ 親：[10 図](README.md)
 
 > **3行で**
-> 1. きっかけからターン・振り分け・報告まで（UC-054・055）・webhook（UC-057）・ルーチンの提案（UC-056）・オートレビュー（UC-059）・要約（UC-060：ターンを始めるときの 1 経路）・VM が起きて眠る（UC-061：`box-browser` と `box-shell` の 2 コンテナ）の 6 本を描いた。
+> 1. きっかけからターン・振り分け・報告まで（UC-054・055）・webhook（UC-057）・ルーチンの提案（UC-056）・オートレビュー（UC-059）・要約（UC-060：ターンを始めるときの 1 経路）・VM が起きて眠る（UC-061：`box-browser` と `box-shell` の 2 コンテナ）の 6 本を描いた。v1.6 で、判定の詳細（作動の形・Kernel・監査ログの鎖）と閉域での外向き・台帳の 2 本を足した。v1.7 で、レシートの写真から家計簿まで（FR-112）と家電の自動化を作る（FR-113）の 2 本を足し、全部で 17 本になった。
 > 2. VM の 1 歩・確認・交代・ターミナル・再開は、画面の番と VM が残る形で描いた。再開（FR-084）は必ず新しい世代で起こし直す。控え（FR-100）は 2 つのボリュームを 1 つの tar にまとめる。
 > 3. どの図も「SSE は合図だけで、中身は REST」の決まり（D-196）は省いて描いた。
 
@@ -98,6 +98,7 @@ sequenceDiagram
 ```
 
 ### UC-059：オートレビュー
+既定は切ってある（`review.auto.enabled = false`。D-351）。切っている間は LLM を呼ばず人の確認に回る。入れたときだけ、下の alt の下側になる。
 ```mermaid
 sequenceDiagram
  participant CU as computer（本体）
@@ -107,15 +108,19 @@ sequenceDiagram
  participant W as 画面
  CU->>K: judgeBrowserAction（name「次へ」）
  K-->>CU: approve（T-3 の confirm_words → オートレビュー）
- CU->>CU: browser_actions（reviewed）・auto_reviews
- CU->>AR: brief・操作・確かめた中身・印つきスクショ（会話は渡さない）
- alt pass
-  AR-->>CU: pass「検索条件の確定。外に出ない」
-  CU->>CU: 直前の確かめ（D-307。外れたら実行せず Claude に返す）
-  CU->>BM: API-103 実行（expect: contentHash）
- else stop・20 秒
-  AR-->>CU: stop「人数の欄が空のまま」
-  CU->>W: browser_checks（pending・review_reason）→ UC-047
+ alt 既定（review.auto.enabled = false）
+  CU->>W: browser_checks（pending）→ UC-047（LLM は呼ばない）
+ else 入れたとき（review.auto.enabled = true）
+  CU->>CU: browser_actions（reviewed・decided_by = llm_review）・auto_reviews
+  CU->>AR: brief・操作・確かめた中身・印つきスクショ（会話は渡さない）
+  alt pass
+   AR-->>CU: pass「検索条件の確定。外に出ない」
+   CU->>CU: 直前の確かめ（D-307。外れたら実行せず Claude に返す）
+   CU->>BM: API-103 実行（expect: contentHash）
+  else stop・20 秒
+   AR-->>CU: stop「人数の欄が空のまま」
+   CU->>W: browser_checks（pending・review_reason）→ UC-047
+  end
  end
 ```
 
@@ -172,7 +177,7 @@ sequenceDiagram
 ```mermaid
 sequenceDiagram
  participant R as 実行役（本体）
- participant C as Claude API
+ participant C as LLM（役割 computer：Claude・OpenAI・互換）
  participant CU as computer（本体）
  participant K as Kernel
  participant BM as box-manager
@@ -184,6 +189,7 @@ sequenceDiagram
   R->>R: 保存前秘密検査。安全なcontentのみdone保存（拒否時はFR-075で会話終了）
  loop 列の操作を並んだ順に
   R->>CU: 実行して
+  CU->>CU: 接続先ごとの呼び出しを同じ作動の形に直す（FR-108）
   CU->>CU: 直前の確かめ（タスク・世代・番・screen_epoch が覚えた値と同じ・control = agent・vm_op）
   alt 外れた
    CU-->>R: 実行しない（残りも実行しない）。番を取り直して新しいスクショだけを返す
@@ -200,7 +206,7 @@ sequenceDiagram
     BM->>B: 同じなら xdotool
     B-->>CU: executed・スクショ
    else approve
-    K-->>CU: approve（行き先：人 → UC-047・オートレビュー → UC-059）
+    K-->>CU: approve（行き先：人 → UC-047。オートレビューを入れたときだけ → UC-059）
     CU-->>R: 列はここで止める。残りは「前の操作の確認を待っているので実行していない」
    end
   end
@@ -383,4 +389,148 @@ sequenceDiagram
   CORE-->>O: 「ホームが壊れています。控えに戻すか作り直してください」
  end
  CORE-->>W: SSE vm.updated
+```
+
+### UC-046 の判定の詳細：作動の形・Kernel・行き先・監査ログの鎖
+接続先（Anthropic・OpenAI・互換）によらず、確かめ以降は同じ形の作動を見る（FR-108・D-354）。オートレビューは既定で切ってあり、入れたときだけ alt の最後の枝（FR-099・D-351）。
+```mermaid
+sequenceDiagram
+ participant L as LLM（役割 computer）
+ participant CU as computer（本体）
+ participant BM as box-manager
+ participant B as box-agent
+ participant K as Kernel（純粋な関数）
+ participant H as 持ち主（人）
+ participant AR as オートレビュー
+ participant AL as audit_logs（鎖）
+ L-->>CU: 画面操作の呼び出し（接続先ごとの形）
+ CU->>CU: 同じ作動の形に直す（FR-108）
+ CU->>BM: API-103 dryRun（作動の形）
+ BM->>B: 確かめ
+ B-->>CU: inspect（先・contentHash）
+ CU->>K: 作動の形・inspect・規則の版（policy_sha256）・時刻
+ K-->>CU: allow・human・deny（decided_by = kernel）
+ CU->>CU: 判定の入力 verdict_input・policy_sha256 を保存
+ alt allow
+  CU->>BM: API-103 実行（expect: contentHash）
+ else deny
+  CU-->>L: 断った理由を返す
+ else human（既定）
+  CU->>H: 人の確認 FR-077
+  H-->>CU: ○ または ×（decided_by = human）
+  CU->>BM: ○ のとき直前の確かめのあと実行（expect: contentHash）
+ else オートレビューを入れたとき（review.auto.enabled = true）
+  CU->>AR: 会話を渡さず確かめる
+  AR-->>CU: pass または stop（decided_by = llm_review）
+  Note over CU,H: stop や時間切れは人の確認に回る
+  CU->>BM: pass のとき直前の確かめのあと実行（expect: contentHash）
+ end
+ CU->>AL: 判定と実行を追記（prev_hash・row_hash）
+```
+
+### FR-101・103：closed での外向きと台帳
+本体の外向きは窓口 `net`、VM の外向きは egress が絞る。egress の記録は box-manager が毎分取りに行く（D-359）。
+```mermaid
+sequenceDiagram
+ participant S as 本体の機能（LLM・カレンダー・GitHub・Push）
+ participant N as net（本体の窓口）
+ participant P as 許可リスト（network.allow_hosts）
+ participant T as 台帳（egress_events）
+ participant V as VM（box-browser・box-shell）
+ participant E as egress
+ participant BM as box-manager
+ S->>N: 外へ出したい（宛先ホスト・目的）
+ N->>P: 宛先は許可リストにあるか
+ alt closed で許可リストにない
+  P-->>N: なし
+  N->>T: 書く（拒否）
+  N-->>S: 断る
+ else 許可リストにある、または standard
+  P-->>N: あり
+  N->>T: 書く（許可・目的・バイト数）
+  alt 書けない（closed）
+   N-->>S: 新しい外向きを断る
+  else 書けない（standard）
+   N->>N: 通して欠けた件数を数える（状態欄に出す）
+   N-->>S: 通す
+  else 書けた
+   N-->>S: 通す
+  end
+ end
+ V->>E: 外へ出したい（送り元ごと）
+ E->>P: 許可リストと内部ホストの許可に合うか
+ E->>E: 通した・断ったを溜める（最大 1 万件）
+ loop 毎分
+  BM->>E: 記録を取りに行く（ctl）
+  E-->>BM: 溜めた記録
+  BM->>T: 本体へ渡して書く（egress_daily に日ごとの集計）
+ end
+```
+
+### FR-112：レシートの写真から家計簿まで
+添付は外から来たものなので汚染の印が付く（BR-06）。費目は間違えても直せるので `classify` を使い、自信が低ければ LLM に回す（BR-16）。
+```mermaid
+sequenceDiagram
+ actor O as 持ち主（スマホ）
+ participant B as 本体
+ participant VT as 保管庫（makase-vault）
+ participant VR as 画像を読む役割（vision）
+ participant CL as classify（判断モデル）
+ participant LM as LLM（上の役割）
+ participant DB as 家計簿（ledger_entries）
+ participant CA as カレンダー
+ O->>B: レシートの写真を送る（API-156）
+ B->>B: 形式・大きさを確かめ、長辺 1568px に縮める
+ B->>VT: 元の画像を レシート に置く
+ B->>DB: chat_attachments に参照と汚染の印を残す
+ B->>VR: 縮小版を渡す（送った枚数は台帳に残る）
+ VR-->>B: 店・日付・品目・金額・支払い方法・自信
+ B->>CL: 費目を選ぶ
+ CL-->>B: 答えと自信
+ alt 自信が下限（0.8）より低い
+  B->>LM: 同じ題を回す
+  LM-->>B: 費目
+ end
+ B->>DB: 1 行入れる（確認の状態つき）
+ B->>CA: 同じ日の予定を見る
+ CA-->>B: 予定
+ B->>DB: 一致した予定をメモに付ける
+ alt 金額・日付の自信が低い
+  B->>O: 確認のカード（send_to_owner の choices）
+  O-->>B: 直した値または ○
+  B->>DB: 直して確認済みにする
+ else 自信が高い
+  B->>O: 入れたと知らせる（任意）
+ end
+```
+
+### FR-113：家電の自動化を作る
+区分は Kernel の規則で決める。`classify`・LLM は機器を選ぶ下ごしらえまでで、区分の判断には使わない（BR-16）。
+```mermaid
+sequenceDiagram
+ actor O as 持ち主
+ participant M as メイン
+ participant W as 振り分け先のエージェント
+ participant K as Kernel
+ participant HC as HA のコネクタ
+ participant HA as Home Assistant
+ O->>M: 玄関が開いたら知らせる自動化を作って
+ M->>W: delegate
+ W->>HC: home_automation_put（案）
+ HC->>K: 判定を頼む（機器の区分・操作の種類）
+ K->>K: home_devices の区分を見る（規則の版で判定。既定は人）
+ K-->>HC: approve（行き先は人）
+ HC-->>O: 確認のカード（機器・いつ・何が起きたら・何をする）
+ alt 人が ○（中身のハッシュが同じ）
+  O-->>HC: ○
+  HC->>HA: 自動化を保存（長期トークン）
+  HA-->>HC: 保存した
+  HC-->>W: 保存した
+  W-->>M: 報告
+  M->>O: send_to_owner で知らせる
+ else 人が × ・期限切れ
+  O-->>HC: ×
+  HC-->>W: 断られた（理由）
+  W-->>M: 決め直す
+ end
 ```
