@@ -1,5 +1,5 @@
 # 手順書を書いて見つけた設計の直しどころ
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-25） ／ 設計の版：v1.4
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7
 
 実装手順書（[README](README.md)）を書くときに、設計書 v1.4 と今のコードを読み比べて見つけたもの。手順書の本文には書かず、ここに集めた。設計書を直すときの材料にする。各ステップの「設計に戻すこと」も合わせて見る。直したら、この一覧から消すか「済」を書く。
 
@@ -18,13 +18,13 @@
 - **API-144** の `:boxId` は VM が眠っているときの世代の指し方が書かれていない。「次に起こす」の意味も曖昧（[7](07_terminal_pack_snapshot.md)）
 - **パック**：外すとき「`browser` の追加分を戻す」とあるが `pack_installs` に追加分を持つ列がない。旧 `TRUSTED_SKILLS` に当たるスキルの信頼の決まりが新設計にない（[7](07_terminal_pack_snapshot.md)）
 - **控えの世代数**：FR-100 の図「4 つ目より古いものを `deleted`」と TBL-052「`ready` は 3 つまで」は、書きかけの 1 つを含む意味なら矛盾しない（[7](07_terminal_pack_snapshot.md)）
-- **Docker の版**：NFR-075 は Docker Engine 24 以上だが、`isolated` モードが使える版はもっと新しい。07 の WSL2 の行（Docker Desktop も可）と D-314 の「WSL の中の Docker Engine が正」の言い方が、D-326 で置き換えたあとも 07・NFR-075・UC-042 に残っている（[8](08_release.md)）
-- **11 §11 実機の行**は NFR-067〜069・082〜084・086 で、05 の測り方の表にある NFR-081 が入っていない（[8](08_release.md)）
-- **`--proxy-bypass-list` の `shell`**：07 と FR-075 はホスト単位の `shell` を書く（`shell` の全ポートが egress を通らない）が、NFR-066 は「`shell:8000`〜`8099` だけ」と書く。仕組みと文章がずれている（[1](01_vm_vertical.md)・[8](08_release.md)）
+- **Docker の版**：NFR-075 は Docker Engine 24 以上だが、`isolated` モードが使える版はもっと新しい。07 の WSL2 の行（Docker Desktop も可）と D-314 の「WSL の中の Docker Engine が正」の言い方が、D-326 で置き換えたあとも 07・NFR-075・UC-042 に残っている（[9](09_release.md)）
+- **11 §11 実機の行**は NFR-067〜069・082〜084・086 で、05 の測り方の表にある NFR-081 が入っていない（[9](09_release.md)）
+- **`--proxy-bypass-list` の `shell`**：07 と FR-075 はホスト単位の `shell` を書く（`shell` の全ポートが egress を通らない）が、NFR-066 は「`shell:8000`〜`8099` だけ」と書く。仕組みと文章がずれている（[1](01_vm_vertical.md)・[9](09_release.md)）
 - **`steer` の区分**：FR-090 は `chat`・`approval_done` だけを `chat` の区分とするが、FR-013・TBL-042・ADR-069 は `steer`（持ち主から）も含める（[4](04_resident.md)）
 - **API-096 の欄**：09 の表は `budget`・`browser`・`terminal` 欄・同時数とあるが、PATCH の本文の例に `terminal` と、SCR-023 の「上限」欄にある歩数・操作・時間が無い（[3](03_core_port.md)・[6](06_web.md)）
-- **Tailscale をホストに入れるか**：D-189・NFR-081 は「Docker と Tailscale が入った機械」、UC-042 は「Tailscale のアカウントがある」。07 は `tailscale` コンテナが tailnet に入る。手順書はコンテナ側だけで足りる前提にした（[8](08_release.md)）
-- **UC-042・07・NFR-075 の WSL2 の行**：「WSL の中の Docker Engine を推奨・Docker Desktop も可」のまま。D-314 は D-326 で置き換わったので、「確かめた構成」と「動くはずの構成」を分けて書き直す（[8](08_release.md)）
+- **Tailscale をホストに入れるか**：D-189・NFR-081 は「Docker と Tailscale が入った機械」、UC-042 は「Tailscale のアカウントがある」。07 は `tailscale` コンテナが tailnet に入る。手順書はコンテナ側だけで足りる前提にした（[9](09_release.md)）
+- **UC-042・07・NFR-075 の WSL2 の行**：「WSL の中の Docker Engine を推奨・Docker Desktop も可」のまま。D-314 は D-326 で置き換わったので、「確かめた構成」と「動くはずの構成」を分けて書き直す（[9](09_release.md)）
 - **置き換え済みの決定の残り**：D-247（`attached`）は D-324 で、D-311・312 は D-323・322 で置き換え済み。手順書には入れていない
 
 ## 今のコードと設計の差（移すときに直すもの）
@@ -33,6 +33,23 @@
 - `claude.ts` は思考のブロックを捨て、`system` を 1 本の文字列で送り、`usage` のキャッシュ項目を入力に混ぜている（D-256・ADR-066 に反する）（[4](04_resident.md)）
 - `policy.ts` の `budget` は `per_day_usd`（設計は `daily_usd`・`daily_auto_usd`）。`browser` 欄がない。`judgeBrowserAction` はまだない（[2](02_risky_actions.md)・[3](03_core_port.md)）
 - `workspace.max_concurrent_tasks` と 08 の `max_tasks` が別名。`newId()` は UUIDv7 でない（[3](03_core_port.md)）
-- Node の版は 07 が 24、`apps/sandbox/Dockerfile` と CI は 22（[1](01_vm_vertical.md)・[8](08_release.md)）
+- Node の版は 07 が 24、`apps/sandbox/Dockerfile` と CI は 22（[1](01_vm_vertical.md)・[9](09_release.md)）
 - `packages/llm` は Gemini が中心で、`LlmRequest` に画像と構造化出力がない。`ClaudeClient` は `apps/worker/src/llm/claude.ts` にある（[1](01_vm_vertical.md)・[2](02_risky_actions.md)）
 - 旧 sandbox の executor は「コマンドを取りに行く」形で、出力 20,000 字・最大 300 秒・`timeout_sec`。設計は受ける側の HTTP・64KB・120 秒・`timeoutSec`（[7](07_terminal_pack_snapshot.md)）
+
+## v1.6・v1.7 で見つけたもの（2026-10-26）
+手順書を v1.7 に合わせるときに見つけたもの。
+- **API のパス**：FR-105・106・107・110・113・114 の本文は `/api/verdicts`・`/api/audit`・`/api/llm`・`/api/vault`・`/api/home`・`/api/chat/attachments` と書き、09 は `/api/v1/...`。API-149 の具体的なパスが 09 resident にない（[3](03_core_port.md)・[8](08_home.md)）
+- **egress の口**：D-359（box-manager が egress の記録を取って本体に渡す）・`network` の設定を egress に渡す道・記録を守るトークンが 09 vm にない。前からある `terminal.allow_hosts` と同じ問題。記録が満杯のときは `standard` で捨てて欠けを数え、`closed` で断る（D-360）と分かれる（[1](01_vm_vertical.md)・[3](03_core_port.md)・[7](07_terminal_pack_snapshot.md)）
+- **FR-102**：「ホスト自身」の範囲（ブリッジ・LAN のアドレス）が書かれていない。本体と egress で固定の除外をどこで共有するかも書かれていない（[1](01_vm_vertical.md)・[3](03_core_port.md)）
+- **TBL-057**：試験の例の `expect` が `allow`・`human`・`deny` だけで、`review.auto.enabled = true` のときの行き先を書けない。行き先の表の JSON の形もない（[2](02_risky_actions.md)）
+- **TBL-058**：`audit_logs.row_hash`・`last_audit_id` を前提にしているが、今のコードの鎖は `seq`・`prev_hash`・`hash`（BLOB）。鎖の始まり（創世の値・既存の行）が書かれていない（[3](03_core_port.md)）
+- **役割の名前**：API-152（09 resident）は `summarize`、11 §1・API-096 は `summary`。REQ-110 の「振り分け先」は 11 §1 の `worker`。11 §1 の `llm.roles` の例の行に `classify` がない（別の行にある）。FR-112・114 の `vision` は役割の一覧にない（[3](03_core_port.md)・[4](04_resident.md)・[8](08_home.md)）
+- **ADR-077**：`review.auto.enabled` の既定 false が TBL-035 の既定の 1 行に入っているか確かめる（[3](03_core_port.md)）
+- **D-386**：ChatGPT のトークンを暗号化する鍵の置き場がない（[3](03_core_port.md)）
+- **FR-101**：Funnel を付けないのを Compose の生成でやるか、`network.mode` を実行時に読むかが書かれていない。`closed` で webhook を登録したときの返し（手順書は仮に 409 `closed_network`）、:8081 を LAN 側にどう出すか・FR-073 との関係、Web Push を止めたときに画面を開いていない人への知らせ方がない（[3](03_core_port.md)・[5](05_triggers.md)）
+- **D-389**：項目名がない（手順書は仮に `llm.chatgpt_for_triggers`）。API-152 の「自動のきっかけで始まる仕事の役割は `openai_chatgpt` を選べない」は、割り当てが 1 つだけなのでメインを ChatGPT にできなくなる。自動のきっかけ用に別の割り当てを持つかを決める（[4](04_resident.md)・[5](05_triggers.md)）
+- **FR-113**：入力の道具が 3 つ、04 tools は `home_automation_delete` を足して 4 つ（[8](08_home.md)）
+- **FR-114 と API-156**：保管庫がつながっていないとき、API-156 は `/data/attachments/` に置き、FR-114 は添付を断る（[8](08_home.md)）
+- **キット**：FR-109 の Tailscale の招待と `OWNER_LOGIN`・`TS_AUTHKEY` の関係（誰の tailnet か）、秘密をイメージに焼かないことが書かれていない。最低の機械が NFR-062（4GB）とキット（ラズパイ 5 の 8GB）で 2 つある（[9](09_release.md)）
+- **NFR-089**：05 の測り方は「100 回ずつ」、変更レポートの受入条件は「1 日動かす」。手順書は両方やる（[9](09_release.md)）

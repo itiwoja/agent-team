@@ -1,10 +1,10 @@
 # ステップ 7. ターミナル・パック・VM の控え
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[04 vm](../design/04_functional_spec/vm.md)（FR-079・086・100）、[04 tools](../design/04_functional_spec/tools.md)（FR-085・088・061）、[08 vm](../design/08_database/vm.md)、[08 resident](../design/08_database/resident.md)、[09 vm](../design/09_api/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)、[10 states](../design/10_diagrams/states.md)、[11](../design/11_tech_spec.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[04 vm](../design/04_functional_spec/vm.md)（FR-079・086・100）、[04 tools](../design/04_functional_spec/tools.md)（FR-085・088・061）、[08 vm](../design/08_database/vm.md)、[08 resident](../design/08_database/resident.md)、[09 vm](../design/09_api/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)、[10 states](../design/10_diagrams/states.md)、[11](../design/11_tech_spec.md)
 
 > **3行で**
 > 1. 振り分け先のエージェントが VM のターミナルでコマンドを動かしてファイルを出し入れでき、パックを入れて使え、VM のホームを毎日控えて戻す・作り直す・ブラウザのデータを消すことができるようになる。
 > 2. 作るのは、shell-agent のコマンド実行（API-117）と tar（API-118）、本体の `sandbox_commands` とターミナルの道具、パックの JSON・検証・入れる／外す（API-114〜116）、標準パック `packs/announcement-page.json`、box-manager の控え・戻す・作り直す・ホームの測り・ブラウザのデータを消す（API-108・143・144・109）、本体の `vm_op` の直列・毎日の控え・5 秒の問い合わせ・戻すときに止めるタスク（API-133〜135・138）。
-> 3. 終わる条件：UC-052・053・061 の基本フローが通り、告知ページ 1 件が GitHub の PR まで届く（段 1 の終わり）。
+> 3. 終わる条件：UC-052・053・061 の基本フローが通り、告知ページ 1 件が GitHub の PR まで届く（VM まわりの段 1 の終わり。家の機能は次のステップ 8）。
 
 ## 前提（始める条件）
 - **入力**：ステップ 1〜6 が終わっている
@@ -13,6 +13,7 @@
   - ステップ 4：`boxes`・`vm_op` の `starting`・`stopping`、画面の番、`computer/`（box-manager のクライアント）、毎分のタイマーの登録口、再開の表の登録口、`report` と `read_skill`、メインの振り分け先の一覧、交代（API-089〜091・113・`takeovers`・道具 `request_takeover`）。ターミナルの道具と成果物の写し（`~/work/<taskId>` → `/data/files/<taskId>/`）は口だけある
   - ステップ 5：GitHub の gateway（PR の Intent・確認・`approval_done`）。ステップ 6：SCR-021 の「ターミナル」欄の枠、SCR-023 の VM の欄と SCR-024 `/packs`（どちらも骨まで。実 API につなぐのはここ）
   - `apps/app`・`apps/worker` はステップ 3 の 3.7 で消えている。「移す元」の `apps/app/src/packs/`・`apps/worker/src/db/repo/sandbox.ts` は、消したコミット（SHA は [05_triggers.md](05_triggers.md) の「前提」に書いてある）から `git show <sha>:<path>` で読む。`apps/sandbox`・`packages/sandbox` はステップ 1 から残っていて、7.2 の最後で消す
+  - ステップ 3（v1.6・v1.7 の分）：`network.internal_hosts` と `closed` の許可リストを box-manager 経由で egress に渡す道（FR-102・FR-101）と、egress の記録を毎分取って台帳に入れる道（FR-103）がある。このステップの `terminal.allow_hosts` も同じ道で渡し、`closed` では `network.allow_hosts` と内部ホストの `terminal` 側に入っている先だけが効く（D-366）
   - 入れないもの：掃除のための起動（API-145・146。D-319）、書き出し・取り込み（D-316）、人がターミナルを直接打つ画面（次の版）
 - **機械**：置き先は段 1（手元の WSL2、amd64）
 - **鍵とアカウント**：`ANTHROPIC_API_KEY`（7.7 の通し）、GitHub をつないだ試験用のリポジトリ（PR の宛先。持ち主の本物のリポジトリは使わない）、`BOX_MANAGER_TOKEN`
@@ -46,7 +47,7 @@
 3. 上限：1 コマンド 120 秒（`timeoutSec` が超えたら 120 に切る）。出力は `clipTail` で 64KB（バイト）に切り、`truncated: true` を返す。時間切れは `ok: false`・出力に打ち切りの文を足して返す（`COMMAND_TIMEOUT`）。プロセスのグループごと止める（`runShell` の `detached` と `kill(-pid)`）
 4. 同時 2 本：3 本目は 409 `COMMANDS_FULL`。`actionId` が実行済みなら前の結果を返す（メモリに最近の分を持つ。shell-agent が再起動したら世代が替わるので足りる）
 5. 利用者 `agent` で動かす（コンテナ自体がagent。rootから落とす分岐なし）。コマンド/tar等の子プロセスには明示的な環境を渡し、SHELL_TOKEN・BROWSER_TOKENを含めない。BROWSER_TOKENはshellコンテナ自体にも渡さない。環境変数削除だけで管理プロセスの初期環境を秘匿できるとは扱わず、SHELL_TOKENが読まれてもブラウザ権限にはならない分離を試験する
-6. `terminal.allow_hosts`：API-096 に `terminal` 欄はある（09 の表）が、egress への届け方だけが設計にない。届け方は 7.2 の後で決める（「実装で決めること」）。まず `HTTP_PROXY`・`HTTPS_PROXY` を egress に向け、`docker exec -u agent` で `curl` が許可リスト内だけ通ることを確かめる
+6. `terminal.allow_hosts`：API-096 に `terminal` 欄はある（09 の表）が、egress への届け方だけが設計にない。v1.7 では、ステップ 3 で `network.internal_hosts`・`closed` の許可リストを box-manager 経由で egress に渡す道ができているので、`terminal.allow_hosts` もそこに載せる（「実装で決めること」）。まず `HTTP_PROXY`・`HTTPS_PROXY` を egress に向け、`docker exec -u agent` で `curl` が許可リスト内だけ通ることを確かめる
 確かめ：shell-agent に直に `curl` で `run_command` を送ると出力と `exitCode` が返る。121 秒の `sleep` は打ち切られる。出力 100KB のコマンドが 64KB に切られ `truncated`。3 本同時に送ると 3 本目が 409。同じ `actionId` の 2 回目は実行されず前の結果が返る。`ls /home/browser`・`ls /tmp/.X11-unix` に何もない。
 
 ### 7.2 tar の出し入れ（API-118）と box-manager の中継
@@ -121,7 +122,7 @@
 11. ステップ 6 で骨だけ作った SCR-023 の VM の欄と SCR-024 を、ここで実 API につないで確かめる。この手順では SCR-023 の VM の欄を API-088・133〜135・138 につなぐ（SCR-024 は 7.4 の 8）。ホームが 4GB 超えのときの 3 つの操作、`broken` のとき他のボタンが使えないこと
 確かめ：偽の box-manager で `vm_op` の遷移を一通り（`snapshotting` の完了・失敗・30 分超過、`restoring` の失敗で `broken`）。タスク 3 つ（VM を使った 1・画面の番を持つ 1・まだ使っていない `waiting_vm` 1）で API-134 を叩くと、前の 2 つだけ `halted`（`vm_replaced`）。実の box-manager で、控えの途中で本体を `kill` し、再起動後に `ready` か `failed` に決まる。
 
-### 7.8 通し：告知ページ 1 件を PR まで（段 1 の終わる条件）
+### 7.8 通し：告知ページ 1 件を PR まで（VM まわりの段 1 の終わる条件）
 1. 準備：`announcement-page` を入れる（SCR-024 または API-115）。試験用のリポジトリに GitHub をつなぐ。VM は眠った状態から始める
 2. チャットで eval (4) の 3 件の 1 つ目「11/15 の文化祭の告知ページを作って」（日時・場所・申込先を添える）を送る。メインが `announcement-page` のエージェントに `delegate` し、`delegate_reason` に理由が残ることを見る
 3. 見る：VM が起きる→ターミナルで HTML を書く→簡易サーバー→ブラウザで 1280×800 と 360px 幅の点検→仕上げ→`report`（成果物が `/data/files/<taskId>/` に写る）→メインが `send_to_owner` の `file` で渡す→PR の確認カード→○→PR の URL
@@ -168,7 +169,7 @@
 | パックの `browser` の追加分を外すとき戻す方法 | `pack_installs` に追加分を持つ列がない | 外すときは、そのパックの今のファイルの `browser` を、今のポリシーから引く。ファイルが変わった・消えた場合の食い違いを避けるなら `pack_installs` に追加分の列を足す（おすすめは列を足す） | 08 README の `pack_installs`、00 に D-xxx |
 | `announcement-page` の 4 本の手順書の書き方の参考 | 手順書 4 本の題と役割だけを書く | 旧 `apps/app/src/packs/library/designer.ts` などは書き方（`description` の形・長さ）の参考にとどめ、本文は 7.5 の雛形と骨で新しく書く。評価の基準は 7.8 と eval (4) の 3 件が通ること | 00 に D-xxx |
 | パックのスキルの信頼 | 旧 Node 版は `TRUSTED_SKILLS`（本文の SHA-256）で信頼を分けた。新設計は書いていない | `/opt/makase/packs/` のスキルは信頼、`/data/packs/` のスキルは外の内容として包み、読んだタスクを汚染する。本文の SHA-256 を入れた時点の値と比べる | 00 に D-xxx、04 tools FR-088 |
-| `terminal.allow_hosts` を本体から egress へ渡す道 | ステップ 1 は環境変数かファイル。本体から変える道はあとで決める。API-096 に `terminal` 欄はある（09 の表）。egress への届け方だけが設計にない | ポリシー（`workspace_policies.terminal`）を正とし、本体が起動時とポリシーが変わったときに box-manager 経由で egress に送る（egress は ctl に居ないので box-manager が中継）。egress が再起動したら box-manager が送り直す。送れていない間は egress の既定の許可リストを使う | 00 に D-xxx、07 egress の行、09 に API を足すなら |
+| `terminal.allow_hosts` を本体から egress へ渡す道 | ステップ 1 は環境変数かファイル。本体から変える道はあとで決める。API-096 に `terminal` 欄はある（09 の表）。egress への届け方だけが設計にない | ポリシー（`workspace_policies.terminal`）を正とし、ステップ 3 で作った `network` の設定を egress に渡す道に相乗りする。本体が起動時とポリシーが変わったときに box-manager 経由で egress に送る（egress は ctl に居ないので box-manager が中継）。`closed` では `network.allow_hosts` と内部ホストの `terminal` 側との重なりだけが効く（D-366）。egress が再起動したら box-manager が送り直す。送れていない間は egress の既定の許可リストを使う | 00 に D-xxx、07 egress の行、09 に API を足すなら |
 | API-144 のパスの `:boxId` | 世代を止めて空にして次に起こす。VM が眠っているときの世代の指し方は書いていない | 眠っていれば最後の世代の `boxId` を使う（box-manager は世代の値が古くても止まっていれば受ける）。「次に起こす」は、持ち主が次にタスクを頼むときに起きる形にして、その場では起こさない | 09 API-144・138 |
 | tar の形式（tar か tar.gz）とリンクの扱い | シンボリックリンクはたどらず、リンクのまま入れる（D-306）。本体の側で捨てる | API-118 は無圧縮 tar。shell-agent は `tar` コマンドで作る（リンクのまま）。本体は旧 `readTarGz` の gzip 部分を外して使う | 00 に D-xxx |
 | 道具の引数名 | 旧 `sandbox` の `timeout_sec` と API-117 の `timeoutSec` | `timeoutSec` にそろえ、旧道具の引数（`path`・`content`・`pattern` など）はそのまま | 09 API-117 |
@@ -184,5 +185,6 @@
 
 ## 参照
 - 設計：[04 vm](../design/04_functional_spec/vm.md)（FR-074・079・084・086・100）、[04 tools](../design/04_functional_spec/tools.md)（FR-061・085・088）、[08 vm](../design/08_database/vm.md)（TBL-031・035・040）、[08 resident](../design/08_database/resident.md)（TBL-052）、[08 README](../design/08_database/README.md)、[09 vm](../design/09_api/vm.md)（API-088・107・108・109・114〜118・133〜135・138・143・144）、[10 sequences](../design/10_diagrams/sequences.md)（UC-053・FR-100）、[10 states](../design/10_diagrams/states.md)、[03 ユースケース](../design/03_use_cases.md)（UC-052・053・061・BR-07・BR-10）、[05](../design/05_non_functional.md)（NFR-062・080・084）、[07](../design/07_architecture.md)、[06 画面](../design/06_ux_design.md)（SCR-023・024）、[11](../design/11_tech_spec.md)（§7・§11・§12 の R-84〜86・97・98）、[00 決定事項ログ](../design/00_overview.md#決定事項ログ)
+- 前後のステップ：[06_web.md](06_web.md)（SCR-021・023・024 の骨）、[08_home.md](08_home.md)（家の機能。このステップの後に段 1 で行う）、[09_release.md](09_release.md)（隔離の試験・段 2・3）
 - ADR：[053](../design/adr/ADR-053-pack-by-purpose.md)・[054](../design/adr/ADR-054-terminal-in-vm.md)・[061](../design/adr/ADR-061-vm-no-judge-restore.md)・[068](../design/adr/ADR-068-browser-shell-split.md)
 - 移す元のコード（`apps/sandbox`・`packages/sandbox` は 7.2 の最後で消す）：`apps/sandbox/src/main.ts`、`packages/sandbox/src/`（`executor.ts`・`tar.ts`・`protocol.ts`・`http-transport.ts`・`index.ts`）、`apps/worker/src/edge/sandbox-command.ts`（使わない）、`apps/worker/src/db/schema.ts`（`sandbox_commands`・`pack_installs`・`agent_skills`）、`apps/app/src/packs/`（`install.ts`・`contract.ts`・`types.ts`・`library/designer.ts`）

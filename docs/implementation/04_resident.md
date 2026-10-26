@@ -1,18 +1,19 @@
 # ステップ 4. 常駐の仕組み
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[常駐の機能仕様](../design/04_functional_spec/resident.md)・[道具の機能仕様](../design/04_functional_spec/tools.md)・[VM の機能仕様](../design/04_functional_spec/vm.md)・[常駐の表](../design/08_database/resident.md)・[VM の表](../design/08_database/vm.md)・[常駐の API](../design/09_api/resident.md)・[状態遷移](../design/10_diagrams/states.md)・[シーケンス](../design/10_diagrams/sequences.md)・[ユースケース](../design/03_use_cases.md)・[技術仕様 §7・§11](../design/11_tech_spec.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[常駐の機能仕様](../design/04_functional_spec/resident.md)・[道具の機能仕様](../design/04_functional_spec/tools.md)・[VM の機能仕様](../design/04_functional_spec/vm.md)・[常駐の表](../design/08_database/resident.md)・[VM の表](../design/08_database/vm.md)・[常駐の API](../design/09_api/resident.md)・[状態遷移](../design/10_diagrams/states.md)・[シーケンス](../design/10_diagrams/sequences.md)・[ユースケース](../design/03_use_cases.md)・[技術仕様 §7・§11](../design/11_tech_spec.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)（v1.6・v1.7：FR-107・108・116）
 
 > **3行で**
 > 1. チャットで頼むと、メインが答えるか `delegate` で振り分け、タスクが VM で仕事をして `report` し、メインが起きて `send_to_owner` で持ち主に伝えるところまで動く。確かめは curl と SSE（画面はステップ 6）。
-> 2. 作るのは、受付とルーター（intake）・メインのターン（turn）・裏のタスク（task）・文脈とキャッシュと要約（context）・記憶 2 層（memory）・VM の窓口と交代（computer）・毎分のタイマーと再開（timer・recovery）。ループと状態は本体にあり、歩みの記録（`task_steps`）で続きから動く。
-> 3. 終わる条件：UC-044・048・054・055・058・060 の基本フローが curl＋SSE＋ScriptedLlm で通り、きっかけがなければ LLM を呼ばず（NFR-082）、先頭の 9 割以上がキャッシュに当たる（NFR-083）。
+> 2. 作るのは、受付とルーター（intake）・メインのターン（turn）・裏のタスク（task）・文脈とキャッシュと要約（context）・記憶 2 層（memory）・VM の窓口と交代（computer）・毎分のタイマーと再開（timer・recovery）。ループと状態は本体にあり、歩みの記録（`task_steps`）で続きから動く。v1.7：LLM は役割（メイン・振り分け先・画面の操作・オートレビュー・要約）ごとに割り当てた接続先で呼び（FR-107）、OpenAI の computer use も同じ作動の形で確かめ（FR-108）、ChatGPT の枠が尽きたら止めて知らせる（D-388）。
+> 3. 終わる条件：UC-044・048・054・055・058・060 の基本フローが curl＋SSE＋ScriptedLlm で通り、きっかけがなければ LLM を呼ばず（NFR-082）、先頭の 9 割以上がキャッシュに当たる（NFR-083）。Claude・OpenAI のどちらの画面操作でも、確かめた先と実行した先が同じ（FR-108・R-104）。
 
 ## 前提（始める条件）
 - 入力：
   - ステップ 1・2：VM（box-browser・box-shell）・box-manager・`judgeBrowserAction`・`browser_checks`・オートレビューが、本体なしの CLI で動く。ステップ 2 で作った「画面の番を取る関数」「確認を作る関数」「直前の確かめ」「○ の処理（API-110 の中身）」「取り消し・交代・世代の替わりで `pending` を `expired` にする関数」を、このステップは呼ぶだけで書き直さない。
   - ステップ 3：`apps/makase`（Node＋SQLite）が Compose で起動し、移した `edge/`（`web.ts`・`web-page.ts`・`web-seen.ts` を含む）・`db/`・SSE・API-100・FR-073・監査ログ・`timer.ts` が動く。表は版 4・5 で全部作ってある（`wakes`・`turns`・`chat_messages`・`task_steps`・`memory_facts`・`memory_search`・`context_snapshots`・`push_outbox`・`boxes`・`takeovers` など）。`apps/worker/src/asks/drive.ts`・`workflows/task-run.ts`・`db/repo/asks.ts` はステップ 3 で消えている。消したコミットの SHA は [05_triggers.md](05_triggers.md) の「前提」を見て、`git show <sha>:<path>` で読む。
+  - ステップ 2・3（v1.7 の分）：作動の形（FR-108）と Claude の computer use をその形に直す変換はステップ 2 にある。接続先 `anthropic`・`openai`・`openai_compatible`・`openai_chatgpt` のクライアント、`llm_models`（TBL-059）・役割の割り当て（API-152）と保存のときの能力の照合、`openai_chatgpt` のサインインとトークンの保存（FR-116）、窓口 `net` と台帳（FR-103）はステップ 3 にある。このステップは役割で呼び分けるところと、OpenAI の computer use の変換を足す
   - 今のコードの形（実際に開いて確かめた）：`packages/runner/src/harness.ts` の `runTask(edge: EdgePort, token, opts)` は、`ChatMessage`（`role: "tool"` を持つ、提供元に依らない形）で会話を持ち、フェーズ（`templatePhases`）と `submit_report`・`finish` で終わる。`packages/llm/src/claude.ts`（ステップ 1 で移した）は思考のブロックを捨て、`system` を 1 本の文字列で送り、`usage` のキャッシュ項目を入力に混ぜている。`task_steps` の使い手は、消えた `workflows/task-run.ts` の `step.do` と同じ役を 4.3 の `steps.run` で作る。いずれも下の手順で直す。
-- 機械：置き先は段 1（手元の WSL2、amd64）。交代の確かめ（4.7）は偽の box-manager で行い、実の VM の画面（noVNC）はステップ 6・段 2 の 8.3 で見る。
-- 鍵とアカウント：`ANTHROPIC_API_KEY`（実 API での確かめ 4.4 の 6 だけ。それ以外は ScriptedLlm で足りる）。実 API を叩くときは `LLM_SESSION_BUDGET_MICRO_USD`（`packages/llm/src/session-budget.ts` の `SessionBudgetClient`）で上限をかける。
+- 機械：置き先は段 1（手元の WSL2、amd64）。交代の確かめ（4.7）は偽の box-manager で行い、実の VM の画面（noVNC）はステップ 6・段 2 の 9.3 で見る。
+- 鍵とアカウント：`ANTHROPIC_API_KEY`（実 API での確かめ 4.4 の 6 と 4.10 の 5 だけ。それ以外は ScriptedLlm で足りる）。`OPENAI_API_KEY`（4.10 の 5。OpenAI の computer use の実 API・有料）。ChatGPT のアカウント（4.10 の 4 の実機の確かめ。任意。無料の枠は小さい）。実 API を叩くときは `LLM_SESSION_BUDGET_MICRO_USD`（`packages/llm/src/session-budget.ts` の `SessionBudgetClient`）で上限をかける。
 
 ## 作るもの
 | 部品 | 置き場 | 移す元（あれば） | 設計の参照 |
@@ -31,6 +32,9 @@
 | 交代と確認の口（本体側） | `apps/makase/src/computer/takeover.ts`・`routes/vm.ts`（API-089・090・091）・`routes/check.ts`（API-087・110） | ステップ 2 の確認の関数 | FR-078・API-087・089〜091・110 |
 | 記憶（memory） | `apps/makase/src/memory/` | なし（新規） | FR-097・ADR-070 |
 | タイマーと再開 | `apps/makase/src/timer/`・`recovery/` | ステップ 3 の `timer.ts`（`timer/` に昇格） | FR-084・NFR-071・082 |
+| 役割ごとの呼び分け（`main`・`worker`・`computer`・`review`・`summary`。`classify` はステップ 8） | `apps/makase/src/llm/roles.ts` | ステップ 3 の接続先のクライアントと `llm_models` の repo | FR-107・D-362〜364 |
+| OpenAI の computer use を作動の形に直す変換 | ステップ 2 の Claude の変換と同じ置き場（02 の表） | ステップ 2 の Claude の変換 | FR-108・R-104・D-354 |
+| ChatGPT の枠の扱い（403・429・接続切れ） | `apps/makase/src/llm/chatgpt-errors.ts` | ステップ 3 の `openai_chatgpt` のクライアント | FR-116・D-388 |
 | ScriptedLlm の拡張（キャッシュ項目・`raw` の応答） | `packages/llm/src/scripted.ts`・`types.ts` | 同左 | NFR-083 |
 
 ## 手順
@@ -122,6 +126,14 @@
 3. 失敗したターンのきっかけの戻しは 4.3 の 7（D-276）と同じ関数を使い、再開では `turns.status = 'running'` のまま残った行を続きから動かす。
 確かめ：24 時間ぶんの tick を偽の時計で回しても、ScriptedLlm の `requests` が 0 件のまま（NFR-082）。DB を途中の状態で作って `recover()` を呼ぶ単体の試験を、このステップの行ごとに 1 本（後のステップの行は登録の口があることだけ）。実プロセスの結合は、`started` の直後と `done` の直前で本体を落とし、再起動して続きから通る（60 秒以内：NFR-071）。
 
+### 4.10 役割ごとの呼び分け・OpenAI の画面操作・ChatGPT の枠
+1. `llm/roles.ts`：`clientFor(role, { budgetClass })`。役割の割り当て（ステップ 3 の API-152 の表）から接続先とモデルを引き、ステップ 3 のクライアントを返す。呼ぶ側は、ターン → `main`、裏のタスク → `worker`、computer use の歩み → `computer`、オートレビュー → `review`、要約（4.4 の 6）と記憶の更新（4.8 の 2）→ `summary`。割り当てはターン・タスクを始めるときに決めて、途中で変えない（文脈の先頭を変えない：FR-098）。単価が空・能力が足りない・`closed` の許可リストにない接続先は呼ばない（保存のときの照合はステップ 3。ここでは呼ぶ前にもう一度確かめ、外れたら `halted` で理由を出す）。
+2. 接続先の違いを閉じ込める（D-363・364）：文脈の組み方（4.4 の 1・2）は接続先によらず同じ。`cache_control` と context editing（4.4 の 3(b)・4）は `anthropic` のときだけ付ける。要約のしきい値（6 万トークン）と上限（20 万トークン）は、モデルの文脈の長さ（`llm_models`）が小さければそれに合わせて下げる。費用の上限（4.3 の 3・4.2 の 5）は宣言した単価で計算する（D-355）。
+3. FR-108：ステップ 2 の作動の形に、OpenAI の computer use の呼び出しを直す変換を足す。4.6 の 1 歩は、元の呼び出しではなく直した作動の形から `dryRun` → 判定 → 実行する（Kernel・box-agent・確かめは接続先を知らない）。スクショの付け方と座標の数え方の違いも変換が吸収する。直せない呼び出し・未対応の操作は実行せず、理由を LLM に返す。`openai_compatible` の `generic` は `llm.experimental_generic_computer = true` のときだけ選べる（照合はステップ 3）。
+4. ChatGPT の枠（D-388）：`openai_chatgpt` の呼び出しで 429 `subscription_sharing_usage_limit_exceeded`（ストリームの途中の `response.failed` を含む）が返ったら、ほかの接続先に切り替えず、そのターン・タスクを費用の上限と同じ扱いで `halted` にし、`role = 'system'` の知らせ（「ChatGPT の枠に達しました」）と `push_outbox` の行を書く。401 `subscription_sharing_invalid_user`・`invalid_grant` は「ChatGPT との接続が切れました」と知らせて止める（再サインインはステップ 6 の SCR-029・ステップ 9 の SCR-033）。403 `subscription_sharing_user_not_eligible` は止めて、役割の割り当てを直すよう知らせる。費用は 0 で、トークン数は `usage_records` と台帳に残す。
+5. 自動のきっかけで ChatGPT を使わない（D-389）の判定の口：`clientFor` が `budgetClass` を受け、`auto` で `llm.chatgpt_allow_auto = false` なら `openai_chatgpt` を返さない（理由つきで `halted`）。ルーチン・予約・webhook で実際に確かめるのはステップ 5。
+確かめ：(1) 役割ごとに別の ScriptedLlm（接続先ごとの偽のクライアント）を差し、ターン・タスク・computer use・要約・記憶の更新がそれぞれ割り当てた方に届く。(2) `openai_compatible` を割り当てたターンで `cache_control` が付かず、先頭のバイトは `anthropic` のときと同じ。(3) 偽の `openai_chatgpt` が 429 をストリームの途中で返すと、タスクが `halted`・`system` の行と `push_outbox` が出て、ほかの接続先の呼び出しが 0 件。(4) 実の VM の試験ページ（ステップ 2）で、`computer` を Claude と OpenAI に替えて同じ操作を頼み、どちらも `dryRun` で確かめた先と実行した先が同じ（有料。`LLM_SESSION_BUDGET_MICRO_USD` で上限をかける）。
+
 ## 終わる条件
 | ID | 確かめること | 方法（コマンド・操作） | 設計の参照 |
 |---|---|---|---|
@@ -140,7 +152,7 @@
 | S4-13 | 記憶のプロフィールの数・字数、`search_memory` の汚染の引き継ぎ、10 万行で 500ms | 単体＋計測 | NFR-087・FR-097 |
 | S4-14 | 画面の番：タスク 3 つの取り合い、`screen_epoch`、3 分で返す（ステップ 2 の関数を呼ぶ） | 偽の box-manager の結合 | D-217・D-258・D-299 |
 | S4-15 | 購読ごとの `push_outbox` の行（送り手はステップ 5）。`skipped` は送り手の側で | 単体（行ができること） | D-288・NFR-086 |
-| S4-16 | NFR-082：きっかけがなければ LLM を呼ばない | 偽の時計で 24 時間分の tick を回し、`requests.length === 0`。実機では置いたまま 24 時間の `usage_records` の合計を見る（段 2 の 8.3） | NFR-082 |
+| S4-16 | NFR-082：きっかけがなければ LLM を呼ばない | 偽の時計で 24 時間分の tick を回し、`requests.length === 0`。実機では置いたまま 24 時間の `usage_records` の合計を見る（段 2 の 9.3） | NFR-082 |
 | S4-17 | NFR-083：2 回目以降で先頭（①〜⑤）の 9 割以上がキャッシュに当たる率が 95% 以上 | ScriptedLlm では判定の式だけを確かめる。当たり率は実 API で `usage_records` の `cache_read_tokens` ÷ 先頭の長さを 1 日ごとに出す | NFR-083・ADR-066 |
 | S4-18 | メインに VM の道具が渡っていない。メインと振り分け先の両方に `web_search`・`web_fetch` がある | 一覧の単体 | D-236・FR-091・092 |
 | S4-19 | `web_fetch` が内側のアドレス（`127.0.0.1`・`10.0.0.0/8` など）とそこへのリダイレクトを断る | 単体（リダイレクト先が内側のアドレスの偽サーバーを立てる） | D-164 |
@@ -149,6 +161,9 @@
 | S4-22 | `request_takeover` の通知：`takeovers` の `requested`・SSE の `check.created`・`push_outbox` の `tag = takeover:<id>`（同じ tag の `pending` は置き換え） | 単体（行ができること。送り手はステップ 5） | FR-078・FR-017・TBL-055 |
 | S4-23 | 確認の口：API-087 が 3 種類（API の書き込み・ブラウザ・交代の頼み）を返し、API-110 が `CHECK_NOT_PENDING` と `expired` を返す | curl＋偽の box-agent | API-087・API-110 |
 | S4-24 | `pnpm typecheck`・`pnpm test`・`pnpm lint:deps` が通る（`packages/runner` が `llm` を import しない：`.dependency-cruiser.cjs` の規則） | ルートで実行 | — |
+| S4-25 | FR-107：役割ごとに割り当てた接続先で呼ばれる。単価が空・能力が足りない・許可リストにない接続先は呼ばず理由つきで止まる。`cache_control` と context editing は `anthropic` だけ | 4.10 の確かめ (1)(2)（ScriptedLlm を接続先ごとに差す単体と結合） | FR-107・D-355・D-363・D-364 |
+| S4-26 | FR-108・R-104：試験ページで、Claude・OpenAI それぞれの computer use について、確かめた先と実行した先が同じ。直せない呼び出しは実行しない | 4.10 の確かめ (4)（実の VM・実 API・有料）＋変換の単体 | FR-108・R-104・D-354 |
+| S4-27 | D-388：`openai_chatgpt` が 429 を返すと（ストリームの途中でも）そのタスクが止まり知らせが来て、ほかの支払いには切り替わらない。401・`invalid_grant` で「接続が切れました」が出る | 4.10 の確かめ (3)（偽の接続先）。無料のアカウントでの実機はステップ 9（R-113） | FR-116・D-388 |
 
 ## 実装で決めること
 | 論点 | 設計の言い分 | おすすめ | 決めたら書く先 |
@@ -172,14 +187,18 @@
 | 動いている Claude の呼び出しの中止の持ち方 | 交代のときだけ中止し、`aborted` で閉じて精算する（D-163） | タスクごとの `AbortController` をプロセス内の表に持つ。再起動すれば呼び出し自体がないので、`started` のまま残った歩みは 4.9 の再開で精算する | 決定事項ログ |
 | 交代中の「無操作」の測り方 | 交代中に 15 分操作がない（FR-078） | `boxes.last_activity_at`（人・エージェントの最後の操作）を使い、VNC の入力のメッセージが来たら本体が更新する | TBL-032 の説明 |
 | `isolated` モードが古い Docker でエラーになるか | `box` ネットワークの既定（07）。ステップ 3 の Compose に書いてある | 起動の確かめで Docker の版を見て、エラーなら 3.6 に戻って版を決める | 07 の注記 |
+| 役割の割り当てをいつ読むか | 割り当ては SCR-029 で変えられる（FR-107）。先頭を変えない（FR-098） | ターン・タスクの始めに読み、`context_snapshots` の行に接続先とモデルを残す。動いている間に変わっても次のターン・タスクから効く（規則の版と同じ：SCR-028） | TBL-053 の説明 |
+| 「持ち主のチャットから振り分けた仕事」の見分け方（D-389） | ChatGPT の枠は持ち主のチャットとそこから振り分けた仕事にだけ使う。一方、上の行のおすすめでは `task_done` のきっかけは `auto` で入る | ChatGPT を使うかは `wakes.budget_class` でなく、束ねたきっかけの元（`chat`・`approval_done`・`steer` と、それらのターンから `delegate` したタスクの `task_done`）で決める。タスクの `budget_class` を `task_done` のきっかけに引き継がせるのが簡単 | FR-116 の 6・D-389 の補足 |
+| OpenAI の computer use のツールの版と画面の大きさの渡し方 | 変換の部品が接続先ごとの違いを吸収する（FR-108） | Claude と同じく（ステップ 1 の NFR-063）既定のモデルで 1 回試し、座標が合う渡し方を決める | 決定事項ログ・NFR-063 の横 |
 | ScriptedLlm の拡張 | 同じ入力なら同じ出力。試験・CI 用 | `ScriptedReply` に `usage` のキャッシュ項目と `raw` を足す。dev 用に `LLM_MODE=scripted` と台本ファイルで本体に差せる口を作る | `packages/llm` の注記 |
 
 ## 設計に戻すこと
 - `delegate` の `reason` を足したら、FR-092 の引数と FR-061 の `delegate_reason` の出どころを直す。
 - ステップ 4 で決めた値（`rank` の式・context editing の値・要約のプロンプト）は、00 の決定事項ログに D-xxx として足す。NFR-083 の当たり率と NFR-087 の実測は NFR の横に書く。
+- D-389 の「チャットから振り分けた仕事」と `task_done` のきっかけの区分（`auto`）の関係を FR-116 の 6 に書き足す（上の表の行）。
 - UC-054 の基本フロー 6 に「閉じると決め」とあるのは D-280 の `closing_at` の名残り。D-324 で消えた分を直す。
 
 ## 参照
-- 設計：[FR 常駐](../design/04_functional_spec/resident.md)（FR-089〜098・FR-017）・[FR 道具](../design/04_functional_spec/tools.md)（FR-013・061・088）・[FR VM](../design/04_functional_spec/vm.md)（FR-074・075・084）・[権限マトリクスとステータス定義](../design/04_functional_spec/README.md)・[DB 常駐](../design/08_database/resident.md)・[DB VM](../design/08_database/vm.md)・[DB 一覧](../design/08_database/README.md)・[API 常駐](../design/09_api/resident.md)・[API 一覧](../design/09_api/README.md)・[シーケンス](../design/10_diagrams/sequences.md)・[状態遷移](../design/10_diagrams/states.md)・[ユースケース](../design/03_use_cases.md)・[非機能](../design/05_non_functional.md)・[アーキテクチャ](../design/07_architecture.md)・[技術仕様](../design/11_tech_spec.md)・[決定事項ログ](../design/00_overview.md)
-- ADR：[ADR-058](../design/adr/ADR-058-resident-agent.md)・[ADR-059](../design/adr/ADR-059-main-agent-delegates.md)・[ADR-062](../design/adr/ADR-062-send-to-owner.md)・[ADR-066](../design/adr/ADR-066-prompt-cache-layout.md)・[ADR-069](../design/adr/ADR-069-daily-auto-budget.md)・[ADR-070](../design/adr/ADR-070-memory-two-layers.md)
+- 設計：[FR 常駐](../design/04_functional_spec/resident.md)（FR-089〜098・FR-017・FR-107・FR-116）・[FR 道具](../design/04_functional_spec/tools.md)（FR-013・061・088）・[FR VM](../design/04_functional_spec/vm.md)（FR-074・075・084・FR-108）・[権限マトリクスとステータス定義](../design/04_functional_spec/README.md)・[DB 常駐](../design/08_database/resident.md)・[DB VM](../design/08_database/vm.md)・[DB 一覧](../design/08_database/README.md)・[API 常駐](../design/09_api/resident.md)・[API 一覧](../design/09_api/README.md)・[シーケンス](../design/10_diagrams/sequences.md)・[状態遷移](../design/10_diagrams/states.md)・[ユースケース](../design/03_use_cases.md)・[非機能](../design/05_non_functional.md)・[アーキテクチャ](../design/07_architecture.md)・[技術仕様](../design/11_tech_spec.md)・[決定事項ログ](../design/00_overview.md)
+- ADR：[ADR-058](../design/adr/ADR-058-resident-agent.md)・[ADR-059](../design/adr/ADR-059-main-agent-delegates.md)・[ADR-062](../design/adr/ADR-062-send-to-owner.md)・[ADR-066](../design/adr/ADR-066-prompt-cache-layout.md)・[ADR-069](../design/adr/ADR-069-daily-auto-budget.md)・[ADR-070](../design/adr/ADR-070-memory-two-layers.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)
 - 移す元のコード：`packages/runner/src/harness.ts`・`tools.ts`・`prompts.ts`・`types.ts`、`apps/worker/src/edge/`（`runtime.ts`・`limits.ts`・`spend.ts`・`llm-call.ts`・`context.ts`・`tools.ts`）、`apps/worker/src/workflows/task-run.ts`、`apps/worker/src/asks/drive.ts`・`run.ts`、`apps/worker/src/llm/claude.ts`、`apps/worker/src/agents/create.ts`、`packages/llm/src/`（`session-budget.ts`・`pricing.ts`・`scripted.ts`）、`packages/kernel/src/taint.ts`

@@ -1,15 +1,16 @@
 # ステップ 6. 画面
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[06 画面・UX設計](../design/06_ux_design.md)、[09 API設計](../design/09_api/README.md)（[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)）、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[ADR-067](../design/adr/ADR-067-web-push-first.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[06 画面・UX設計](../design/06_ux_design.md)、[09 API設計](../design/09_api/README.md)（[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)）、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[ADR-067](../design/adr/ADR-067-web-push-first.md)、v1.6・v1.7：[SCR-027〜029](../design/06_ux_design.md#scr-027外に出た通信)・[FR-101・103・107・116](../design/04_functional_spec/resident.md)・[FR-104〜106](../design/04_functional_spec/vm.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-076](../design/adr/ADR-076-verifiable-decisions.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)
 
 > **3行で**
-> 1. スマホから頼む・見る・確認する・タップで交代するところまでが、`apps/web` だけでできるようになる。ステップ 3〜5 で curl が通った API（09 の画面向けの一覧）を、06 の 10 画面につなぐ。ステップ 7 で作る API（114〜116・133〜135・138）は、このステップでは画面の骨と `qa/` の架空データで作り、実 API での確かめはステップ 7。
-> 2. 作るもの：依頼（asks）中心の今の画面を、チャット（SCR-020）・タスク（SCR-021）・確認（SCR-019）に作り直し、VM の画面（SCR-022、noVNC）・設定（SCR-023）・記憶（SCR-025）・きっかけ（SCR-026）を足し、PWA（Service Worker で Web Push を受ける）にする。
+> 1. スマホから頼む・見る・確認する・タップで交代するところまでが、`apps/web` だけでできるようになる。ステップ 3〜5 で curl が通った API（09 の画面向けの一覧）を、06 の画面（家の画面 SCR-030〜033 を除く）につなぐ。ステップ 7 で作る API（114〜116・133〜135・138）は、このステップでは画面の骨と `qa/` の架空データで作り、実 API での確かめはステップ 7。
+> 2. 作るもの：依頼（asks）中心の今の画面を、チャット（SCR-020）・タスク（SCR-021）・確認（SCR-019）に作り直し、VM の画面（SCR-022、noVNC）・設定（SCR-023）・記憶（SCR-025）・きっかけ（SCR-026）を足し、PWA（Service Worker で Web Push を受ける）にする。v1.6・v1.7 の分として、外に出た通信（SCR-027）・判定の規則（SCR-028）・モデル（SCR-029）と、設定のネットワーク・ChatGPT の欄、記録の鎖の検査を足す。家の画面（SCR-030〜032）はステップ 8、はじめての設定（SCR-033）はステップ 9。
 > 3. 終わる条件：06 の画面遷移どおりに動き、iOS Safari の PWA と Android Chrome と PC で、幅 360px から頼む・確認する・見る・タップで交代するができる。SSE の合図を落としても画面が追いつく。
 
 ## 前提（始める条件）
 - 入力（前のステップの成果）：
   - ステップ 3（`apps/makase`：SSE・FR-073・FR-083・`apps/web` のビルドを配る形）・ステップ 4（`wakes`・`turns`・`tasks`・`send_to_owner`）・ステップ 5（Web Push の送り手と購読・きっかけの API）が終わり、09 の画面向けのエンドポイントが curl で通る。ステップ 7 で作る API（114〜116・133〜135・138）は、このステップでは画面の骨と `qa/` の架空データで作り、実 API での確かめはステップ 7。API が変わっていたら、先に 09 を直す
   - API-087・089・090・091・110 と `takeoverRequest`（API-088 の応答の欄）は、ステップ 4 で作った（交代と確認の口）
+  - API-148（台帳）・149（規則の版）・150（再実行）・151（鎖の検査）・152（モデルと役割）と、`openai_chatgpt` のサインイン（API-157 のデバイスコードの開始と状態）は、ステップ 2・3 で作り curl で通る
 - 機械（置き先・実機）：
   - 置き先は段 1（手元の WSL2・amd64）。画面の確かめは、dev サーバーを `--port 5211 --strictPort` で立ててヘッドレスの Chromium でスクショを撮る（WSL2 では vite が `/mnt/c` の変更を拾わないので、コードを変えたら立て直す。日本語フォントと Chromium のライブラリが要る）。iOS・Android の実機は、Compose を立てたホストに tailnet から入って確かめる（Service Worker と Web Push は https が要るため）
   - 実機の iPhone（iOS 16.4 以上。ホーム画面に追加した PWA だけ通知が届く）と Android。`@novnc/novnc`（npm）
@@ -26,6 +27,7 @@
 | 設定 SCR-023 | `screens/Settings.tsx`・`components/settings/*`（上限・こわい操作・通知・つながり・VM・ホスト） | `components/GithubLine.tsx`・`GoogleCalendarLine.tsx`（つながり欄へ） | 06 SCR-023、API-096・031・032・137・093・094・107・111・133〜135・138 |
 | 記憶 SCR-025・きっかけ SCR-026 | `screens/Memory.tsx`・`screens/Triggers.tsx` | 新規 | 06 SCR-025・026、API-130・131・141、API-125〜128・136・139・140 |
 | パック SCR-024・エージェント SCR-014・記録 SCR-010 | `screens/Packs.tsx`・`Agents.tsx`・`Audit.tsx` | 同じ場所（差分） | 06 の各「差分」、API-114〜116・041・080・081・023 |
+| 外に出た通信 SCR-027・判定の規則 SCR-028・モデル SCR-029 | `screens/Egress.tsx`・`screens/Policy.tsx`・`screens/Models.tsx`・`components/policy/*` | 新規 | 06 SCR-027〜029、API-148〜150・152・157 |
 | PWA：manifest・Service Worker・購読 | `apps/web/public/manifest.webmanifest`・`public/sw.js`・`lib/push.ts`・`lib/presence.ts` | 新規 | FR-017、ADR-067、API-121・137・031 |
 
 `apps/web/src` の「今 → v1.4」（全ファイルを開いて確かめた。テストは対応するファイルと一緒に動かす）：
@@ -53,7 +55,7 @@
 | `components/GithubLine.tsx`・`GoogleCalendarLine.tsx`・`lib/argLabels.ts` | 移す | つなぎ方は設定のつながり欄へ。`argLabels` は API の書き込みのカードで使い続けられる分だけ残す |
 | `lib/undo.ts` | 決める | ○ のあとの 5 秒の取り消し猶予。ブラウザの確認には合わない（「実装で決めること」） |
 | `index.html`・`vite.config.ts`・`package.json` | 直す | manifest・apple-touch-icon・`theme-color` を足す。vite の中継に `ws: true`・身元ヘッダー・`X-Makase-Request` を足す。`@novnc/novnc` を入れる |
-| 新規 | 足す | `screens/Task.tsx`・`Vm.tsx`・`Settings.tsx`・`Memory.tsx`・`Triggers.tsx`・`components/VmScreen.tsx`・`TaskBand.tsx`・`lib/uuidv7.ts`・`lib/push.ts`・`lib/presence.ts`・`lib/reasons.ts`・`public/sw.js`・`public/manifest.webmanifest` |
+| 新規 | 足す | `screens/Task.tsx`・`Vm.tsx`・`Settings.tsx`・`Memory.tsx`・`Triggers.tsx`・`Egress.tsx`・`Policy.tsx`・`Models.tsx`・`components/VmScreen.tsx`・`TaskBand.tsx`・`lib/uuidv7.ts`・`lib/push.ts`・`lib/presence.ts`・`lib/reasons.ts`・`public/sw.js`・`public/manifest.webmanifest` |
 
 ## 手順
 P1の画面契約：T-1は通常の承認でなく交代カード。API-087のeffectiveActionを確認カードに表示する。画像不明は画像なしの対応要求、FR-091のsystem通知は確定済み/未完了/結果不明を分けて表示する。受入は[IMP-002〜004・009](../design/changes/2026-10-25-p1-review-fixes.md)（SCR-019・020・022）。
@@ -118,6 +120,14 @@ P1の画面契約：T-1は通常の承認でなく交代カード。API-087のef
 8. 記録（`Audit.tsx`）：種類の絞り込みに「きっかけ」「オートレビュー」「VM」を足し、`audit.ts` の要約の文を、きっかけ（起こされた理由・受け口・重複で捨てたもの）・オートレビュー（通した・止めた・理由）・VM（起きた・眠った・控え・戻した）で足す
 確かめ（360px と 1280px）：エージェントの一覧でメインの行が先頭にあり消すメニューがなく、`description` を直せて、パック名の札と「メインが作成」の札が出る。作る（`AgentBirth`）・消す（`AGENT_BUSY`・`MAIN_AGENT` の文）が動く。記録の絞り込みに「きっかけ」「オートレビュー」「VM」が並び、要約の文が出る。パックの 2 つの一覧・入れる（`PackInstallCeremony`）・外す・更新の確かめは `qa/` の架空データで撮って見る（実 API ではステップ 7）。
 
+#### 6.5.e 外に出た通信 SCR-027・判定の規則 SCR-028・モデル SCR-029（v1.6・v1.7）
+9. 外に出た通信（`Egress.tsx`、`/egress`）：API-148 で日ごと・宛先ごと・目的ごと（`llm`・`tool`・`browser`・`terminal`・`notify`）の集計と、許可/拒否の一覧。期間・目的・許可/拒否で絞り、[ CSV で書き出す ] は今の絞り込みのまま `/api/v1/egress.csv`。`closed` のときだけ上に「許可リストの外への外向き」の件数を大きく出し、0 でなければ赤で件数と最新の 3 件へのリンク。台帳の書き漏れの件数（FR-103 の 5）も出す。[ 許可リストを直す ] は設定のネットワークの欄へ
+10. 判定の規則（`Policy.tsx`、`/policy`、4 つのタブ）：版（一覧・中身・[ この版に戻す ] は新しい版として保存）／差分（二つの版）／試験（通った件数・外れた例）／試し当て（過去 30 日で行き先が変わる件数と例）。保存は理由（一言）が必須で、試験が 1 件でも外れたら保存できず外れた例を出し、保存の前に試し当ての件数を見せる。[ 書き出す ]（`policy.json`）・[ 取り込む ]（試験と試し当てを通してから）。「効くのは次のタスク・ターンから」と添える（API-149）
+11. モデル（`Models.tsx`、`/settings/models`）：役割（メイン・振り分け先・画面の操作・オートレビュー・要約・仕分け）ごとの割り当て（API-152 の `GET/PUT /llm/roles`）。候補で `selectable = false` のものは灰色にして `reason` を文にする（06 SCR-029 の例の文）。モデルの一覧（能力・単価。ローカルは「0 円」）と [ ＋ 足す ]（`openai_compatible` は `base_url`。`closed` で許可リストにない先は 422 `LLM_HOST_NOT_ALLOWED` を文に）。画面の操作の「試し」（`experimentalGenericComputer`）。ChatGPT の行：状態（つながっている／切れた／枠に達した／対象外）・使えるモデル・「自動のきっかけで使う」（既定は切）・[ もう一度サインイン ]（API-157 のデバイスコードを出し、状態を取り直す）・「無料の枠は小さく、すぐ上限に当たることがあります」。仕分けの行（`decision`）は、ステップ 8 で `classify` を作るまで選べない理由を出すだけでよい
+12. 設定 SCR-023 に足す欄：ネットワーク（「家の中だけで動かす」＝`closed` の切り替え・許可リスト・内部ホストの `browser`／`terminal` 別と `confirm`／`auto`。固定の除外は書いても断ると出し、`/8` より広い CIDR は警告）・ChatGPT（SCR-029 への導線）・オートレビュー（既定は切。ADR-077）。通知の欄は `closed` のとき「画面の中の通知で知らせます」と出して購読のボタンを無効に、つながりの欄は許可リストにない先を「閉域モードのため使えません」で押せなくする。ホストの欄に ChatGPT の状態と閉域モードを足す。保管庫・家電・仕分けの欄はステップ 8
+13. 記録 SCR-010 に足す：種類の絞り込みに「規則」「検査」、判定の行に「誰が決めたか」（規則・持ち主・オートレビュー）と使った規則の版（押すと SCR-028 のその版）と [ 再実行 ]（API-150）。画面の上に「鎖の検査」（最後の結果・[ 今すぐ検査 ]・毎日の先頭のハッシュの一覧と書き出し：API-151。切れ目があれば最初に切れた行）
+確かめ（360px と 1280px）：`closed` で外向き 0 の大きな「0」、0 でないときの赤、CSV の書き出しが絞り込みどおり。規則を直して試験の外れる版を保存しようとすると止まり外れた例が出る。試し当ての件数が出る。能力の足りないモデルが灰色で理由が出て、単価が空のモデルは割り当てられない。ChatGPT の行でデバイスコードが出て、承認すると「つながっている」に変わる（偽の API-157 でもよい）。記録の判定の行から再実行して「同じ結果」が出る。鎖の検査で、DB の 1 行を書き換えた試しのデータで「切れ目あり」と最初の行が出る。
+
 ### 6.6 PWA（Web Push を受ける・ホーム画面に追加）
 1. `public/manifest.webmanifest`：`name`・`short_name`・`start_url: "/"`・`scope: "/"`・`display: "standalone"`・`theme_color`・`background_color`・アイコン（192・512 と maskable）。`index.html` に `<link rel="manifest">`・`apple-touch-icon`。アイコンの絵は今の `index.html` の丸いマークに合わせる
 2. `public/sw.js`（手書き。キャッシュはしない）：`push` で通知を出す（`title`・`body`・`tag` で置き換え・`data.url`）、`notificationclick` で開いている窓があれば `focus` してその経路へ移し、なければ `clients.openWindow`。移り先は `data.url`（無いときは `tag` の先頭で決める：`chat` → `/`、`check:*` → `/check`、`takeover:*` → `/vm`）。`install` で `skipWaiting`、`activate` で `clients.claim`
@@ -155,6 +165,10 @@ P1の画面契約：T-1は通常の承認でなく交代カード。API-087のef
 | S6-15 | NFR-074：iOS Safari（PWA）・Android Chrome・PC の最新 2 版で、360px から頼む・見る・確認する・タップできる | 実機とスクショ。結果を 05 の NFR-074 の横に書く | NFR-074 |
 | S6-16 | NFR-086：`send_to_owner`・確認・交代の頼みから Web Push の送信まで 5 秒以内。端末に届くまでを目安として測る | 設定の「試しに送る」を 10 回、端末に届くまで目で測る | NFR-086、FR-017 |
 | S6-17 | `pnpm --filter @open-team/web typecheck / test / build` が緑。消した画面への参照が残っていない | コマンド | — |
+| S6-18 | SCR-027：日ごと・宛先ごと・目的ごと・許可/拒否の一覧、CSV、`closed` の「外向き 0」と 0 でないときの赤、書き漏れの件数 | 6.5.e の確かめ（実 API） | 06 SCR-027、FR-103・FR-101、API-148 |
+| S6-19 | SCR-028：版・差分・試験・試し当て。試験が外れる規則は保存できない。書き出し・取り込み。記録（SCR-010）の判定から再実行できる | 6.5.e の確かめ | 06 SCR-028・SCR-010、FR-104・105、API-149・150 |
+| S6-20 | SCR-029：役割ごとの割り当て、能力が足りない・単価が空の理由、`openai_compatible` の `base_url`、ChatGPT の行（状態・自動のきっかけの切り替え・再サインイン） | 6.5.e の確かめ | 06 SCR-029、FR-107・116、API-152・157 |
+| S6-21 | SCR-023 のネットワーク・ChatGPT・オートレビュー（既定は切）の欄。`closed` で通知の購読とつながりの欄が押せない。SCR-010 の鎖の検査が切れ目の位置を出す | 6.5.e の確かめ | 06 SCR-023・SCR-010、FR-101・102・106、ADR-077 |
 
 ## 実装で決めること
 | 論点 | 設計の言い分 | おすすめ | 決めたら書く先 |
@@ -172,15 +186,18 @@ P1の画面契約：T-1は通常の承認でなく交代カード。API-087のef
 | `PackWorkspace`（`/packs/:packId`）を残すか | 06 の遷移図に無い。SCR-024 は「今のまま」 | 消す。パックの中身を見る画面が欲しくなったら一覧の行を開く形で足す | 06 SCR-024 |
 | 心拍を送る条件 | 前に出ている間 30 秒ごと・隠れたら送る（API-121） | `visible` かつ SSE がつながっている間。`pagehide` では `keepalive` の `fetch` | API-121 |
 | 確かめ用の画面（`qa/`）の残し方 | 今の `qa/team-activity` と同じ型 | `qa/` に SCR-019・021・022 の状態を架空データで並べる画面を置く。本番のビルドには入れない | `apps/web/qa` |
+| SCR-029 を独り立ちの画面にするか、SCR-023 の欄にするか | どちらでもよい（06 の画面一覧） | 独り立ち（`/settings/models`）。役割が 6 つと ChatGPT の行で、設定の 1 欄には長すぎる | 06 SCR-029 |
+| 外に出た通信の日ごとのグラフ | 06 のワイヤーフレームは小さな棒 | ライブラリは足さず、SVG の棒を手で描く（7 日・30 日） | 06 SCR-027 |
 | 画面の確かめに使う本体のデータの作り方 | — | ScriptedLlm のケース（ステップ 4）と curl。足りない状態（期限切れなど）は `qa/` の架空データ | `apps/web/qa` |
 
 ## 設計に戻すこと
 - 画面を足した・経路を変えたら、06 の画面一覧と全体図の表に行を足す。`/settings#limits` のようなアンカーを使ったら 06 SCR-023 に書く
 - 通知のタップ先（`data.url` の形）を決めたら、FR-017 の「タップで開く画面」の表に書く
 - 設定の VM の欄・ホストの欄で API-088・111 の欄が足りなければ、09 の応答の例に足す
+- SCR-029 の置き方、SCR-027 のグラフの形を決めたら 06 に書く
 - 実測（NFR-069・074・086）は 05 の各 NFR の横に「実測」として書く。noVNC の入れ方・Service Worker・配り方は 00 の決定事項ログに D-xxx
 
 ## 参照
-- 設計：[06](../design/06_ux_design.md)、[09](../design/09_api/README.md)・[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[03 の UC-043・044・047・048・051・058](../design/03_use_cases.md)、[02 の US](../design/02_user_stories.md)、[05 の NFR-065・069・074・086](../design/05_non_functional.md)、[00 決定事項ログ](../design/00_overview.md#決定事項ログ)（D-181・196・197・229・243・307・322）、[ADR-067](../design/adr/ADR-067-web-push-first.md)
+- 設計：[06](../design/06_ux_design.md)、[09](../design/09_api/README.md)・[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[03 の UC-043・044・047・048・051・058](../design/03_use_cases.md)、[02 の US](../design/02_user_stories.md)、[05 の NFR-065・069・074・086](../design/05_non_functional.md)、[00 決定事項ログ](../design/00_overview.md#決定事項ログ)（D-181・196・197・229・243・307・322・D-344・347〜350・352・353・385〜390）、[ADR-067](../design/adr/ADR-067-web-push-first.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-076](../design/adr/ADR-076-verifiable-decisions.md)・[ADR-077](../design/adr/ADR-077-auto-review-off-by-default.md)・[ADR-078](../design/adr/ADR-078-llm-by-role.md)
 - 移す元（実際に開いた）：`apps/web/src/main.tsx`・`api.ts`・`workspace.tsx`・`lib/router.ts`・`lib/sse.ts`・`screens/Chat.tsx`・`AskPage.tsx`・`Check.tsx`・`components/CheckSheet.tsx`・`CheckRow.tsx`・`Notices.tsx`、`apps/web/vite.config.ts`・`index.html`・`qa/team-activity.tsx`、[docs/ui-design.md](../ui-design.md)、[docs/development.md](../development.md)
-- 前後のステップ：[ステップ 3](03_core_port.md)・[4](04_resident.md)・[5](05_triggers.md)・[7](07_terminal_pack_snapshot.md)
+- 前後のステップ：[ステップ 3](03_core_port.md)・[4](04_resident.md)・[5](05_triggers.md)・[7](07_terminal_pack_snapshot.md)・[8](08_home.md)（家の画面 SCR-030〜032）・[9](09_release.md)（SCR-033）

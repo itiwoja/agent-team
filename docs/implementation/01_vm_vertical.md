@@ -1,10 +1,10 @@
 # ステップ 1. VM の縦の 1 本
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)、[09 vm](../design/09_api/vm.md)、[08 vm](../design/08_database/vm.md)、[ADR-068](../design/adr/ADR-068-browser-shell-split.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)（v1.6 の [FR-102](../design/04_functional_spec/vm.md#fr-102内部ホストの許可) の固定の除外）、[04 resident の FR-103](../design/04_functional_spec/resident.md#fr-103外に出た通信の台帳)（egress の記録）、[09 vm](../design/09_api/vm.md)、[08 vm](../design/08_database/vm.md)、[ADR-068](../design/adr/ADR-068-browser-shell-split.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)
 
 > **3行で**
 > 1. 本体（`makase`）なしで、CLI から Claude の computer use のループを回し、VM（`box-browser`・`box-shell` の組）の中の Chromium で試験ページを操作できるようになる。
 > 2. 作るのは `docker/box-browser`・`docker/box-shell` のイメージ、`apps/box-agent`、`apps/shell-agent`（起きて応答するまで）、`apps/egress`、`apps/box-manager`（最小）、`makase-browser-seccomp.json`、試験用の CLI。
-> 3. 終わる条件：CLI が試験ページを最後まで操作でき、止めて起こしてもホームが残り、隔離の先取りの試験（`box-shell` から X・CDP・VNC に届かない、`shell` だけ egress を通さない など）が通り、起き上がり・1 歩・スクショの費用を実測して決めたこと。
+> 3. 終わる条件：CLI が試験ページを最後まで操作でき、止めて起こしてもホームが残り、隔離の先取りの試験（`box-shell` から X・CDP・VNC に届かない、`shell` だけ egress を通さない、固定の除外に必ず届かない など）が通り、egress が 1 接続ずつ記録を溜め、起き上がり・1 歩・スクショの費用を実測して決めたこと。
 
 ## 前提（始める条件）
 - 入力：前のステップはない。設計の文書と既存の `apps/sandbox`・`packages/sandbox`・`apps/worker/src/llm/claude.ts` だけが入力
@@ -21,7 +21,7 @@
 | Chromium 用の seccomp | `docker/makase-browser-seccomp.json` | なし（Docker の既定に `CLONE_NEWUSER` を足したもの） | [07 Chromium のサンドボックス](../design/07_architecture.md) |
 | box-agent | `apps/box-agent`（新規） | なし | FR-075、API-103・105 |
 | shell-agent（応答するまで） | `apps/shell-agent`（新規） | `apps/sandbox/src/main.ts` の環境変数の読み方、あとで `packages/sandbox/src/executor.ts` の `runShell`・`commandEnv`・`clipTail` と `tar.ts` | FR-086、API-117・118（ステップ 7） |
-| egress | `apps/egress`（新規） | なし | [ADR-045](../design/adr/ADR-045-egress.md) |
+| egress | `apps/egress`（新規） | なし | [ADR-045](../design/adr/ADR-045-egress.md)、[ADR-074](../design/adr/ADR-074-closed-network.md)、FR-102（固定の除外）・FR-103（記録を溜める側） |
 | box-manager（最小） | `apps/box-manager`（新規） | なし | [ADR-044](../design/adr/ADR-044-box-manager.md)、API-101〜103・105・106・109 |
 | Compose（VM まわりだけ） | `compose.vm.yaml`（暫定。ステップ 3 で `compose.yaml` にまとめる） | ルートの `compose.yaml`（db だけ。触らない） | [07 コンテナ図](../design/07_architecture.md#レベル2コンテナ図) |
 | Claude の computer use の呼び出し | `packages/llm/src/claude.ts`（`apps/worker/src/llm/claude.ts` の `ClaudeClient` を移して足す） | `apps/worker/src/llm/claude.ts` | [07 移すもの・変えるもの](../design/07_architecture.md) |
@@ -59,14 +59,15 @@
 ### 1.4 egress
 1. `apps/egress` を Node の小さなプロキシとして書く。`CONNECT host:port` に加えて、Chromium が `http://` に使う絶対 URI の要求も中継する。名前を引き、返った**すべての**アドレスを確かめ（範囲は [ADR-045](../design/adr/ADR-045-egress.md) の表）、1 つでもグローバルでなければ断る。つなぐ先は確かめたアドレスに固定して名前を引き直さない
 2. 送り元で分ける：接続元のアドレスが `box-browser` ならアドレスの判定だけ、`box-shell` なら許可リスト（`terminal.allow_hosts`）に入っているホストだけ、知らない送り元は断る。許可リストの渡し方と送り元の伝え方は「実装で決めること」
-3. 断った通信はログ（JSON の行）に残す。HTTP 以外のプロトコルは通さない
-4. 試験用に、手で作った `internal: true` のネットワークと `egress-out` のネットワークをつなぎ、`docker run` で 2 つの疑似コンテナ（`box-browser` 役・`box-shell` 役）から `curl --proxy` で叩く
-確かめ：`box-browser` 役から公開サイトに届き、`192.168.x`・`100.64.x`・`127.0.0.1`・`::1`・`::ffff:127.0.0.1`・`169.254.169.254` を断られる。DNS rebinding（引くたびに答えが変わる名前）で抜けられない。`box-shell` 役は許可リストにないホストを断られる。知らない送り元は断られる。
+3. 固定の除外（FR-102）：本体・box-manager・tailnet（`100.64.0.0/10`）・ホスト自身・クラウドのメタデータ（`169.254.169.254` など）は、許可リストに書いてあっても必ず断る。アドレスの判定と許可リストより**前**に当てる（ステップ 3 で `network.internal_hosts` が来ても、この順を変えない）。名前のときは、引いたアドレスでも当てる
+4. 記録（FR-103 の egress 側）：通した・断ったの両方を、1 接続 1 件で自分の中に溜める（最大 1 万件）。項目は [TBL-056](../design/08_database/resident.md#tbl-056egress_events外に出た通信の台帳) の列に合わせる（ID・送り元 `vm_browser`／`vm_shell`・宛先ホストとポート・目的 `browser`／`terminal`・`allow`／`deny`・断った理由 `fixed_exclusion` など・送受のバイト数・時刻）。**中身（URL のパス・ヘッダー・本文）は残さない**。溜まりが満杯なら新しい件を捨てて欠けの件数を数える（`standard` の動き。`closed` の「断る」はステップ 3）。取り出しの口は ctl ネットワークだけに置く（取り出しの形は「実装で決めること」）。HTTP 以外のプロトコルは通さない
+5. 試験用に、手で作った `internal: true` のネットワークと `egress-out` のネットワークをつなぎ、`docker run` で 2 つの疑似コンテナ（`box-browser` 役・`box-shell` 役）から `curl --proxy` で叩く
+確かめ：`box-browser` 役から公開サイトに届き、`192.168.x`・`100.64.x`・`127.0.0.1`・`::1`・`::ffff:127.0.0.1`・`169.254.169.254` を断られる。DNS rebinding（引くたびに答えが変わる名前）で抜けられない。`box-shell` 役は許可リストにないホストを断られる。知らない送り元は断られる。`terminal.allow_hosts` に box-manager・`169.254.169.254` を書いても断られ、理由が `fixed_exclusion` になる。溜まった記録を取り出すと、通した件・断った件が 1 件ずつあり、URL のパスもヘッダーも入っていない。上限を小さくして満杯にすると、欠けの件数が増える。
 
 ### 1.5 box-manager の最小（起こす・止める・世代・トークン・固定の起こし方）
 #### 1.5.a Compose と docker-socket-proxy
 1. `apps/box-manager` を Node で書く。Docker API は docker-socket-proxy 越しにだけ呼ぶ（`compose.vm.yaml` に `docker-socket-proxy` を足し、コンテナ・ネットワーク・ボリューム・イメージの読み取りと作成・削除だけ通す）。待ち受けは ctl ネットワークの :7000 だけ、認証は `BOX_MANAGER_TOKEN`
-2. `compose.vm.yaml`：ネットワーク `box`（`internal: true`。名前を固定）・`ctl`・`sock`・`egress-out`、`egress`・`box-manager`・`docker-socket-proxy`、名前つきボリューム `makase-browser-profile`・`makase-vm-home`。box-manager は `box` にもつなぐ（2 つの管理の口を呼ぶため）。`box-browser`・`box-shell` は Compose には書かない（box-manager が起こす）
+2. `compose.vm.yaml`：ネットワーク `box`（`internal: true`。名前を固定）・`ctl`・`sock`・`egress-out`、`egress`・`box-manager`・`docker-socket-proxy`（egress は `box`・`egress-out` に加えて `ctl` にもつなぐ。box-manager が記録を取りに行く道：[07](../design/07_architecture.md)）、名前つきボリューム `makase-browser-profile`・`makase-vm-home`。box-manager は `box` にもつなぐ（2 つの管理の口を呼ぶため）。`box-browser`・`box-shell` は Compose には書かない（box-manager が起こす）
 確かめ：`docker compose -f compose.vm.yaml up -d` で egress・box-manager・docker-socket-proxy が立つ。box-manager から docker-socket-proxy 越しに、許す口（コンテナ・ネットワーク・ボリューム・イメージ）は通り、許していない口（`exec` など）は断られる。`docker network inspect` で `box` が `internal: true`。box-manager は ctl の :7000 だけで待ち、`BOX_MANAGER_TOKEN` なしは断る。
 
 #### 1.5.b API-101・102・109 と世代
@@ -145,6 +146,8 @@
 | S1-11 | VM から box-manager の口・`192.168.x`・`100.64.x`・`::1`・IPv4 を入れた IPv6 に届かない。DNS rebinding で抜けない | VM の中から各アドレスへ。ホストのブリッジのアドレスは `isolated` モードの結果を記録（本体・Funnel の試験はステップ 3 以降と隔離の試験で行う） | 11 §11 隔離 |
 | S1-12 | NFR-067（起き上がり）・NFR-068（1 歩の LLM を除く処理）・スクショ 1 枚の費用を実測した | 1.7 | NFR-067・068、R-77・R-82 |
 | S1-13 | Chromium の `Singleton*` が残っていても次の起動が立つ（D-171） | 動いている `box-browser` を `docker kill` →起こし直し | FR-074 4 |
+| S1-14 | 固定の除外（本体・box-manager・tailnet・ホスト自身・メタデータ）は、許可リストに書いても VM の 2 つのコンテナから届かず、理由が `fixed_exclusion` | `terminal.allow_hosts` に除外の先を書いて egress を起こし直し、`docker exec` で各先へ | FR-102、ADR-074、D-343 |
+| S1-15 | egress が通した・断ったを 1 接続 1 件で溜め、中身（パス・ヘッダー・本文）を残さない。満杯で欠けの件数を数える | 1.4 の確かめ（記録を取り出して中身を grep） | FR-103、TBL-056、D-344・359・360 |
 
 ## 実装で決めること
 | 論点 | 設計の言い分 | おすすめ | 決めたら書く先 |
@@ -165,6 +168,8 @@
 | 暫定の Compose の置き場 | 置き場の表：`compose.yaml` を置き換える。今は db だけ（`apps/app` が使う） | `compose.vm.yaml` を足し、ステップ 3 で `compose.yaml` にまとめる | ステップ 3 |
 | egress の許可リストの渡し方 | `terminal.allow_hosts` は設定の値。本体はまだない | 環境変数かファイルから起動時に読む。本体から変える道はステップ 3 以降で決める | 00 に D-xxx |
 | プロセスの起こし方（`box-browser` の複数プロセスの親と後始末） | 起動役は D-326 で外した | コンテナの `Init: true` で子の後始末を任せ、起動スクリプトは `browser` 権限のまま Xvfb・WM・x11vnc・box-agent を順に起こす。落ちたら全部止めてコンテナごと落とす（世代が `failed` になる） | 00 に D-xxx |
+| egress の記録の取り出し口 | 07・D-359：box-manager が毎分取りに行く（ctl の道）。09 の内部 API に口がない | egress の ctl 側に `GET /internal/v1/egress/events?after=<id>`（取った分までの ID を返し、次に消す）を置き、`BOX_MANAGER_TOKEN` と別のトークンで守る。本体への渡し方はステップ 3（API-109 の応答に載せるか別の口か） | 09 vm に行を足す、00 に D-xxx |
+| 記録の項目の形 | TBL-056 の列（`source`・`host`・`port`・`purpose`・`decision`・`deny_reason`・`bytes_out`・`bytes_in`・`occurred_at`）。ID は egress が付ける | egress は TBL-056 の列名のまま JSON で持つ（UUIDv7 の ID）。本体は同じ ID を二度入れない | TBL-056 の横 |
 | ベースイメージの Node の版 | 07：Node 24 LTS。今の `apps/sandbox/Dockerfile` は `node:22.23.3-slim` | 新しいイメージは Node 24 の digest 固定にそろえる。Debian の版は `chromium` が amd64・arm64 の両方にあるものを選ぶ | 00 に D-xxx |
 
 ## 設計に戻すこと
@@ -172,8 +177,9 @@
 - NFR-063・067・068 の横に実測の数字を足す。11 §7 の NFR-063 の行に、使ったツールの版と渡し方を書く
 - API-103 の例の `screenshot` の返し方を直す。09 に `healthz`（box-agent・shell-agent の管理の口）を足すなら表に行を足す
 - 07 の起こすときの決まりに、Chromium のキャッシュの置き場と `/tmp` の置き方を足す
+- 09 vm に egress の記録の取り出し口（box-manager ↔ egress）の行を足す。固定の除外に「ホスト自身」として何を数えるか（ホストのブリッジ・LAN のアドレス）を FR-102 に書き足す
 
 ## 参照
-- 設計：[07](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)（FR-074・075・079）、[09 vm](../design/09_api/vm.md)（内部 API）、[08 vm](../design/08_database/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)（UC-061・UC-046）、[05](../design/05_non_functional.md)（NFR-062・063・066・067・068）、[11](../design/11_tech_spec.md)（§7・§11・§12 の R-77・R-82・R-100）、[00 決定事項ログ](../design/00_overview.md#決定事項ログ)
-- ADR：[043](../design/adr/ADR-043-box-container.md)・[044](../design/adr/ADR-044-box-manager.md)・[045](../design/adr/ADR-045-egress.md)・[060](../design/adr/ADR-060-one-persistent-vm.md)・[068](../design/adr/ADR-068-browser-shell-split.md)
+- 設計：[07](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)（FR-074・075・079）、[09 vm](../design/09_api/vm.md)（内部 API）、[08 vm](../design/08_database/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)（UC-061・UC-046）、[04 resident の FR-103](../design/04_functional_spec/resident.md#fr-103外に出た通信の台帳)、[08 resident の TBL-056](../design/08_database/resident.md#tbl-056egress_events外に出た通信の台帳)、[05](../design/05_non_functional.md)（NFR-062・063・066・067・068）、[11](../design/11_tech_spec.md)（§7・§11・§12 の R-77・R-82・R-100）、[00 決定事項ログ](../design/00_overview.md#決定事項ログ)
+- ADR：[043](../design/adr/ADR-043-box-container.md)・[044](../design/adr/ADR-044-box-manager.md)・[045](../design/adr/ADR-045-egress.md)・[060](../design/adr/ADR-060-one-persistent-vm.md)・[068](../design/adr/ADR-068-browser-shell-split.md)・[074](../design/adr/ADR-074-closed-network.md)
 - 移す元のコード：`apps/sandbox/Dockerfile`、`apps/sandbox/src/main.ts`、`packages/sandbox/src/executor.ts`（`runShell`・`commandEnv`・`clipTail`）、`packages/sandbox/src/tar.ts`、`packages/sandbox/src/protocol.ts`、`apps/worker/src/llm/claude.ts`、`packages/llm/src/types.ts`（`LlmClient`）、`packages/runner/src/types.ts`（`ChatMessage`）

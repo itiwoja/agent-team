@@ -1,20 +1,20 @@
-# Agent-Team-Open 実装手順書（設計 v1.5 向け）
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：[v1.5](../design/README.md) ／ インプット：[11 技術仕様書](../design/11_tech_spec.md)、置き先の順番（D-190）
+# Agent-Team-Open 実装手順書（設計 v1.7 向け）
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：[v1.7](../design/README.md) ／ インプット：[11 技術仕様書](../design/11_tech_spec.md)、置き先の順番（D-190）
 
-P1の[全11件受入条件](../design/changes/2026-10-25-p1-review-fixes.md)を該当ステップとリリースの必須ゲートにする。新しいステップ/タスク分解は追加しない。未変更のステップはv1.4から継承。
+P1の[全11件受入条件](../design/changes/2026-10-25-p1-review-fixes.md)を該当ステップとリリースの必須ゲートにする。v1.6（[差別化 A・B・C](../design/changes/2026-10-26-differentiation-abc.md)）と v1.7（[家に置く常駐エージェント](../design/changes/2026-10-26-home-agent.md)）の受入条件も同じく、割り振ったステップの終わる条件に入れた。v1.7 の家の機能は新しいステップ 8 にまとめ、旧ステップ 8（リリース）はステップ 9 にした。
 
 > **3行で**
-> 1. [設計書 v1.4](../design/README.md) を、**8 つのステップ**で順に実装する手順書。各ステップは「作るもの → 手順 → 終わる条件 → 実装で決めること」の型で書く。設計の中身は写さず、設計書へのリンクで済ませる。
-> 2. 順番は「いちばん分からないものから」：VM の縦の 1 本 → こわい操作 → 本体の移植 → 常駐の仕組み → きっかけと外とのつながり → 画面 → ターミナル・パック・控え → 隔離の試験と導入手順書。置き先は 段 1 WSL2 → 段 2 クラウドの Linux VM → 段 3 ラズパイ（D-190）。
+> 1. [設計書 v1.7](../design/README.md) を、**9 つのステップ**で順に実装する手順書。各ステップは「作るもの → 手順 → 終わる条件 → 実装で決めること」の型で書く。設計の中身は写さず、設計書へのリンクで済ませる。
+> 2. 順番は「いちばん分からないものから」：VM の縦の 1 本 → こわい操作 → 本体の移植 → 常駐の仕組み → きっかけと外とのつながり → 画面 → ターミナル・パック・控え → 家の機能 → 隔離の試験・キット・導入手順書。置き先は 段 1 WSL2 → 段 2 クラウドの Linux VM → 段 3 ラズパイ（D-190）。
 > 3. この手順書は設計書の**外**にある（D-211）。設計と食い違ったら設計書の決定事項ログ（D-xxx）に戻し、この手順書は設計に追いつかせる。チケット・日程・担当は決めない。
 
 ## 始める前に
 ### 言葉
 | 言葉 | 意味 |
 |---|---|
-| ステップ | 8 つの作業の単位（1〜8）。順に進める。1 ファイル 1 ステップ |
+| ステップ | 9 つの作業の単位（1〜9）。順に進める。1 ファイル 1 ステップ |
 | 区切り（N.k） | ステップの中の、単独で動かして確かめられる単位。各区切りの終わりに「確かめ」がある |
-| 段 | 置き先。段 1 ＝手元の WSL2、段 2 ＝クラウドの amd64 の Linux VM、段 3 ＝ラズパイ（arm64）。ステップ 1〜7 は段 1、ステップ 8 で段 2・3 |
+| 段 | 置き先。段 1 ＝手元の WSL2、段 2 ＝クラウドの amd64 の Linux VM、段 3 ＝ラズパイ（arm64）。ステップ 1〜8 は段 1、ステップ 9 で段 2・3 |
 | 終わる条件 | ステップを「済」にするための表。11 §11 のテスト観点と UC の基本フローから、ID つきで拾ってある |
 | 実装で決めること | 設計が「実装で決める」とした論点。手順書は「おすすめ」を書くだけで、決めたら設計書の決定事項ログに D-xxx を足す |
 
@@ -22,11 +22,14 @@ P1の[全11件受入条件](../design/changes/2026-10-25-p1-review-fixes.md)を�
 | もの | いつから要るか |
 |---|---|
 | Node 24・pnpm 10・Docker Engine（WSL の中）・Compose v2・`docker buildx` | ステップ 1 |
-| `ANTHROPIC_API_KEY`（**ここから有料**。`LLM_SESSION_BUDGET_MICRO_USD` で上限をかける） | ステップ 1 の 1.6（CLI で computer use）。ステップ 2 のオートレビュー、ステップ 4 の実 API の確かめ、ステップ 7・8 の通し |
+| `ANTHROPIC_API_KEY`（**ここから有料**。`LLM_SESSION_BUDGET_MICRO_USD` で上限をかける） | ステップ 1 の 1.6（CLI で computer use）。ステップ 2 のオートレビュー、ステップ 4 の実 API の確かめ、ステップ 7〜9 の通し |
+| `OPENAI_API_KEY`（有料）。任意で Ollama などの OpenAI 互換の接続先 | ステップ 3（役割ごとのモデル FR-107）・ステップ 4（OpenAI の computer use FR-108・R-104） |
+| ChatGPT のアカウント（無料と有料を 1 つずつ） | ステップ 3（`openai_chatgpt` のサインイン FR-116）・ステップ 9（無料の枠の確認 R-113） |
 | Tailscale のアカウント（tailnet の HTTPS を有効に。`TS_AUTHKEY`） | ステップ 3 |
 | GitHub（テスト用のリポジトリ・GitHub App）、Google Cloud（OAuth のクライアント）。使う機能だけ | ステップ 5 |
 | Web Push を受ける実機（Android の Chrome、または iOS でホーム画面に追加した PWA）、tailnet の外から `curl` できる場所 | ステップ 5・6 |
-| クラウドの amd64 の Linux VM（1 週間以上）、ラズパイ 4/5（4GB 以上）、開発者でない人（予行 1 人＋本番 3 人） | ステップ 8 |
+| Home Assistant（コンテナで足りる。試験用の機器はデモの統合で可）、試しのレシート 50 枚、USB の SSD か NAS（保管庫） | ステップ 8 |
+| クラウドの amd64 の Linux VM（1 週間以上）、ラズパイ 5 の 16GB（キットの推奨）と 8GB（最低）、開発者でない人（予行 1 人＋本番 3 人。キットの初回設定 NFR-094 も同じ人で測る） | ステップ 9 |
 
 ### 進め方
 1. ステップのファイルを開き、「前提」を満たしているか確かめる（前のステップの「終わる条件」が済んでいること）
@@ -42,7 +45,7 @@ P1の[全11件受入条件](../design/changes/2026-10-25-p1-review-fixes.md)を�
 | J-1 | 本体のパッケージ名と、旧コードを消す時期 | 新規 `apps/makase` に `apps/worker/src` を移す。ステップ 3 の最後で `apps/app`・`apps/worker`・`packages/edge` を消し、`packages/db`・`apps/gateway`・`apps/gcal`・`apps/github`・`packages/gateway-client` はステップ 5 の最後で消す | [ステップ 3](03_core_port.md)・[5](05_triggers.md) |
 | J-2 | ステップ 2（こわい操作）を本体より先に置くか | 先に置く。設計レビューで指摘が最も集中した箇所で、VM と CLI のループだけで試せる。本体ができてから表を合流させる | [ステップ 2](02_risky_actions.md) |
 | J-3 | 画面（ステップ 6）を常駐（ステップ 4）より後に置くか | 後に置く。ステップ 4・5 は curl・SSE・ScriptedLlm で確かめられる。先に画面を作ると API の形が揺れるたびに作り直しになる | [ステップ 6](06_web.md) |
-| J-4 | Google の OAuth の戻り先に ts.net の URL を使えるか、クラウドの VM と第三者テストの費用・被験者 | 持ち主が決める。[実装で決めることの一覧](#実装で決めることの一覧)の太字の行 | [ステップ 5](05_triggers.md)・[8](08_release.md) |
+| J-4 | Google の OAuth の戻り先に ts.net の URL を使えるか、クラウドの VM と第三者テストの費用・被験者 | 持ち主が決める。[実装で決めることの一覧](#実装で決めることの一覧)の太字の行 | [ステップ 5](05_triggers.md)・[9](09_release.md) |
 
 ほかに、各ステップの「実装で決めること」（設計が「実装で決める」とした論点）を[下の一覧](#実装で決めることの一覧)に集めた。手順書を書くときに見つけた設計の直しどころは [design-feedback.md](design-feedback.md) にある。
 
@@ -51,15 +54,15 @@ P1の[全11件受入条件](../design/changes/2026-10-25-p1-review-fixes.md)を�
 flowchart LR
  subgraph S1["段 1：手元の WSL2（amd64）"]
   direction LR
-  P1["1 VM の縦の 1 本"] --> P2["2 こわい操作"] --> P3["3 本体の移植"] --> P4["4 常駐の仕組み"] --> P5["5 きっかけと外"] --> P6["6 画面"] --> P7["7 ターミナル・パック・控え"]
+  P1["1 VM の縦の 1 本"] --> P2["2 こわい操作"] --> P3["3 本体の移植"] --> P4["4 常駐の仕組み"] --> P5["5 きっかけと外"] --> P6["6 画面"] --> P7["7 ターミナル・パック・控え"] --> P8["8 家の機能"]
  end
  subgraph S2["段 2：クラウドの Linux VM（amd64）"]
-  P8a["8 隔離の試験・1 週間放置・導入手順書"]
+  P9a["9 隔離の試験・閉域で 1 日・1 週間放置・導入手順書"]
  end
  subgraph S3["段 3：ラズパイ（arm64）"]
-  P8b["8 arm64 のイメージ・実機の計測"]
+  P9b["9 arm64 のイメージ・キット・実機の計測"]
  end
- P7 --> P8a --> P8b
+ P8 --> P9a --> P9b
 ```
 見てほしいところ：段 1 の中でステップ 1・2 が先。ここで NFR-063（computer use のツールの版と画面の大きさ）・NFR-067・068（速さ）・R-82（スクショの費用）の実測が出て、設計の「実装で決める」が最初に減る。ステップ 3 以降は Cloudflare 版の部品を並べ直す作業で、やり方が分かっている（[07 レベル3](../design/07_architecture.md#レベル3本体のコンポーネント図)）。
 
@@ -78,20 +81,21 @@ flowchart LR
 | ステップ | 段 | 作るもの | 終わる条件（要約） | 主な設計の参照 |
 |---|---|---|---|---|
 | [1 VM の縦の 1 本](01_vm_vertical.md) | 1 | `docker/box-browser`・`docker/box-shell` のイメージ、box-agent、shell-agent の最小、egress、box-manager の最小、本体なしの CLI で computer use のループ | CLI から試験ページを操作できる。止めて起こしてもホームが残る。`box-shell` から X・CDP・VNC に届かない。NFR-067・068・スクショの費用の実測が出る | [07](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)、[09 vm](../design/09_api/vm.md)、ADR-043〜045・060・068 |
-| [2 こわい操作](02_risky_actions.md) | 1 | `judgeBrowserAction` と行き先の表、`browser_checks` の承認とハッシュ、オートレビュー、eval の土台 | 11 §11 の単体の観点が緑。実の VM の試験ページで、確かめた先と実行した先が同じ。eval (1)(3) が回る | [04 vm](../design/04_functional_spec/vm.md) FR-076・077・099、ADR-047・052・064 |
-| [3 本体の移植](03_core_port.md) | 1 | `apps/makase`（Node 24・Hono・`better-sqlite3`）、表の骨組み（版 4・5）、Compose 一式（`isolated`）、Tailscale の身元、FR-083 の状態、SSE、監査ログ、`web_fetch` の判定。依頼（asks）と旧コードを消す | `docker compose up -d` で起動し、Tailscale 経由で入れる。LAN からは届かない。`pnpm typecheck / test / lint:deps` が緑 | [07](../design/07_architecture.md) 移すもの、[08 方針](../design/08_database/README.md)、ADR-042・046・049・051 |
-| [4 常駐の仕組み](04_resident.md) | 1 | `wakes`・`turns`・`tasks`、受付・ターン・タスク・タイマー、`delegate`・`report`・`send_to_owner`、文脈とキャッシュ、要約、記憶 2 層、VM の窓口（画面の番・交代 API-089〜091・113・確認の一覧 API-087・110）、再開 | チャットで頼むとメインが答えるか振り分け、タスクが VM で仕事をして報告し、メインが伝える。交代して返せる。再起動しても続く。先頭の 9 割以上がキャッシュに当たる | [04 resident](../design/04_functional_spec/resident.md)、[08 resident](../design/08_database/resident.md)、ADR-058・059・062・066・069・070 |
-| [5 きっかけと外とのつながり](05_triggers.md) | 1 | ルーチン・予約・webhook（:8081・Funnel）、Web Push の送り手と購読、カレンダー・GitHub の gateway と `approval_done`。旧 gateway・gcal・github・`packages/db` を消す | 時刻と webhook でメインが起き、留守の間の知らせがスマホに届く。カレンダーと PR の書き込みが確認つきで通る | [04 resident](../design/04_functional_spec/resident.md) FR-094〜096・017、[04 tools](../design/04_functional_spec/tools.md) FR-081、ADR-065・067 |
-| [6 画面](06_web.md) | 1 | SCR-020〜026、PWA と Service Worker、noVNC の画面、`apps/web` の作り直し | 06 の画面遷移どおりに動き、スマホで頼む・見る・確認する・タップで交代するまでできる | [06](../design/06_ux_design.md)、[09](../design/09_api/README.md) |
+| [2 こわい操作](02_risky_actions.md) | 1 | `judgeBrowserAction` と行き先の表、`browser_checks` の承認とハッシュ、オートレビュー（既定で切る）、規則の版と試験・判定の再実行、computer use の共通の形、eval の土台 | 11 §11 の単体の観点が緑。実の VM の試験ページで、確かめた先と実行した先が同じ。試験が落ちる規則は保存できない。再実行が 100% 一致。eval (1)(3) が回る | [04 vm](../design/04_functional_spec/vm.md) FR-076・077・099・102・104・105・108、ADR-047・052・064・076・077 |
+| [3 本体の移植](03_core_port.md) | 1 | `apps/makase`（Node 24・Hono・`better-sqlite3`）、表の骨組み（版 4〜6）、Compose 一式（`isolated`）、Tailscale の身元、FR-083 の状態、SSE、監査ログとハッシュの鎖、`web_fetch` の判定、窓口 `net` と外に出た通信の台帳、閉域モード、役割ごとのモデル（4 つの接続先）。依頼（asks）と旧コードを消す | `docker compose up -d` で起動し、Tailscale 経由で入れる。LAN からは届かない。監査ログの改ざんを検査が見つける。本体の外向きが全部台帳に載る。`pnpm typecheck / test / lint:deps` が緑 | [07](../design/07_architecture.md) 移すもの、[08 方針](../design/08_database/README.md)、FR-101・103・106・107・116、ADR-042・046・049・051・074・076・078・084 |
+| [4 常駐の仕組み](04_resident.md) | 1 | `wakes`・`turns`・`tasks`、受付・ターン・タスク・タイマー、`delegate`・`report`・`send_to_owner`、文脈とキャッシュ、要約、記憶 2 層、VM の窓口（画面の番・交代 API-089〜091・113・確認の一覧 API-087・110）、再開 | チャットで頼むとメインが答えるか振り分け、タスクが VM で仕事をして報告し、メインが伝える。交代して返せる。再起動しても続く。先頭の 9 割以上がキャッシュに当たる。役割ごとに別のモデルで動き、Claude・OpenAI どちらの computer use でも確かめた先と実行した先が同じ | [04 resident](../design/04_functional_spec/resident.md)、[08 resident](../design/08_database/resident.md)、FR-107・108、ADR-058・059・062・066・069・070・078 |
+| [5 きっかけと外とのつながり](05_triggers.md) | 1 | ルーチン・予約・webhook（:8081・Funnel）、Web Push の送り手と購読、カレンダー・GitHub の gateway と `approval_done`。旧 gateway・gcal・github・`packages/db` を消す | 時刻と webhook でメインが起き、留守の間の知らせがスマホに届く。カレンダーと PR の書き込みが確認つきで通る。`closed` では Funnel・Web Push を使わない。自動のきっかけは既定で ChatGPT の枠を使わない | [04 resident](../design/04_functional_spec/resident.md) FR-094〜096・017、[04 tools](../design/04_functional_spec/tools.md) FR-081、ADR-065・067 |
+| [6 画面](06_web.md) | 1 | SCR-020〜029（027 外に出た通信・028 判定の規則・029 モデル）、PWA と Service Worker、noVNC の画面、`apps/web` の作り直し | 06 の画面遷移どおりに動き、スマホで頼む・見る・確認する・タップで交代するまでできる | [06](../design/06_ux_design.md)、[09](../design/09_api/README.md) |
 | [7 ターミナル・パック・控え](07_terminal_pack_snapshot.md) | 1 | shell-agent のコマンドと tar、パック（`announcement-page`）、VM の控え・戻す・作り直す、ブラウザのデータを消す | UC-052・053・061 が通る。告知ページ 1 件を PR まで届けられる。控えから戻せる | [04 vm](../design/04_functional_spec/vm.md) FR-086・100・079、[04 tools](../design/04_functional_spec/tools.md) FR-085、ADR-053・054・061 |
-| [8 隔離の試験・導入手順書・段 2 と 3](08_release.md) | 2・3 | 隔離の試験、実機の計測、導入手順書（README）、1 週間の放置、arm64 のイメージ | 11 §11 の隔離の試験がすべて通る。開発者でない人が README だけで 30 分以内に起動できる（NFR-081）。arm64 で同じ Compose が起動する | [11 §11](../design/11_tech_spec.md#11-テスト方針)、[05](../design/05_non_functional.md)、[07 ホスト側の手順](../design/07_architecture.md#デプロイ構成環境) |
+| [8 家の機能](08_home.md) | 1 | チャットの画像の添付、家の保管庫と `vault_*`、写真の整理、Home Assistant のコネクタと `home_*`・機器の区分、家計簿、`classify`（判断モデル）、SCR-030〜032 | 消したファイルはゴミ箱から戻せ、空にするのは人だけ。VM から保管庫に届かない。鍵はどんな頼み方でも人に回り「電気消して」は確認なしで動く。レシート 50 枚の読み取りが基準を満たす。`classify` が Kernel の行き先を変えない | [04 vm](../design/04_functional_spec/vm.md) FR-110・111・113、[04 resident](../design/04_functional_spec/resident.md) FR-112・114・115、ADR-080〜083 |
+| [9 隔離の試験・キット・導入手順書・段 2 と 3](09_release.md) | 2・3 | 隔離の試験、閉域で 1 日、実機の計測、導入手順書（README）、1 週間の放置、arm64 のイメージ、キットのイメージと初回設定（SCR-033） | 11 §11 の隔離の試験がすべて通る。`closed` で外向き 0。開発者でない人が README だけで 30 分以内に起動できる（NFR-081）。arm64 で同じ Compose が起動する。キットで 15 分以内に最初のお願い（NFR-094） | [11 §11](../design/11_tech_spec.md#11-テスト方針)、[05](../design/05_non_functional.md)、[07 ホスト側の手順](../design/07_architecture.md#デプロイ構成環境)、FR-101・109、ADR-079・083・084 | [11 §11](../design/11_tech_spec.md#11-テスト方針)、[05](../design/05_non_functional.md)、[07 ホスト側の手順](../design/07_architecture.md#デプロイ構成環境) |
 
 ### 段ごとの終わる条件
 | 段 | 終わる条件 |
 |---|---|
-| 1（WSL2） | ステップ 1〜7 の終わる条件がすべて満たされ、WSL2 の Compose 一式で UC-042〜049・051〜061 が通る。11 §11 の単体と結合が緑。標準パック「告知ページ制作」で告知ページ 1 件を GitHub の PR まで届けられる |
+| 1（WSL2） | ステップ 1〜8 の終わる条件がすべて満たされ、WSL2 の Compose 一式で UC-042〜049・051〜061 が通る。11 §11 の単体と結合が緑。標準パック「告知ページ制作」で告知ページ 1 件を GitHub の PR まで届けられる |
 | 2（クラウドの amd64） | 1 週間放置して、毎日のバックアップ（NFR-070）・VM の控え（NFR-084）・掃除（NFR-073）が回り、ターンもタスクも途中で壊れていない。11 §11 の隔離の試験がすべて通る。開発者でない人 1 人が README だけで 30 分以内に起動できる（NFR-081 の予行） |
-| 3（ラズパイ） | arm64 のイメージで同じ Compose が起動する。NFR-067・068 を実機で測り、外れたら画面を小さくする（R-77）。4GB の機械で本体＋VM（2 コンテナ）＋OS が入る（NFR-062） |
+| 3（ラズパイ） | arm64 のイメージで同じ Compose（Home Assistant を含む）が起動する。NFR-067・068・096 を実機で測り、外れたら画面を小さくする（R-77）。キットの選び方（NFR-092）を実機で確かめる。非エンジニア 3 人中 2 人がキットの電源を入れてから最初のお願いまで 15 分以内（FR-109・NFR-094） |
 
 段 2 を段 3 の前に置く理由：WSL2 はノートを閉じると止まる（R-78）。長時間の試験は常時起動の amd64 で先に済ませ、arm64 の問題と切り分ける。
 
@@ -107,13 +111,16 @@ flowchart LR
 | box-agent（`box-browser` の中） | `apps/box-agent`（新規） | xdotool・CDP（`--remote-debugging-pipe`）・スクショ・`read_page` |
 | shell-agent（`box-shell` の中） | `apps/shell-agent`（新規） | `apps/sandbox`＋`packages/sandbox` から育てる |
 | VM のイメージ | `docker/box-browser/Dockerfile`・`docker/box-shell/Dockerfile`・`docker/makase-browser-seccomp.json` | Chromium は Debian の `chromium` パッケージ |
-| Claude のクライアント（computer use・オートレビュー・本体で共用） | `packages/llm/src/claude.ts`（ステップ 1 で `apps/worker/src/llm/claude.ts` から移す） | クライアントの作成は 1 か所（D-315） |
+| LLM のクライアント（computer use・オートレビュー・本体で共用） | `packages/llm/src/claude.ts`（ステップ 1 で `apps/worker/src/llm/claude.ts` から移す）。ステップ 3 で `openai.ts`・`openai-compatible.ts`・`openai-chatgpt.ts` を足す | 接続先ごとに作成は 1 か所。役割ごとに選ぶ（D-352。D-315 を置き換え） |
 | 試験用の CLI（本体なしで computer use のループを回す） | `apps/box-manager/src/cli/`（ステップ 1。開発用） | 本番の構成には入れない |
 | 試験ページ | `evals/pages/`（ステップ 1 で最小、ステップ 2 で増やす） | `box-shell` の `shell:8000` で配る |
 | Compose | `compose.yaml`（今の db だけのものを置き換える）＋`compose.dev.yaml`。ステップ 1・2 の間は暫定の `compose.vm.yaml`（3.6 で取り込んで消す） | 開発時は本体だけ `pnpm dev` に差し替える。`box` ネットワークは `isolated` を既定で書く |
 | 標準パック | `packs/announcement-page.json`（イメージでは `/opt/makase/packs/`） | 既存の `apps/app/src/packs/library/*.ts` は参考 |
 | eval | `evals/cases/<日付>-<短い名前>/`、`pnpm run eval:capture`（設計の `npm run` はこのリポジトリでは `pnpm run`） | 11 §11・D-199 |
 | 画面 | `apps/web`（作り直す） | |
+| 家の保管庫 | ボリューム `makase-vault`（USB の SSD か NAS をホストでマウント）。道具は `apps/makase/src/vault/` | 本体だけがマウントする。VM にはつながない（FR-110） |
+| Home Assistant | `compose.yaml` のサービス `homeassistant`（プロファイル `home`。キットでは既定で入れる）。コネクタは `apps/makase/src/home/` | 本体のコネクタ用の内部ホストとして自動登録（FR-102 の 6） |
+| 判断モデル（`classify`） | 接続先 `decision`。置き場はステップ 8 で決める | Kernel の判定には使わない（BR-16） |
 
 名前はおすすめで、実装で変えてよい。変えたらこの表と各ステップを直す。
 
@@ -146,10 +153,23 @@ flowchart LR
 | 交代（FR-078）をステップ 4 に置く | [4](04_resident.md) | 1・5・6 | ステップ 4 の区切り 4.7。box-manager の API-113・本体の API-089〜091・`takeovers`・`request_takeover`。ステップ 1 の box-agent は `control_epoch` を比べるだけ |
 | 控えの zstd の呼び方・ボリュームを空にして広げる手順 | [7](07_terminal_pack_snapshot.md) | 8 | 一時コンテナの `tar --zstd` |
 | `announcement-page` の手順書 4 本の中身 | [7](07_terminal_pack_snapshot.md) | 8 | 旧 `library/` は書き方の参考だけ。本文は新しく書く |
-| `isolated` モードが使える Docker の版の確かめ方・任意の規則（DOCKER-USER）が 1 行で足りるか | [8](08_release.md) | 3（Compose） | 最低の版を公式の文書で確かめて README に書く。I-4 の試験で決める |
-| マルチアーキのイメージをどこでビルドしてどこに置くか | [8](08_release.md) | 3（`compose.yaml` の `image:`） | GitHub Actions の arm64 runner でネイティブにビルドし GHCR へ |
-| 導入手順書の最終形（今の README を置き換えるか） | [8](08_release.md) | 3（`docs/development.md`） | 置き換える。README は「置く手順」だけにし、設計・開発の話は `docs/` へ |
-| クラウドの VM の種類と費用、第三者テストの被験者と記録の置き場 | [8](08_release.md) | — | 汎用の amd64 VM を 1 週間＋予備。記録は `docs/implementation/records/`（**持ち主が決める**） |
+| `isolated` モードが使える Docker の版の確かめ方・任意の規則（DOCKER-USER）が 1 行で足りるか | [9](09_release.md) | 3（Compose） | 最低の版を公式の文書で確かめて README に書く。I-4 の試験で決める |
+| マルチアーキのイメージをどこでビルドしてどこに置くか | [9](09_release.md) | 3（`compose.yaml` の `image:`） | GitHub Actions の arm64 runner でネイティブにビルドし GHCR へ |
+| 導入手順書の最終形（今の README を置き換えるか） | [9](09_release.md) | 3（`docs/development.md`） | 置き換える。README は「置く手順」だけにし、設計・開発の話は `docs/` へ |
+| クラウドの VM の種類と費用、第三者テストの被験者と記録の置き場 | [9](09_release.md) | — | 汎用の amd64 VM を 1 週間＋予備。記録は `docs/implementation/records/`（**持ち主が決める**） |
+| egress の記録を本体へ渡す道（D-359。09 vm に口がない） | [1](01_vm_vertical.md)・[3](03_core_port.md) | 7 | box-manager が毎分取りに行き本体へ。`terminal.allow_hosts`・`network` を egress へ渡す道と同じ口にする |
+| 行き先の表の JSON の形・試験の例の `expect` に `auto_review` を足すか | [2](02_risky_actions.md) | 3・6 | 表はデータとして受け、版のハッシュに入れる。`expect` は足す（設計に戻す） |
+| `openai_chatgpt` のトークンを暗号化する鍵の置き場（D-386）・監査ログの鎖の始まり | [3](03_core_port.md) | 8・9 | 鍵は初回の起動で 1 台ごとに作り `/data` の外の秘密に。鎖は版 6 の移行の時点を始まりにする |
+| 窓口 `net` の置き場と、本体と egress の固定の除外（FR-102）の共有 | [3](03_core_port.md) | 1・5 | `apps/makase/src/net/`。固定の除外は `packages/kernel` の定数にして両方から読む |
+| OpenAI の computer use のツールの名前・座標の形・画面の大きさの渡し方（ADR-078） | [4](04_resident.md) | 2 | 実 API で 1 回試して決める（有料） |
+| D-389 で「チャットから振り分けた仕事」を自動のきっかけと見分ける形 | [4](04_resident.md)・[5](05_triggers.md) | — | タスクの区分を `task_done` に引き継ぐ。割り当ては断らず、実行のときに `dropped`（`chatgpt_auto_off`） |
+| `vision` を役割ではなく能力として扱う | [8](08_home.md) | 3・4 | 能力として扱う（07・11 の役割の一覧に `vision` がない） |
+| HEIC の変換（`sharp` の prebuilt は HEIC を読めない） | [8](08_home.md) | 9（arm64） | HEIC だけ wasm の libheif で JPEG に |
+| HA の自動化を書く API（非公式の `/api/config/automation/config`）と HA の版の固定・Compose を bridge にするか host にするか | [8](08_home.md) | 9 | 版を digest で固定。段 1 は bridge、キットで決める |
+| 判断モデルの立て方（プロファイル `decision`）と日本語の精度（R-109） | [8](08_home.md) | 9 | 偽のサーバーで先に作り、実モデルは 1 つ試す。ラズパイの p95 は 9 |
+| 試しのレシート 50 枚を公開のリポジトリに入れるか | [8](08_home.md) | 9 | 個人の情報を消したものだけ入れる（**持ち主の確認が要る**） |
+| キットの tailnet の持ち主と `OWNER_LOGIN`（作った人の tailnet か、受け取った人の tailnet か） | [9](09_release.md) | 3・8 | 受け取った人の tailnet（**持ち主が決める**。設計にない） |
+| 最低の機械：NFR-062 の 4GB と、キットの最低のラズパイ 5 の 8GB | [9](09_release.md) | — | 4GB の試験は残し、キットとしては 8GB を最低にする |
 
 ### 設計の直しどころ
 手順書を書くときに見つけた設計書の食い違い・不足と、今のコードとの差は [design-feedback.md](design-feedback.md) にまとめた。設計書を直すときの材料にする。

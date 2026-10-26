@@ -1,16 +1,17 @@
 # ステップ 5. きっかけと外とのつながり
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-24） ／ 設計の版：v1.4 ／ インプット：[FR-094〜096・FR-017・FR-090・FR-091](../design/04_functional_spec/resident.md)、[FR-081・FR-083](../design/04_functional_spec/tools.md)、[常駐の DB（TBL-041・044〜046・054・055）](../design/08_database/resident.md)、[VM の DB（TBL-037）](../design/08_database/vm.md)、[変える表](../design/08_database/README.md)、[API](../design/09_api/README.md)、[UC-049・056・057 と BR-13](../design/03_use_cases.md)、[NFR-064・085・086](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)、[11 §10・§11](../design/11_tech_spec.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.2（2026-10-26） ／ 設計の版：v1.7 ／ インプット：[FR-094〜096・FR-017・FR-090・FR-091](../design/04_functional_spec/resident.md)、[FR-081・FR-083](../design/04_functional_spec/tools.md)、[常駐の DB（TBL-041・044〜046・054・055）](../design/08_database/resident.md)、[VM の DB（TBL-037）](../design/08_database/vm.md)、[変える表](../design/08_database/README.md)、[API](../design/09_api/README.md)、[UC-049・056・057 と BR-13](../design/03_use_cases.md)、[NFR-064・085・086](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)、[11 §10・§11](../design/11_tech_spec.md)、v1.6・v1.7：[FR-101](../design/04_functional_spec/resident.md#fr-101閉域モード)・[FR-116 の 6](../design/04_functional_spec/resident.md#fr-116chatgpt-でサインイン)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)（D-342・D-389）
 
 > **3行で**
 > 1. 時刻（ルーチン・予約した確認）と外の出来事（GitHub などの webhook）でメインが起き、留守の間の知らせが Web Push でスマホに届き、カレンダーと GitHub の書き込みが確認つきで通って、決まるとメインが `approval_done` で起きる。
-> 2. `routines`・`routine_proposals`・`scheduled_wakes`・`webhooks` と毎分のタイマーの足し、:8081 の webhook の口、Tailscale Funnel（8443 番）、Web Push の送り手（`push_outbox`・購読・心拍）、本体の中の gateway（`apps/makase/src/gateway/`）を作る。
-> 3. 終わる条件：UC-049・056・057 の基本フローが通り、署名・429・重複・再送・`skipped` の単体が緑で、インターネット側から `curl` して 443 番に届かず 8443 番の `/hooks/<hookId>` だけが :8081 にパスのまま届き、試しの通知が 5 秒以内に送られる。
+> 2. `routines`・`routine_proposals`・`scheduled_wakes`・`webhooks` と毎分のタイマーの足し、:8081 の webhook の口、Tailscale Funnel（8443 番）、Web Push の送り手（`push_outbox`・購読・心拍）、本体の中の gateway（`apps/makase/src/gateway/`）を作る。v1.7：閉域モード（`network.mode = closed`）では Funnel と Web Push を使わず（D-341・342）、自動のきっかけでは ChatGPT の枠を使わない（D-389）。
+> 3. 終わる条件：UC-049・056・057 の基本フローが通り、署名・429・重複・再送・`skipped` の単体が緑で、インターネット側から `curl` して 443 番に届かず 8443 番の `/hooks/<hookId>` だけが :8081 にパスのまま届き、試しの通知が 5 秒以内に送られる。`closed` では 8443 番が開かず Web Push の行が送られない。ルーチン・予約・webhook のターンとタスクが `openai_chatgpt` を呼ばない。
 
 ## 前提（始める条件）
 - 入力（前のステップの成果・git の履歴から読むもの）：
   - ステップ 4（[04_resident.md](04_resident.md)）が終わっている：受付が `wakes.origin` のすべてを受け、メインのターンが `send_to_owner` で `push_outbox` に書き、毎分のタイマーの骨組み（`chat` の待ちを起こす・日次の区分の判定）が動く。区分の判定そのものはステップ 4 のものを使う
   - ステップ 3（[03_core_port.md](03_core_port.md)）が終わっている：`apps/makase` が Compose で起動し、:8080 は Tailscale の身元で守られ、:8081 の Hono アプリは「空で 404 だけ」の形である。`tailscale` コンテナで `https://makase.<tailnet>.ts.net` に入れる。`ENCRYPTION_KEY` が `.env` にあり、`packages/platform` の `sealSecret`・`openSecret` が使える
   - `apps/app`・`apps/worker`・`packages/edge` はステップ 3 の 3.7 で消えている。このステップの「移す元」のうち `apps/app/src/` のもの（`routes/connect.ts`・`connect-github.ts`・`approvals.ts`・`connectors/`・`check/`・`tick.ts`・`schedule.ts`）は、消したコミット（SHA：ステップ 3 の最後にここへ書く）から `git show <sha>:<path>` で読む。`apps/worker/src/` のもの（`db/repo/gateway.ts`・`edge/intents.ts`・`views/connectors/known.ts`）は `apps/makase/src/` の同名に移っている
+  - v1.7 の分：`network.mode`・`network.allow_hosts` の設定と窓口 `net`（本体の外向きを許可リストで絞り台帳に書く：FR-103）はステップ 3、役割で呼び分ける `clientFor(role, { budgetClass })` と D-389 の判定の口はステップ 4 の 4.10 にある
   - 新しい表の骨組み（`routines`・`routine_proposals`・`scheduled_wakes`・`webhooks`・`push_subscriptions`・`push_outbox`）と `action_intents`・`approvals`・`policy_decisions` の `turn_id` は、ステップ 3 の版 4・5 で作ってある。このステップの「マイグレーションに足す」は「無い列・索引があれば足す」の意味
 - 機械（置き先・実機）：
   - 置き先は段 1（手元の WSL2・amd64）。webhook と Web Push は外の機械と実の端末が要る（下の道具）
@@ -32,6 +33,7 @@
 | Funnel の設定と本体との受け渡し | `docker/tailscale/`（起動スクリプト・`serve.json`）と `compose.yaml` | ステップ 3 の `tailscale` コンテナ | ADR-065、D-241・D-305、07 |
 | Web Push の送り手・心拍・購読の API | `apps/makase/src/push/`（`sender.ts`・`presence.ts`・`outbox.ts`）と `routes/push.ts` | `packages/platform/src/mask.ts`（秘密を通知の文に入れない検査の参考） | FR-017、API-031・032・121・137、D-267・D-288 |
 | gateway（本体の中の部品） | `apps/makase/src/gateway/`（下の対応表） | `apps/gateway`・`apps/gcal`・`apps/github` | ADR-051、FR-081 |
+| 閉域モードのときの Funnel・Web Push の止め方、自動のきっかけで ChatGPT を使わない判定 | `docker/tailscale/` の起動スクリプト・`push/outbox.ts`・`intake/router.ts`（ステップ 4） | ステップ 3 の `network.mode`、ステップ 4 の `clientFor` | FR-101・FR-017・FR-096・D-341・342・389 |
 | カレンダー・GitHub をつなぐ API と確認の決定 | `apps/makase/src/routes/connect.ts`・`approvals.ts` と `gateway/connect/` | `apps/app/src/routes/connect.ts`・`connect-github.ts`・`connectors/google.ts`・`github.ts`・`classify.ts`・`policy.ts`・`check/decide.ts`・`check/tick-step.ts`・`check/recheck.ts` | API-093〜095・107・019、D-248・D-275 |
 
 gateway の「移す元 → 移す先」（開いて確かめた。`apps/gateway` に `flow.ts` はなく、あるのは `flow.test.ts`＝偽の MCP サーバーとの一周の試験だけ）：
@@ -133,6 +135,14 @@ gateway の「移す元 → 移す先」（開いて確かめた。`apps/gateway
 3. `pnpm install` でロックを作り直し、`pnpm typecheck / test / lint:deps` を通す
 確かめ：`git ls-files apps/gateway apps/gcal apps/github packages/gateway-client packages/db` が空。`grep -rn "gateway-client\|@open-team/db"` が残っていない。`pnpm typecheck / test / lint:deps` が緑
 
+### 5.8 閉域モードときっかけ・自動のきっかけと ChatGPT の枠
+1. Funnel（D-341）：`network.mode = closed` のときは、`TS_FUNNEL` と受け口の数によらず 8443 番に `funnel` を付けない（5.4 の 3 の「公開してよいか」のファイルを書かない）。API-128 の `funnel` は `off` と理由（閉域モード）を返し、API-111 の Funnel の状態も同じ。`closed` に切り替えた時点で付いていれば外す
+2. webhook（FR-096）：`closed` では家（社内）の GitLab・GitHub Enterprise Server から LAN の中で受ける。:8081 を LAN 側にも結ぶ形は、ステップ 3 の入口（Headscale・LAN の直結）に合わせる。署名・重複・件数の検査（5.3）は変えない。GitHub.com からの配達は届かない（Funnel がない）
+3. Web Push（D-342・FR-017）：`closed` では `enqueuePush` が行を作らない（購読があっても）。送り手（5.5 の 5）も、`closed` の間は残っている `pending` を送らず `skipped` にする。通知は画面の中（SSE）だけで、家の中の ntfy（`network.allow_hosts` に書いたもの）は任意（作るかは「実装で決めること」）。API-031 の `?test=1` は 409 で理由を返す
+4. カレンダー・GitHub の gateway（5.6）の外向きは、ステップ 3 の窓口 `net` を必ず通す（`gateway/call.ts` の `fetch` の包みを `net` の上に置く）。`closed` で許可リストにない先は、実行の前に断られ台帳に残る
+5. 自動のきっかけと ChatGPT の枠（D-389）：ルーチン（5.1）・予約（5.2）・webhook（5.3）で始まるターンと、そこから `delegate` したタスクは、`llm.chatgpt_allow_auto = false` のあいだ `openai_chatgpt` を呼ばない。ステップ 4 の `clientFor` の口を使い、割り当てが `openai_chatgpt` のときは呼ばずに、きっかけを `dropped`（`chatgpt_auto_off`）にして `role = 'system'` の知らせを 1 日 1 回出す（日次の上限で `auto` を捨てるのと同じ扱い：4.2 の 5）。`true` にすれば使う
+確かめ：(1) `closed` にして受け口を作っても、tailnet の外からの `curl -m 10 -si https://<host>:8443/hooks/<hookId>` がつながらず、API-128 の `funnel` が `off`。(2) `closed` で `send_to_owner` を呼んでも `push_outbox` の行ができず、SSE の `chat.created` は出る。(3) 窓口 `net` の台帳に、カレンダーの呼び出しが目的 `tool` で 1 行ずつ残る。(4) メインを偽の `openai_chatgpt` に割り当て、ルーチンを今すぐ動かす（API-136）と、偽の接続先の呼び出しが 0 件で、きっかけが `dropped`（`chatgpt_auto_off`）と `system` の行。チャットから頼むと呼ばれる。`chatgpt_allow_auto = true` にするとルーチンでも呼ばれる
+
 ## 終わる条件
 | # | 確かめること | 方法（コマンド・操作） | 設計の参照 |
 |---|---|---|---|
@@ -164,6 +174,10 @@ gateway の「移す元 → 移す先」（開いて確かめた。`apps/gateway
 | S5-26 | 依存の検査：資格情報を読めるのは `gateway/` の中だけ | `pnpm lint:deps` | ADR-051、NFR-072 |
 | S5-27 | `pnpm typecheck / test / lint:deps` が緑 | 同左 | 11 §11 |
 | S5-28 | 旧コードが消えている：`apps/gateway`・`apps/gcal`・`apps/github`・`packages/gateway-client`・`packages/db` | 5.7 の確かめ。`git ls-files` が空 | 07 の移すもの |
+| S5-29 | FR-101・D-341：`closed` では受け口があっても Funnel を付けない。tailnet の外から 8443 番につながらない。`closed` に切り替えたら外れる | 5.8 の確かめ (1) | FR-101・FR-096・D-341 |
+| S5-30 | D-342：`closed` では Web Push の行を作らず送らない。通知は SSE で出る | 5.8 の確かめ (2)（単体と実の端末） | FR-017・D-342・R-102 |
+| S5-31 | gateway の外向きが窓口 `net` を通り台帳に残る。`closed` で許可リストにない先は実行の前に断られる | 5.8 の確かめ (3) | FR-103・FR-101 |
+| S5-32 | D-389：`chatgpt_allow_auto = false` で、ルーチン・予約・webhook のターンとそこから振り分けたタスクが `openai_chatgpt` を呼ばない。チャットからは呼ぶ | 5.8 の確かめ (4)（偽の接続先の結合） | FR-116 の 6・FR-107・D-389 |
 
 ## 実装で決めること
 | 論点 | 設計の言い分 | おすすめ | 決めたら書く先 |
@@ -184,6 +198,8 @@ gateway の「移す元 → 移す先」（開いて確かめた。`apps/gateway
 | `provenance.ts`（承認の出どころの照合）を残すか | 設計に記述なし（旧 Node 版の `apps/gateway` の決まり） | 消す。SQLite にはロールの分離がなく、同じプロセスなので意味が薄い。`approved` のときだけ実行・`intentHash` の再計算・依存の検査で守る | ADR-051 の影響 |
 | 偽の MCP サーバーを使う旧 `flow.test.ts` の扱い | 11 §11 の結合は「偽の box-manager」 | 偽の Google・偽の GitHub の `fetch` を差し込む形に書き直す | 11 §11 |
 | 承認の期限と拾い直しの間隔 | 確認には期限がある。値は設計に書いていない | 旧コードの値：期限 24 時間・拾い直し 30 秒 | 09 の API-019、`gateway/approvals.ts` |
+| 自動のきっかけの割り当てが `openai_chatgpt` のときの扱い（D-389） | 自動のきっかけは家の中のモデルか API キーで動かす（FR-107 の 9）。一方 API-152 は「自動のきっかけで始まる仕事の役割は `openai_chatgpt` を選べない」とし、役割は 1 つの割り当てしか持たない | 割り当ては断らず（メインを ChatGPT にできないと非エンジニアの既定の道がなくなる）、実行のときにきっかけを `dropped`（`chatgpt_auto_off`）にして知らせる。自動のきっかけ用に別の割り当てを持たせるかは設計に戻す | FR-107 の 9・API-152・D-389 の補足 |
+| `closed` の通知を家の中の ntfy で出すか | 任意（FR-017・R-102） | 初版は SSE だけ。ntfy はステップ 9 の閉域の 1 日の試験で要るとわかったら足す | FR-017・R-102 |
 | 実機の Web Push の確かめ方 | iOS はホーム画面に追加した PWA だけ（ADR-067） | Android の Chrome と iOS の両方で 1 回ずつ。結果を NFR-086 の横に書く | NFR-086、導入手順書 |
 
 ## 設計に戻すこと
@@ -191,11 +207,12 @@ gateway の「移す元 → 移す先」（開いて確かめた。`apps/gateway
 - Funnel の付け外しの仕組み（本体 → `tailscale`）と ts.net の名前の取り方を決めたら、07 のコンテナ表と 11 §10 の環境変数の表に足す
 - API-136 の `source_key`、API-031 の `?test=1` の意味、API-121 の `deviceId` と SSE の結びつきを決めたら、09 の表に 1 行ずつ足す
 - Google が ts.net の戻り先を受けなければ、07 の外部連携と FR-081 を直す
+- D-389 の割り当てと実行の扱い（上の表）を FR-107 の 9・API-152 の `chatgpt_auto_off` にそろえて書き直す。
 - 00 の D-305 の横に、Funnel を通してパスの頭が落ちなかった結果を書く。NFR-086 の横に実測を書く
 
 ## 参照
 - 設計：[FR-094〜096・FR-017・FR-090・FR-091](../design/04_functional_spec/resident.md)、[FR-081・FR-083](../design/04_functional_spec/tools.md)、[TBL-041・044〜046・054・055](../design/08_database/resident.md)、[TBL-037](../design/08_database/vm.md)、[変える表](../design/08_database/README.md)、[API-121・125〜129・136・139・140・142](../design/09_api/resident.md)、[API-094・095](../design/09_api/vm.md)、[API 一覧（API-019・031・032・093・107・137）](../design/09_api/README.md)
-- 図・業務：[UC-057・056・054 4a のシーケンスと状態](../design/10_diagrams/sequences.md)・[states](../design/10_diagrams/states.md)、[UC-049・056・057 と BR-13](../design/03_use_cases.md)、[NFR-064・085・086](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)、[11 §10・§11](../design/11_tech_spec.md)、[決定事項ログ（D-203・207・221〜223・229・241・248・261・267・275・287・288・305・318・322）](../design/00_overview.md)
-- ADR：[ADR-051](../design/adr/ADR-051-gateway-in-core.md)・[ADR-065](../design/adr/ADR-065-webhook-funnel.md)・[ADR-067](../design/adr/ADR-067-web-push-first.md)・[ADR-069](../design/adr/ADR-069-daily-auto-budget.md)
+- 図・業務：[UC-057・056・054 4a のシーケンスと状態](../design/10_diagrams/sequences.md)・[states](../design/10_diagrams/states.md)、[UC-049・056・057 と BR-13](../design/03_use_cases.md)、[NFR-064・085・086](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)、[11 §10・§11](../design/11_tech_spec.md)、[FR-101・FR-116](../design/04_functional_spec/resident.md)、[決定事項ログ（D-203・207・221〜223・229・241・248・261・267・275・287・288・305・318・322）](../design/00_overview.md)
+- ADR：[ADR-051](../design/adr/ADR-051-gateway-in-core.md)・[ADR-065](../design/adr/ADR-065-webhook-funnel.md)・[ADR-067](../design/adr/ADR-067-web-push-first.md)・[ADR-069](../design/adr/ADR-069-daily-auto-budget.md)・[ADR-074](../design/adr/ADR-074-closed-network.md)・[ADR-084](../design/adr/ADR-084-sign-in-with-chatgpt.md)
 - 移す元のコード：`apps/gateway/src/`（`execute.ts`・`reads.ts`・`context.ts`・`mcp.ts`・`result-text.ts`・`origin.ts`）、`apps/gcal/src/`（`tools.ts`・`calendar.ts`・`slots.ts`）、`apps/github/src/`（`tools.ts`・`github.ts`）、`packages/gcal-core`・`github-core`・`gateway-client`、`apps/app/src/routes/connect.ts`・`connect-github.ts`・`approvals.ts`、`apps/app/src/connectors/`、`apps/app/src/check/`（`decide.ts`・`tick-step.ts`・`recheck.ts`）、`apps/app/src/tick.ts`、`apps/worker/src/db/repo/gateway.ts`・`edge/intents.ts`・`views/connectors/known.ts`、`packages/kernel/src/approvals.ts`（期限の計算の参考）
-- 前後のステップ：[03_core_port.md](03_core_port.md)（:8081 と `tailscale`）、[04_resident.md](04_resident.md)（受付・ターン・`push_outbox`）、[06_web.md](06_web.md)（購読と心拍の画面）、[07_terminal_pack_snapshot.md](07_terminal_pack_snapshot.md)（交代の通知はステップ 4 で `push_outbox` に書き、送るのは 5）、[08_release.md](08_release.md)（隔離の試験の通し・導入手順書）
+- 前後のステップ：[03_core_port.md](03_core_port.md)（:8081 と `tailscale`）、[04_resident.md](04_resident.md)（受付・ターン・`push_outbox`）、[06_web.md](06_web.md)（購読と心拍の画面）、[07_terminal_pack_snapshot.md](07_terminal_pack_snapshot.md)（交代の通知はステップ 4 で `push_outbox` に書き、送るのは 5）、[09_release.md](09_release.md)（隔離の試験の通し・導入手順書）
