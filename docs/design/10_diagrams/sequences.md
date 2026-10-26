@@ -1,5 +1,5 @@
 # 10. 図：シーケンス図
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[10 図](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[10 図](README.md)
 
 > **3行で**
 > 1. きっかけからターン・振り分け・報告まで（UC-054・055）・webhook（UC-057）・ルーチンの提案（UC-056）・オートレビュー（UC-059）・要約（UC-060：ターンを始めるときの 1 経路）・VM が起きて眠る（UC-061：`box-browser` と `box-shell` の 2 コンテナ）の 6 本を描いた。
@@ -181,7 +181,7 @@ sequenceDiagram
  R->>R: task_steps に started（費用を予約）。今の screen_epoch を覚える
  R->>C: messages（スクショつき）
  C-->>R: tool_use の列：left_click(812,604)・type("2名")・key(Enter)
- R->>R: task_steps に done（返った content をそのまま）
+  R->>R: 保存前秘密検査。安全なcontentのみdone保存（拒否時はFR-075で会話終了）
  loop 列の操作を並んだ順に
   R->>CU: 実行して
   CU->>CU: 直前の確かめ（タスク・世代・番・screen_epoch が覚えた値と同じ・control = agent・vm_op）
@@ -367,15 +367,20 @@ sequenceDiagram
   CORE->>BM: API-108 GET
  end
  alt 終わった
-  BM->>BM: 印ファイルを消す
+   BM->>BM: 操作IDつきdoneを永続保持（ACKまで）
   BM-->>CORE: done
-  CORE->>CORE: vm_op = none・vm_home_state = ok・監査 vm.restored
+   CORE->>CORE: vm_home_state = ok・監査 vm.restored・ACK待ちを一括確定
+   CORE->>BM: API-108 PATCH ACK（operationId）
+   BM-->>CORE: 204（成功の印を削除。再送可）
+   CORE->>CORE: vm_op = none・操作ID/ACK待ちを解放
  else 失敗した・打ち切った
   BM->>BM: 印ファイルを failed で残す
   BM-->>CORE: failed
-  CORE->>CORE: vm_op = none・vm_home_state = broken・監査 vm.restore_failed
+   CORE->>CORE: broken・失敗監査・ACK待ちを一括確定
+   CORE->>BM: API-108 PATCH ACK（brokenの印は保持）
+   BM-->>CORE: 204
+   CORE->>CORE: vm_op = none・操作ID/ACK待ちを解放
   CORE-->>O: 「ホームが壊れています。控えに戻すか作り直してください」
  end
  CORE-->>W: SSE vm.updated
 ```
-

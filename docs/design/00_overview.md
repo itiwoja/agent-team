@@ -1,5 +1,5 @@
 # 00. プロジェクト概要
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ インプット：ヒアリング（2026-10-23・24）、[参考資料/](../../参考資料/index.md)（GrokBot の講義の解説動画）、v0.6 の設計書、`apps/worker`・`apps/web` の実装
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ インプット：ヒアリング（2026-10-23・24）、[参考資料/](../../参考資料/index.md)（GrokBot の講義の解説動画）、v0.6 の設計書、`apps/worker`・`apps/web` の実装
 
 > **3行で**
 > 1. Agent-Team-Open を**常駐型**にする。持ち主は自分の Linux ホストに `docker compose up` で置き、PC やスマホから Tailscale 経由で、1 本のチャットで**メイン**のエージェントと話す。メインは小さな質問に自分で答え、重い仕事は用途に合うエージェントへ**裏で振り分け**、短い報告だけを受け取る。
@@ -326,6 +326,17 @@ flowchart LR
 | D-326 | ブラウザとターミナルを別のコンテナ（`box-browser`・`box-shell`）にする。起動役・資格・ホスト前提の検査をやめる。egress は送り元のコンテナで分ける。`shell:8000` を点検に使う。`--no-sandbox` に逃げてよい | ユーザー | 同居させて利用者を分ける仕掛けが R-95・R-96・R-99 を生んだ | FR-074・079・086・100、NFR-062・066・075、07、R-100 | [ADR-068](adr/ADR-068-browser-shell-split.md) |
 | D-327 | 本体の再起動では必ず新しい VM の世代で起こし直す。「同じ世代を使い続ける」の分岐を消す | ユーザー | 再開の分岐が多い | FR-084、API-103・117 | — |
 | D-328 | Web Push の送り待ち表（`push_outbox`）はそのまま残す | Claude判断 | 再送が要る。削ると通知が落ちる | TBL-055 | [ADR-067](adr/ADR-067-web-push-first.md) |
+| D-329 | IMP-001：ブラウザ/シェル資格を世代ごとに独立生成し相互拒否 | 承認済み改善案 | シェルからのブラウザ権限迂回を防ぐ | FR-086、07、API-103・106・117 | ADR-068の隔離を具体化 |
+| D-330 | IMP-002：秘密入力は交代専用。AI再送原本は保存せず、混入応答は全体拒否・会話終了 | ユーザー明示決定 | 秘密非保存を履歴原本保存より優先 | FR-075・078・098、TBL-038 | [ADR-071](adr/ADR-071-human-only-secrets.md) |
+| D-331 | IMP-003：全可視秘密領域を撮影前マスク、保証不能は画像保存/送信停止・人へ要求 | ユーザー明示決定 | 操作対象以外からの画像漏洩を防ぐ | FR-075、API-105 | ADR-071 |
+| D-332 | IMP-004：実効送信先をinspect/表示/ハッシュ/直前比較に含め、秘密URLは交代 | 承認済み改善案 | 宛先だけの変更による承認迂回を防ぐ | FR-077、TBL-039、API-103・110 | — |
+| D-333 | IMP-005：操作IDで未受付/実行中/終了を照合、DB確定後ACKまで結果保持 | 承認済み改善案 | 高速完了と再起動で結果を失わない | FR-084・100、TBL-031、API-108 | [ADR-073](adr/ADR-073-durable-vm-operation-results.md) |
+| D-334 | IMP-006：消去もclearing_browserで排他・操作ID/ACK、失敗はbroken | 承認済み改善案 | 復元/控えとの競合を防ぐ | FR-079、API-138・144、TBL-031 | ADR-073 |
+| D-335 | IMP-007：allowed仮行→確認/レビュー→verdict/参照同時更新を一括commit | 承認済み改善案 | FK/CHECKを満たし仮状態を公開しない | FR-077・099、TBL-033・039・051 | — |
+| D-336 | IMP-008：固定本文①〜⑤を永続化し保存本文から再開 | 承認済み改善案 | 設定変更後も履歴を再現 | FR-098、TBL-053 | ADR-066の永続化を具体化 |
+| D-337 | IMP-009：副作用確定/不明後のLLM失敗は停止通知、元依頼を再受付しない | ユーザー明示決定 | 新tool_call_idによる重複を防ぐ | FR-091、TBL-041・042・055 | [ADR-072](adr/ADR-072-stop-after-side-effects.md) |
+| D-338 | IMP-010：動的VMを導入labelで停止/削除、非使用確認後コピー | 承認済み改善案 | Compose外の書き手を確実に止める | NFR-070、11運用契約 | — |
+| D-339 | IMP-011：ComposeとVM2イメージのdigest一組を公開し明示pull | 承認済み改善案 | 新規/更新ホストでVMを起動可能にする | FR-074、NFR-077、11運用契約 | — |
 
 </details>
 
@@ -385,18 +396,5 @@ flowchart LR
 
 </details>
 
-### ドキュメント索引
-| ファイル | 中身 |
-|---|---|
-| [README.md](README.md) | 読む入口 |
-| [01_requirements.md](01_requirements.md)〜[03_use_cases.md](03_use_cases.md) | 要件定義・ユーザーストーリー・ユースケース |
-| [04_functional_spec/](04_functional_spec/README.md) | 機能仕様（常駐の仕組み・VM と確認・道具とそのほか） |
-| [05_non_functional.md](05_non_functional.md)・[06_ux_design.md](06_ux_design.md)・[07_architecture.md](07_architecture.md) | 非機能要件・画面・アーキテクチャ |
-| [08_database/](08_database/README.md)・[09_api/](09_api/README.md)・[10_diagrams/](10_diagrams/README.md) | DB・API・図 |
-| [11_tech_spec.md](11_tech_spec.md) | 技術仕様書 |
-| [adr/](adr/) | ADR-041〜070 |
-| [changes/](changes/) | 変更レポート |
-| [../oss-and-business.md](../oss-and-business.md) | OSS 方針と事業化の整理（設計書の外。ADR-055 の元） |
-
-## このドキュメントで決まったこと
-- D-121〜D-328（上の決定事項ログ）。v1.4（過剰な設計を削る）は D-315〜D-328。v1.0 の決定は D-200〜D-240、v1.1（レビューの反映）は D-241〜D-274、v1.2（v1.1 の直しの読み直し）は D-275〜D-310
+### ドキュメント索引・決定
+読む順と各文書の索引は[README](README.md)。今回の決定はD-329〜339、影響IDと受入条件は[変更レポート](changes/2026-10-25-p1-review-fixes.md)。既存決定D-121〜328は上のログに保持する。

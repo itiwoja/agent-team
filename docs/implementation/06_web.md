@@ -1,5 +1,5 @@
 # ステップ 6. 画面
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-24） ／ 設計の版：v1.4 ／ インプット：[06 画面・UX設計](../design/06_ux_design.md)、[09 API設計](../design/09_api/README.md)（[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)）、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[ADR-067](../design/adr/ADR-067-web-push-first.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[06 画面・UX設計](../design/06_ux_design.md)、[09 API設計](../design/09_api/README.md)（[resident](../design/09_api/resident.md)・[vm](../design/09_api/vm.md)）、[FR-017・093・089](../design/04_functional_spec/resident.md)、[FR-077・078・100・079](../design/04_functional_spec/vm.md)、[FR-073・083・085](../design/04_functional_spec/tools.md)、[ADR-067](../design/adr/ADR-067-web-push-first.md)
 
 > **3行で**
 > 1. スマホから頼む・見る・確認する・タップで交代するところまでが、`apps/web` だけでできるようになる。ステップ 3〜5 で curl が通った API（09 の画面向けの一覧）を、06 の 10 画面につなぐ。ステップ 7 で作る API（114〜116・133〜135・138）は、このステップでは画面の骨と `qa/` の架空データで作り、実 API での確かめはステップ 7。
@@ -56,6 +56,7 @@
 | 新規 | 足す | `screens/Task.tsx`・`Vm.tsx`・`Settings.tsx`・`Memory.tsx`・`Triggers.tsx`・`components/VmScreen.tsx`・`TaskBand.tsx`・`lib/uuidv7.ts`・`lib/push.ts`・`lib/presence.ts`・`lib/reasons.ts`・`public/sw.js`・`public/manifest.webmanifest` |
 
 ## 手順
+P1の画面契約：T-1は通常の承認でなく交代カード。API-087のeffectiveActionを確認カードに表示する。画像不明は画像なしの対応要求、FR-091のsystem通知は確定済み/未完了/結果不明を分けて表示する。受入は[IMP-002〜004・009](../design/changes/2026-10-25-p1-review-fixes.md)（SCR-019・020・022）。
 ### 6.1 土台（API の呼び方・合図で取り直す・経路）
 1. `api.ts` の `request` を直す。GET 以外に `X-Makase-Request: 1` を付ける。`Origin` はブラウザが付ける。`csrfToken`・`CSRF_TOKEN_INVALID` の再試行・`/entry`・`/logout` を消す。`describeError` は 09 のエラーコード表（`BOX_RUNNING`・`SCREEN_IN_USE`・`MAIN_AGENT`・`TASK_NOT_ACTIVE`・`ROUTINE_LIMIT`・`SCHEDULE_INVALID`・`MEMORY_FULL`・`VM_BUSY`・`DISK_LOW`・`CHECK_NOT_PENDING`・`PACK_*`・`CONTROL_IN_USE` ほか）に合わせて決まった文に入れ替える
 2. 型は 09 の応答の例から手で写す（今と同じ。zod の契約は出ていない）。依頼・チェックの旧い型（`AskDetail`・`StageView`・`CheckItem` の報告と質問・`DoneItem` ほか）を消す

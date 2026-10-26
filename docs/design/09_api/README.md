@@ -1,5 +1,5 @@
 # 09. API設計
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ インプット：[04_functional_spec](../04_functional_spec/README.md)、[06_ux_design](../06_ux_design.md)、`apps/worker/src/routes`
 
 > **3行で**
 > 1. 画面向けの API は `/api/v1`（:8080・tailnet だけ）。依頼の API（API-072〜077・084）はやめ、チャット・タスク・きっかけ・記憶・VM・通知の API を足した。詳細は [resident.md](resident.md)（新しい API）と [vm.md](vm.md)（引き継ぐ API）。
@@ -57,6 +57,9 @@ flowchart LR
 | `BOX_NOT_RUNNING` | 409 | VM が止まっている |
 | `BOX_RUNNING` | 409 | VM が動いている（ホームを入れ替えられない） |
 | `SCREEN_IN_USE` | 409 | 画面の番が使われている（ブラウザのデータを消せない） |
+| `SECRET_INPUT_REQUIRES_TAKEOVER` | 409 | 秘密入力はAI実行せず人に交代 |
+| `SECRET_REGIONS_UNVERIFIED` | 409 | 全可視秘密領域を保証できず画像保存/送信を停止 |
+| `OPERATION_CONFLICT` | 409 | 同じ操作IDで引数が異なる |
 | `MAIN_AGENT` | 409 | メインは消せない |
 | `TASK_NOT_ACTIVE` | 409 | 終わったタスクに言い直そうとした |
 | `ROUTINE_LIMIT` | 409 | ルーチンが 20 本ある |

@@ -1,5 +1,5 @@
 # 07. システムアーキテクチャ
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ インプット：[04_functional_spec](04_functional_spec/README.md)、[05_non_functional](05_non_functional.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ インプット：[04_functional_spec](04_functional_spec/README.md)、[05_non_functional](05_non_functional.md)
 
 > **3行で**
 > 1. 1台の Linux ホストの上で、Docker Compose で 7 種類のコンテナを動かす：Tailscale・本体・box-manager・Docker の中継・egress・box-browser・box-shell（この2つの組が VM。持ち主に 1 台。止めても残るホームのボリュームつき）。
@@ -205,10 +205,11 @@ webhook を使うときは、tailnet の ACL で `makase` に `funnel` の属性
 | ホストへの入り（任意） | `isolated` モードが使えない版では、box ネットワークのブリッジからホストへの入りを捨てる規則を 1 行入れることを勧める | 隔離の試験（11 §11） |
 
 ### 認証・認可方式
+- 復元/作り直し/消去の操作ID・running/done/failed・ACK/broken印は `makase-vm-snapshots` 内のmanager専用 `.operations/` に原子的置換＋永続化して保持する。控えの世代整理・ホーム消去では触らず、VMにはマウントしない。ACK済みIDは再POST実行を防ぐため小さな墓標として保持し、結果削除後の同ID POSTは409 OPERATION_CONFLICT。新しい操作IDだけを受ける（IMP-005・006）。
 - 持ち主の確かめは FR-073。`tailscale serve` が付ける `Tailscale-User-Login` を、`OWNER_LOGIN` と比べる（:8080 だけ）
 - webhook の口（:8081）：受け口ごとの署名の秘密で HMAC を確かめる（FR-096）
 - 本体 ↔ box-manager：共有トークン（`BOX_MANAGER_TOKEN`、`.env`）
-- box-manager ↔ VM：VM の世代ごとに作るトークンを、起こすときに 2 つのコンテナの管理の口（box-agent・shell-agent・VNC）に環境変数で渡す
+- box-manager ↔ VM：世代ごとに独立な `BROWSER_TOKEN` と `SHELL_TOKEN` を生成。前者はbox-browserのbox-agent/VNCとmanagerだけ、後者はbox-shellのshell-agentとmanagerだけに渡す。相互利用・旧世代は拒否。環境変数削除は境界とみなさず、シェルから初期環境が読めてもブラウザ資格は存在しない（IMP-001）
 - VM ↔ egress：送り元のコンテナのアドレスで分ける。box-manager が世代を起こすとき、2 つのコンテナのアドレスを egress に伝える。知らない送り元は断る
 - 認可：持ち主1人なのでロールは持たない。エージェントの道具の範囲は役（メイン・振り分け先）で分ける（[04 権限マトリクス](04_functional_spec/README.md#権限マトリクス)）
 

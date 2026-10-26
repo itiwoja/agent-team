@@ -1,5 +1,5 @@
 # 10. 図：状態遷移図
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[10 図](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[10 図](README.md)
 
 > **3行で**
 > 1. `wakes.status` は `queued`・`consumed`・`dropped` の 3 つ。`turns.status` の `halted` には `context_exceeded`（入力が 20 万トークン超）がある。
@@ -13,8 +13,8 @@
 stateDiagram-v2
  [*] --> queued : 受付（source_key が重複なら行を作らない。webhook が 1 分 60 件を超えたら 429 で行を作らない）
  queued --> consumed : ターン・タスクに渡した
- consumed --> queued : 失敗したターンから戻す（2 回まで）
- consumed --> dropped : 3 回目の失敗（retry_exceeded）
+ consumed --> queued : 副作用未発生を証明できる失敗だけ（2 回まで）
+ consumed --> dropped : 副作用なしの3回目の失敗（retry_exceeded）
  queued --> dropped : 日次の上限（ルーチン・予約・webhook だけ）・行き先がない
  consumed --> [*]
  dropped --> [*]
@@ -27,7 +27,7 @@ stateDiagram-v2
  running --> running : 歩む（動いている間に来たきっかけは queued のまま）
  running --> done : 道具を呼ばずに終わった・記憶を更新した
  running --> halted : $1・40 歩・10 分・日次（daily_budget_exceeded）・入力が 20 万トークン超（context_exceeded）
- running --> failed : LLM の失敗（3 回）
+  running --> failed : LLM の失敗（3 回）。副作用確定/不明なら元wakeはconsumed維持・停止通知
  done --> [*] : 眠る
  halted --> [*]
  failed --> [*]
@@ -141,11 +141,13 @@ stateDiagram-v2
  none --> snapshotting : 毎日の控え・今すぐ（VM を止めてから）
  snapshotting --> none : 書き終えた（ready）・失敗（failed。古い控えは残す）・30 分を超えて打ち切った
  none --> restoring : API-134（VM を使ったタスクを halted）
- none --> rebuilding : API-135（同じ）
- restoring --> none : 終わった（vm_home_state = ok）
- rebuilding --> none : 終わった（vm_home_state = ok）
- restoring --> none : 失敗・30 分を超えて打ち切った（vm_home_state = broken）
- rebuilding --> none : 失敗・30 分を超えて打ち切った（vm_home_state = broken）
+  none --> rebuilding : API-135（同じ）
+  none --> clearing_browser : API-138（番/交代なし・ok・条件付き取得）
+  clearing_browser --> none : 結果DB確定とACK完了（失敗/30分打切りはbroken）
+  restoring --> none : 結果DB確定とACK完了（vm_home_state = ok）
+  rebuilding --> none : 結果DB確定とACK完了（vm_home_state = ok）
+  restoring --> none : 失敗/打切りのDB確定とACK完了（broken）
+  rebuilding --> none : 失敗/打切りのDB確定とACK完了（broken）
  note right of restoring
   本体の再起動では box-manager に聞く（API-108 の GET）。
   動いていれば待ち、box-manager も落ちていれば印ファイルから最初からやり直す。
@@ -161,7 +163,7 @@ stateDiagram-v2
 ```mermaid
 stateDiagram-v2
  [*] --> ok
- ok --> broken : 戻し・作り直しに失敗した・打ち切った
+  ok --> broken : 戻し・作り直し・消去に失敗した・打ち切った
  broken --> ok : 戻し・作り直しが終わった
 ```
 `broken` の間は戻す・作り直すだけを受ける（FR-100）。ホームが 4GB を超えたときは box-manager が VM を止め（`stop_reason = 'disk_quota'`）、超えている間はタスクのために VM を起こさない。持ち主はブラウザのデータを消す（FR-079）・控えに戻す・作り直す（FR-100）のどれかで戻す。

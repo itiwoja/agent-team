@@ -1,5 +1,5 @@
 # ステップ 2. こわい操作
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-24） ／ 設計の版：v1.4 ／ インプット：[FR-076・077・099](../design/04_functional_spec/vm.md)、[UC-046・047・059 と BR-06・10・11・14](../design/03_use_cases.md)、[VM の DB（TBL-033・035・039）](../design/08_database/vm.md)、[常駐の DB（TBL-051）](../design/08_database/resident.md)、[VM の API（API-103・104・110）](../design/09_api/vm.md)、[シーケンス図](../design/10_diagrams/sequences.md)、[状態遷移図](../design/10_diagrams/states.md)、[11 技術仕様 §8・11・12](../design/11_tech_spec.md)、[ADR-047](../design/adr/ADR-047-risky-action-check.md)・[ADR-052](../design/adr/ADR-052-browser-checks-table.md)・[ADR-064](../design/adr/ADR-064-auto-review.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[FR-076・077・099](../design/04_functional_spec/vm.md)、[UC-046・047・059 と BR-06・10・11・14](../design/03_use_cases.md)、[VM の DB（TBL-033・035・039）](../design/08_database/vm.md)、[常駐の DB（TBL-051）](../design/08_database/resident.md)、[VM の API（API-103・104・110）](../design/09_api/vm.md)、[シーケンス図](../design/10_diagrams/sequences.md)、[状態遷移図](../design/10_diagrams/states.md)、[11 技術仕様 §8・11・12](../design/11_tech_spec.md)、[ADR-047](../design/adr/ADR-047-risky-action-check.md)・[ADR-052](../design/adr/ADR-052-browser-checks-table.md)・[ADR-064](../design/adr/ADR-064-auto-review.md)
 
 > **3行で**
 > 1. ステップ 1 の CLI が、変える操作の前に合図を判定し、人の ○/× かオートレビューを通ってから 1 回だけ実行するようになり、判定と行き先を eval で毎回確かめられる。
@@ -33,7 +33,7 @@
 5. `type` の改行（`\n`・`\r`）は T-4 と同じ判定にする（D-157）。`open_url` は `http`・`https` 以外を断り（D-158。ここは判定ではなく入力の検査）、確認するドメインへのときだけ T-2。T-4 は修飾キーつきの Enter も含み Shift+Enter だけ当たらない（D-297）。T-7 は `submitsForm` が true で `formMethod` が `get`・`dialog` 以外（D-298）
 6. `left_mouse_up`・`left_click_drag` の離す点は、押した点の判定を呼び出し側が覚えて引き継ぐ（関数は押した点の結果を入力に受ける）
 7. 行き先の表（BR-14）は 1 つの表（定数）にして、合図の組み合わせから引く。1 つでも人の行があれば人。`auto_review.enabled = false` なら行き先がオートレビューのものも人にする
-8. 秘密の欄の判定（T-1）は、確認や記録で使う「置き換え」とそろえる：`password`・`autocomplete` の 5 値の先への `type`・`key` は `args` の文字を `***` にする関数も同じファイルに置く
+8. T-1は交代専用。秘密をAIへ要求せず、秘密入力応答は保存前に全体を拒否し `secret_rejected` で会話を閉じる（FR-075）。署名つき原本の部分マスク再送は禁止。秘密なしのT-1操作も通常承認でなく交代要求にする（IMP-002）
 確かめ：`pnpm --filter @open-team/kernel test` で `browser.test.ts` の最初の数件（T-1・T-3）が通り、`pnpm --filter @open-team/kernel typecheck` が通る。`allow` の操作が 1 つも `approve` にならない見るだけの操作の例もある
 
 ### 2.2 単体テストを 11 §11 から全部並べる
@@ -47,7 +47,7 @@
 この DB は試験用で、ステップ 3 で `apps/makase/src/guard/` に取り込んで消す。DDL と状態機械の関数は `WsDb` を受ける形で書く。
 1. `packages/browser-guard` を作る（`better-sqlite3` を足す。`pnpm-workspace.yaml` の `onlyBuiltDependencies` に足す必要があるか確かめる。公開から 3 日未満の版は入らない）。旧 `approvals.ts` の 24 時間の期限は旧コードの値で、ここでは使わない（確認の期限は 30 分）。DB は 1 ファイル（例 `./data/guard.sqlite`）。`foreign_keys=ON`
 2. 表を TBL-033・039・051 の列どおりに作る。外部キーの先（`tasks`・`boxes`）はまだ本体にないので、最小の `boxes`（`id`・`screen_task_id`・`screen_epoch`・`control`・`vm_op`・世代）と仮の `tasks`（`id`・`status`）をこの DB に置く。名前と列は本体と同じにして、ステップ 3 で本体の DB に合流できる形にする
-3. `browser_actions` と `browser_checks` の相互参照（`check_id` と `action_id`）は、操作の行（`check_id` NULL）→ 確認の行 → 操作の `check_id` を UPDATE の順で入れる。制約（`status = 'expired'` ⇔ `expire_reason IS NOT NULL` など）は CHECK で書く
+3. TBL-039の順序を厳守：同一トランザクションでallowed・参照NULLの仮行 → 確認/レビュー → verdictと参照IDの同時UPDATE。commit前は実行/通知禁止。CHECK・外部キーを緩めない。人への回し直しも一括commitし、各段階の故障注入で全体rollbackを試験（IMP-007）
 4. 確認を作る関数：中身（操作の引数・世代・タブとフレーム・先・フォームの値の要約・URL）から `content_hash` を作り、`screen_epoch` を `boxes` から写し（D-299）、期限を 30 分にし、タスクを `awaiting_approval` にする。スクショは DB の外のファイルに置く（`screenshot_path`）。秘密の欄の文字は `browser_actions`・`browser_checks` のどちらにも `***` で入れる
 5. 直前の確かめを 1 つの関数にする（FR-075 の 3a）：タスクの状態・世代・画面の番と `screen_epoch`・`control = agent`・`vm_op = none` を 1 つのトランザクションで読み、外れた理由（`task_cancelled`・`box_restarted`・`screen_lost`・`taken_over`・`vm_replaced`）を返す。見るだけでない操作の実行・列の残り・`pass`・○ のすべてがこの関数を通る形にする
 6. ○ の処理（API-110 の中身）：直前の確かめと `pending → executing` を 1 つのトランザクションで行う（`WHERE status = 'pending'` の条件つき UPDATE。0 行なら `CHECK_NOT_PENDING`）。外れたら `expired`（その理由）。その外で box-agent に `expect: contentHash` と `actionId` つきで頼み、答えで `executed`・`expired`（`page_changed`）・`unknown_outcome` に変える。× は `rejected`、30 分は `expired`（`approval_timeout`）
@@ -57,7 +57,7 @@
 確かめ：`pnpm --filter @open-team/browser-guard test` が緑。同じ確認に ○ を 2 回送ると 2 回目が `CHECK_NOT_PENDING`、偽の box-agent の実行回数が 1 のまま
 
 ### 2.4 オートレビュー
-1. 行き先が `auto_review` のとき：`browser_actions` に `verdict = 'reviewed'` で入れ、`auto_reviews` に行を作る（`verdict` は NULL）。印つきのスクショを作る（押す場所の印。秘密の欄の `rect` は塗る：D-162）
+1. auto_reviewは2.3の仮行→レビュー→verdict/参照同時更新を使う。撮影はFR-075の全可視秘密領域の撮影前マスク。特定不能なら画像もレビュー呼出しも止め人へ対応要求（IMP-003・007）
 2. 道具なしの Claude を、`packages/llm/src/claude.ts`（ステップ 1 で移したもの）に user のメッセージへの画像と構造化出力を足して、1 回呼ぶ。モデルは `CLAUDE_REVIEW_MODEL`（既定 `claude-sonnet-5-5`）。渡すものは FR-099 の表の 5 つだけ（決まりの文・`brief`・操作・確かめた中身・スクショ 1 枚）。エージェントの会話・手順書は渡さない。ページから来たもの（題・欄の名前と値・スクショ）は `wrapUntrusted`（`untrusted.ts`）で `<untrusted>` の枠に入れる。タスクが汚染していれば `brief` に「外の内容をもとに書かれた可能性がある」と添える
 3. 答えは構造化出力（`output_config.format`。上で `packages/llm/src/claude.ts` に足したもの）で `{ verdict: "pass" | "stop", reason }`（200 字まで）を受ける。20 秒・形が違う・呼び出しの失敗・`refusal` は `stop` とみなし `auto_reviews.verdict = 'error'` にする。費用（`cost_micro_usd`）を記録する
 4. `pass` → 直前の確かめ（2.3 の 5）をしてから `expect: contentHash` つきで実行する。結果は人の ○ と同じ表（中身が違えば実行せず、新しいスクショで決め直させる）。`stop`・`error` → 理由を `browser_checks.review_reason` に入れて人の確認（2.3 の 4）を作り、`auto_reviews.check_id` を埋める
@@ -68,6 +68,7 @@
 
 ### 2.5 CLI のループに差し込み、実の VM の試験ページで確かめる
 #### 2.5.a box-agent の `inspect`・`dryRun`・`expect`
+IMP-004：API-103のeffectiveAction（submitterのformaction優先、絶対URL）をinspect・確認表示・canonicalJson・直前比較へ追加。actionだけ/formactionだけの変更を別々に試験し実行0/CONTENT_CHANGEDを確認。秘密URLは保存/表示せず交代する。
 1. box-agent に `inspect`（API-104）と `dryRun`・`expect`（API-103）を足す：`DOM.getNodeForLocation` で一番上のフレームの要素を引き、同じ出どころの iframe は中へたどり、ほかの出どころ・canvas・JS のダイアログは `unresolvedKind` で返す（[07 画面の座標と CDP の対応](../design/07_architecture.md#vm-の中身)）。`submitsForm`・`formMethod`・`editable`・`clickable`・祖先の名前・`contentHash` を返す（D-298）。`expect` が今の `contentHash` と違えば実行せず 409 `CONTENT_CHANGED`（D-159）。`actionId` の冪等はステップ 1 のまま
 確かめ：ステップ 1 の試験ページ（購入ボタン・同じ出どころの iframe・canvas・JS のダイアログ）に `curl` で box-agent を直に叩く。`dryRun` が実行せず `inspect` を返す。同じ出どころの iframe の中の要素が引け、canvas・ダイアログは `unresolvedKind` で返る。`expect` に違う `contentHash` を付けると 409 `CONTENT_CHANGED` で何も実行されない。
 
@@ -79,7 +80,7 @@
 #### 2.5.c CLI への差し込みと ○/×
 1. CLI のループに差し込む：変える操作ごとに、API-103 の `dryRun`（または API-104）で `inspect` を取る → `judgeBrowserAction` → `allow` なら `expect: contentHash` つきで実行／`approve` なら列をここで止め、残りの操作には「前の操作の確認を待っているので実行していない」を返す。見るだけの操作はそのまま実行する。`confirm_action` を道具として CLI に足し、直前の道具が `confirm_action` なら申告として渡す
 2. 確認は CLI の端末で ○/× を受ける（画面はステップ 6）。待つ間は `awaiting_approval` にし、30 分の期限・`paused_ms` 相当の時間は数えない。オートレビューは実の API を呼ぶ
-3. 渡すスクショ（S2-27）：保存するスクショと Claude に送るスクショの両方に、秘密の欄の `rect` を黒で塗る関数（2.4 の 1 のオートレビュー用の塗りと同じもの）を適用する。Claude への要求に `context_management`（`clear_tool_uses_20250919`。直近 `browser.keep_screenshots`、既定 3、より前の道具の結果を消させる。履歴は追記だけで手元では消さない）を入れる。ステップ 1 の CLI が固定で入れていた 3 は、この値から読む形に直す
+3. 全画像経路をFR-075の撮影前マスクに統一する。操作対象rectでなく全可視秘密領域を列挙し、iframe・zoom・交代終了・撮影だけでも適用。不完全なら撮影/保存/送信を停止して人へ要求。context editingは安全に保存された履歴だけに適用し `keep_screenshots` を読む（IMP-003）
 4. S2-27 のテスト：偽の Claude で要求の本文を捕まえ、`context_management` があり残す数が `keep_screenshots` と同じこと、送った画像と保存した画像の秘密の欄の位置が塗られていること（パスワード欄の試験ページ）を確かめる
 確かめ：偽の Claude を使った CLI のループのテストが緑（S2-27 を含む）。端末で ○ を押すと 1 回だけ実行され、× では実行されない。`keep_screenshots` を 5 にすると要求の値も 5 になる。
 
@@ -137,7 +138,7 @@
 |---|---|---|---|
 | `inspect` に足す判定の材料の形（`submitsForm`・`formMethod`・`editable`・`unresolvedKind`・`clickable`・`rect`） | D-298 で欄の名前は決まったが、型の細部（`formMethod` の値、祖先の名前の持たせ方、`rect` の座標系）は書いていない | `BrowserInspect` を `browser.ts` に zod で置き、box-agent の出力を本体の境界で検査する。検査に落ちたら `unresolvedKind = outside` として人に回す。`formMethod` は `get`・`post`・`dialog`・null。祖先の名前は `ancestorNames` の配列 | 09 の API-103 の inspect の例、D-xxx |
 | `content_hash` を誰が作るか | TBL-039 は `action`・`content`・`box_id` から sha256、API-103 は box-agent の `contentHash` と比べる | 材料の正規化（`canonicalJson`）を Kernel に置き、box-agent も同じ関数を import する。本体は box-agent の `contentHash` をそのまま `content_hash` に保存 | TBL-039、D-xxx |
-| オートレビューに渡すスクショの大きさと塗りつぶし | 押す場所の印つき 1 枚。秘密の欄は塗る（D-162）。大きさは書いていない | 1280×800 の PNG をそのまま（NFR-067 の縮めない方針）。秘密の欄の `rect` を黒で塗ってから印を描く。保存用と Claude に送る用は同じ画像 | FR-099、D-162 の横 |
+| オートレビュー画像 | 1280×800のPNG。全可視秘密領域を撮影前マスク | FR-075の完全性検査を通った同じ画像を保存/送信。対象rectだけのマスクは禁止。失敗なら撮影しない | D-331 |
 | 試験ページをどこに置き、どう配るか | 11 §11 は「決まった試験ページ」 | ステップ 1 の 1.6 の表が正（一覧と配り方）。ステップ 2 は「ステップ 2 で足す」の行を足すだけで、置き場は `evals/pages/` | 11 §11 の VM の行、`01_vm_vertical.md` の 1.6 |
 | `browser_checks`・`auto_reviews` の表をこのステップで SQLite に作るか | 本体の DB はステップ 3 | 作る。`packages/browser-guard` に `better-sqlite3` の小さな DB を置き、列名・制約を TBL-033・039・051 と同じにしてステップ 3 で本体の DB に合流 | 08 の vm.md の TBL-039 の横、`03_core_port.md` |
 | `browser-guard` を新しい部品として作るか | 置き場の表（親のおすすめ）に無い | 作る（純粋でない部分を Kernel に混ぜないため）。ステップ 3 で `apps/makase` に取り込むか、パッケージのまま使う | README の置き場の表 |

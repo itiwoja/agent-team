@@ -1,5 +1,5 @@
 # 04. 機能仕様：VM とこわい操作
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[04 機能仕様](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[04 機能仕様](README.md)
 
 > **3行で**
 > 1. VM は持ち主に 1 台。実体は 2 つのコンテナ（`box-browser`・`box-shell`）の組で、道具を使うときに一緒に起き、10 分使わなければ一緒に眠る（FR-074・ADR-068）。画面は 1 つで、画面を使うタスクは番を取る。ファイルとログインは 2 つのボリュームに残り、控えから戻せる（FR-079・FR-100）。
@@ -52,12 +52,13 @@ flowchart TD
 
 ### FR-079：ブラウザのデータ
 - Chrome のプロフィールは `box-browser` のボリューム `makase-browser-profile`（`/home/browser`）に 1 つ（全エージェントで共通。D-205）。使うのは利用者 `browser` だけで、`box-shell` にはつながない（別コンテナ）
-- 消す：持ち主が設定の VM の欄で「ブラウザのデータを消す」（API-138）。画面の番が使われている間は 409 `SCREEN_IN_USE`。box-manager が世代を止め、`makase-browser-profile` のボリュームを空にして、次に起こす
+- 消す（IMP-006）：API-138 は同一トランザクションで画面の番・交代なし、`vm_home_state = ok`、`vm_op = none` を確認し、`clearing_browser` と操作IDを取得する。番があれば 409 `SCREEN_IN_USE`、他の操作中は 409 `VM_BUSY`。API-144 は世代を止め切ってからプロフィールを空にする。box-manager も起動・控え・復元・消去に共通の排他を持つ。再起動・完了確認・ACK は FR-100 の操作ID契約に従い、停止確認なしに排他を解放しない。失敗・30分超の打ち切りは `broken` として戻す・作り直すだけを許す
 - ホームが 4GB を超えたときの戻り方の 1 つでもある（FR-074 の容量）
 - エージェントを消しても消えない（BR-07）
 
 ### FR-075：コンピューターユースの操作
 - 道具：Claude の computer use ツールと、Agent-Team-Open の道具 `open_url`・`read_page`・`confirm_action`・`request_takeover`。振り分け先のエージェントだけが持つ（メインには渡さない：D-236）
+ - LLM応答の保存前検査は入力先のinspectも用いる。操作列の先行操作に依存して秘密入力でないと確認できない文字入力も、応答を保存/実行せず拒否する。秘密検査を実行後の記録処理まで遅らせない。返却内容の本文を含むデバッグログはこの検査の前に出さない（IMP-002）
  - 使う前に画面の番を取る（FR-074）。番がなければ、本体が取ってから最初の歩みを返す
  - `confirm_action(target, summary, category)`：`category` は `publish`・`pay`・`delete`・`send`・`account`・`other`（D-228）。行き先は FR-076 の表
  - computer use ツールは `computer_toolset_20260801`（名前も画面の大きさも渡さない。座標は返したスクショの画素で数える）
@@ -80,7 +81,8 @@ flowchart TD
    | 画面の番をそのタスクが持ち、`screen_epoch` が LLM を呼んだときと同じ（確認からなら確認に写した `screen_epoch` と同じ。D-299） | `screen_lost` |
    | `boxes.control = 'agent'` | `taken_over` |
    | VM の操作がない（`vm_op` が `none`）・タスクが戻す・作り直すで止められていない | `vm_replaced` |
- 4. `browser_actions`（TBL-033）に記録する。秘密の欄への文字は、記録するすべての場所（`browser_actions`・`task_steps`・`browser_checks`）で `***` に置き換える。秘密の欄（T-1 の対象）の領域は、box-agent が確かめたときの `rect` を使い、保存するスクショと Claude に送るスクショの両方で塗りつぶす（サイトがマスクしないカード番号も画像に残さない。D-162）
+  4. 秘密入力は人への交代専用（IMP-002）。T-1 は通常の ○/× にせず `request_takeover` 相当で待つ。AI に秘密を要求・実行させず、再送用秘密原本も保存しない。LLM 応答は永続化前に検査し、秘密入力を含む応答は応答全体を破棄（署名つき content の部分改変・再送をしない）、歩みは `done`（`secret_rejected`）で閉じ、タスクを `blocked` で終了して人に通知する。安全な応答だけ原本保存する。ログ・DB・eval・バックアップに拒否した本文を出さない
+  4a. 全撮影（`screenshot`・`zoom`・確認・交代終了・番の取得・API-105）で、操作対象とは独立に全可視秘密領域（T-1）を撮影前に特定してマスクする（IMP-003）。iframe の変換座標・拡大/切り抜きも対象。DOM変更との競合を防ぎ、特定・マスクの完全性を保証できなければ撮影せず `SECRET_REGIONS_UNVERIFIED`、画像保存・外部送信を止め、人に画面を閉じる等の対応を要求する。無加工画像を一時ファイルにも残さない。安全が確認できるまでAIは続けない。VNC は認証済み持ち主への非記録の交代経路で、AIへの画像経路と分離する
  5. 結果を返す：列のすべての操作に 1 つずつ `tool_result` を、次の 1 つの user のメッセージで返す（toolset では `toolset_name: "computer"` を付ける）。画像を付けるのは `screenshot`・`zoom` だけで、ほかは `OK` か短い文。`read_page` は一覧の文だけ
  6. 古いスクショは手元で消さない（履歴は追記だけ：FR-098・D-256）。サーバー側の context editing（`clear_tool_uses_20250919`）で、直近 `browser.keep_screenshots`（既定 3）回より前の道具の結果を消させる（D-161 を置き換えた）
 - 上限：1 タスクで操作 300 回・60分（ポリシーの `max_minutes` は 55：M-59）・$3（FR-013）。超えたら halted（`budget_exceeded` か `timeout`）。確認待ち・交代待ち（`awaiting_approval`・`waiting_takeover`・`taken_over`）の時間は含めない。待った時間は `tasks.paused_ms` に足し、判定は「経過時間 − `paused_ms`」で行う。外側の 60 分も同じ（D-174）
@@ -109,7 +111,8 @@ flowchart TD
 - 行き先（BR-14・D-206）：`approve` になった操作は、当たった合図で行き先を決める。1 つでも人の行があれば人
  | 当たったもの | 行き先 |
  |---|---|
- | T-1・T-2・T-3 の `human_words`・T-7・申告の `publish`・`pay`・`delete`・`send`・`account` | 人（[FR-077](#fr-077こわい操作の確認)） |
+  | T-1 | 人への交代（FR-078）。承認してAIに秘密を入力させる経路はない |
+  | T-2・T-3 の `human_words`・T-7・申告の `publish`・`pay`・`delete`・`send`・`account` | 人（[FR-077](#fr-077こわい操作の確認)） |
  | T-6 のすべて（ほかの出どころの iframe（決済のフォームの多くがこれ）・JS のダイアログ・ブラウザの外・canvas。D-297） | 人 |
  | T-4 で、作動する要素の名前が取れない（空・画像だけ）とき、または先が書ける欄（`editable`） | 人 |
  | T-5 で Enter を含むもの（D-297） | 人 |
@@ -121,7 +124,7 @@ flowchart TD
 - 置き場所：`browser_checks`（TBL-039）。MCP の書き込み用の `action_intents`・`approvals` とは分ける（[ADR-052](../adr/ADR-052-browser-checks-table.md)）
 - 入口：FR-076 の行き先が人のとき、またはオートレビュー（FR-099）が `stop`・時間切れのとき
 - 処理：
- 1. 確認を `pending` で作る。中身は、操作の引数・VM の世代・タブとフレーム・操作の先・フォームの値の要約（秘密の欄はハッシュ）・ページの URL・スクショ・当たった合図・オートレビューの理由（あれば）。中身からハッシュ（`content_hash`）を作る
+  1. 確認を `pending` で作る。操作行の挿入順序は TBL-039 の同一トランザクション契約に従う。中身は、操作の引数・VM の世代・タブとフレーム・操作の先・フォームの値の要約（秘密の欄はハッシュ）・ページの URL・実効送信先（API-103 の `effectiveAction`）・安全にマスクできたスクショ・当たった合図・オートレビューの理由。実効送信先を表示・ハッシュ材料・実行直前比較に含める。秘密を含むURLや安全な表示を保証できないURLは保存・確認実行せず交代へ回す（IMP-004）
  2. 期限 30分。タスクは `awaiting_approval`。VM と画面の番はそのまま（ほかのタスクは画面を待つ）。待っている時間は `paused_ms` に足す（D-174）
  3. 確認の一覧（SCR-019）に出し、SSE（FR-018）と Web Push（FR-017）で知らせる
  4. ○（API-110）→ 1つのトランザクションで、実行の直前の確かめ（FR-075 の 3a）をして `pending → executing` に変える（条件つきの更新。0行なら 409 `CHECK_NOT_PENDING`。確かめに外れたら `expired`（その理由）にして、API-110 は `expired` を返す：D-307）。その外で、box-agent に「中身のハッシュが同じなら実行」と操作 ID つきで頼む（API-103 の `expect`）
@@ -164,7 +167,7 @@ flowchart TD
  |---|---|
  | `wakes.status = queued` | そのまま。ルーターが並べ直す |
 | 道具の歩み（`tool:<callId>`）が `started` のまま | `repeatable = 0` なのでやり直さない。`tool_call_id` で作ったもの（タスク・メッセージ・予約・提案・コネクタの書き込みの Intent）を探す。`steer_task` は `source_key = steer:<toolCallId>` のきっかけ、`cancel_task` はタスクが `cancelled` かで確かめる。あれば `done`、なければ「実行されたか分からない」を返して続ける（D-249・D-287） |
- | `workspace.vm_op` が `restoring`・`rebuilding` | API-108 の GET で box-manager に聞く（D-294）。動いていれば終わるまで待つ。終わっていれば片付ける（`none`・監査ログ）。失敗なら失敗の道（FR-100）。box-manager も落ちていたときは、box-manager が起動時に印ファイルを見て最初からやり直す（D-251）。終わるまで VM を起こさない |
+  | `workspace.vm_op` が `restoring`・`rebuilding`・`clearing_browser` | FR-100の操作ID/ACK契約でAPI-108/144と照合。ACK待ちはACKのみ再送、noneは同じID/引数で未受付を再送、runningは待つ。manager再起動はrunningだけ停止確認後やり直し、done/failedは保持。結果確定・ACK完了まで起動禁止 |
  | `workspace.vm_op` が `snapshotting` | API-143 の GET で box-manager に聞く（D-295）。動いていれば待つ。終わっていれば控えを `ready` に、失敗・box-manager が知らなければ `failed`（書きかけのファイルは box-manager が消す）。そのあと `none` |
  | `workspace.vm_op` が `starting` | その世代を止め（API-102）、`failed`（`host_restart`）にして `none` に戻す |
  | `workspace.vm_op` が `stopping` | 止め切る（API-102 をもう一度。止まったと分かるまで）。世代を `stopped` にして `none` に戻す。この世代は使い続けない（D-295） |
@@ -234,7 +237,7 @@ flowchart TD
 ### FR-099：オートレビュー
 - 入口：FR-076 の行き先がオートレビュー（BR-14・ADR-064）
 - 処理：
- 1. 本体は操作を `browser_actions` に `verdict = 'reviewed'` で入れ、`auto_reviews`（TBL-051）に行を作る。印つきのスクショを作る（FR-077 と同じ。秘密の欄は塗る）
+  1. 同一トランザクションで操作を `allowed`・参照NULLの仮行で入れ、`auto_reviews`（TBL-051）を作り、操作の `verdict = 'reviewed'` と `auto_review_id` を同時更新する。commit前は実行・通知・外部観測しない（IMP-007）。撮影は FR-075 の全秘密領域マスク契約に従う
  2. 道具なしの Claude を 1 回呼ぶ（`CLAUDE_REVIEW_MODEL`、既定 `claude-sonnet-5-5`。D-226）。渡すのは次だけで、エージェントの会話・手順書は渡さない。ページから来たもの（題・欄の名前と値・スクショ）は「信用しない材料」の枠（`<untrusted>`）に入れて渡す
    | 渡すもの | 中身 |
    |---|---|
@@ -259,9 +262,10 @@ flowchart TD
  1. 確かめのダイアログ（「動いているタスク N 件が止まります」）のあと、1 つのトランザクションで `vm_op = 'restoring'`（`rebuilding`）にし、VM を使っているタスクを `halted`（`vm_replaced`）で閉じてメインに報告する（D-268）。画面の番を空にし、VM を止める
    - 「VM を使っているタスク」は、終わっていないタスクのうち、VM の道具を一度でも使ったもの（どの世代でも。`browser_actions`・`sandbox_commands` に行がある）と、画面の番を持つもの（D-308）。眠っている間に古い世代で `~/work` を作ったタスクも入る。まだ VM を使っていない `waiting_vm` のタスクは止めず、戻したあとの VM で始める
    - 止めたタスクの `pending` の確認は `expired`（`vm_replaced`）、答えを待っているオートレビューは結果を捨て、`queued` のコマンドは `expired`（D-308）
- 2. box-manager は印ファイル（`{ action, snapshotId, status: "running" }`）を書いてから、2 つのボリューム（`makase-browser-profile`・`makase-vm-home`）を空にして控えの中身を入れる（作り直しは空のまま、`makase-vm-home` にはイメージの既定のホームを入れる）。API-108 は受けたら 202 で返し、本体は 5 秒ごとに API-108 の GET で終わりを確かめる（D-294）
- 3. 終わったら box-manager は印ファイルを消す。本体は `vm_op = 'none'`・`vm_home_state = 'ok'` に戻し、監査ログに `vm.restored`・`vm.rebuilt`。次に VM の道具を使うときに新しい世代で起きる
-- 失敗の道（D-294）：box-manager が「失敗した」と答えたら（落ちずに失敗した）、印ファイルを `status: "failed"` にして残す。本体は `vm_op = 'none'`・`vm_home_state = 'broken'` にし、監査ログに `vm.restore_failed`、持ち主に知らせる。`broken` の間は VM を起こさず（API-101 も印ファイルで断る）、戻す・作り直すだけを受ける。次の戻し・作り直しが印ファイルを上書きする
+  2. 本体は開始トランザクションで `vm_op_id` と `vm_op_payload`（action・snapshotId）も保存する。box-manager は操作IDと引数を含む印ファイルを永続化してから202を返し、停止した2ボリュームを入れ替える。GETは操作ID指定で5秒ごとに確認する。同一ID・同一引数のPOSTは再実行せず状態を返し、引数違いは409。DB確定後POST前の停止はGETの `none` で未受付と分かり、同じID・引数でPOSTする。応答消失時も同じIDで照合する（IMP-005）
+  3. 終了結果は `done`（失敗は `failed`）で永続保持する。本体は結果と監査をDBに確定し `vm_op_ack_pending = 1` にしてから API-108 のACKを送る。ACK応答後に操作ID・引数・ACK待ちを消し `vm_op = none` にする。ACK途中の再起動はDBの確定結果からACKを再送する。ACKは冪等で、成功結果の削除はACK時だけ。ACK前は起動・別の破壊的操作を拒否する。成功なら `vm_home_state = ok`、次の利用で新世代を起こす
+- 失敗の道：本体は `vm_home_state = broken` と失敗監査を確定し通知、同じACK手順で `vm_op = none` に戻す。managerはACK後もbrokenの印を保持し、起動・消去・控えは断る。次の復元・作り直しだけが新しい操作IDで印を置換できる。通信不明では排他を保持し、成功と推定しない
+- ACK待ちは処理時間超過の打ち切り対象から除外し、ACKだけ再送する。managerの記録が破損/読取不能ならnoneを返さずエラーにし、本体は排他を保持して通知する。noneは健全な永続記録で当該操作IDが未受付と確認できる場合だけ。
 - 時間の上限（D-294）：`vm_op_started_at` から `starting` 2 分・`stopping` 2 分・`snapshotting` 30 分・`restoring`・`rebuilding` 30 分。タイマーが毎分見て、超えたら box-manager に打ち切りを頼む（API-108・143 の DELETE）。止めたと答えたら失敗の道へ（控えなら `failed`、`starting`・`stopping` は世代を `failed` にして `none`）。答えなければ `vm_op` はそのままにして持ち主に知らせる（box-manager を起こし直せば、印ファイルから続きを決める）
 - 控えには Chrome のプロフィール（ログイン状態）が入る。控え専用のボリュームに置き、本体のデータのボリュームとは分ける（box-manager がつなぐのは `makase-browser-profile`・`makase-vm-home`・`makase-vm-snapshots` の 3 つで、データのボリュームはつながない：D-309）。4GB の上限は 2 つの合計。本体のバックアップ（NFR-070）には入れない
 - `vm_op` と `vm_home_state` の遷移は [10 states](../10_diagrams/states.md#workspacevm_op)。流れは [10 sequences](../10_diagrams/sequences.md#fr-100控えを取る戻す)

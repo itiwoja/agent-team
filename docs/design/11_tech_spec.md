@@ -1,5 +1,5 @@
 # 11. 技術仕様書
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ インプット：[01](01_requirements.md)〜[10](10_diagrams/README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ インプット：[01](01_requirements.md)〜[10](10_diagrams/README.md)
 
 > **3行で**
 > 1. Linux ホスト1台の上で Docker Compose の 7 種類のコンテナ（Tailscale・本体・box-manager・Docker の中継・egress・box-browser・box-shell）を動かす。box-browser と box-shell の組が VM（持ち主に 1 台）。持ち主1人が PC とスマホから 1 本のチャットでメインと話す。
@@ -7,6 +7,7 @@
 > 3. 実装の順番・タスクはこの文書の範囲外（12_implementation_order.md は v1.0 で削除：D-211）。
 
 ## 🧭 判断してほしいこと
+P1の必須受入条件は[全11件対応表](changes/2026-10-25-p1-review-fixes.md)。既存の単体/VM/隔離/eval/導入試験に組み込む。[停止・移行・VMイメージの運用契約](11_operations.md)も本仕様の一部。
 全体の一覧は [README](README.md#-判断してほしいこと全ドキュメントから集約)。この文書だけの論点はなし。
 
 ## 全体図

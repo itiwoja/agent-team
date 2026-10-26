@@ -1,5 +1,5 @@
 # ステップ 1. VM の縦の 1 本
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-24） ／ 設計の版：v1.4 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)、[09 vm](../design/09_api/vm.md)、[08 vm](../design/08_database/vm.md)、[ADR-068](../design/adr/ADR-068-browser-shell-split.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[07 アーキテクチャ](../design/07_architecture.md)、[04 vm](../design/04_functional_spec/vm.md)、[09 vm](../design/09_api/vm.md)、[08 vm](../design/08_database/vm.md)、[ADR-068](../design/adr/ADR-068-browser-shell-split.md)
 
 > **3行で**
 > 1. 本体（`makase`）なしで、CLI から Claude の computer use のループを回し、VM（`box-browser`・`box-shell` の組）の中の Chromium で試験ページを操作できるようになる。
@@ -39,19 +39,19 @@
 確かめ：noVNC に Chromium が全画面で映る。`docker inspect` で capability なし・`ReadonlyRootfs`・`no-new-privileges` が付いている。サンドボックスつきで立った/立たなかったの両方を、WSL2 のこの機械で記録した。
 
 ### 1.2 box-agent（スクショ・xdotool・CDP のパイプ・`read_page`・`open_url`）
-1. `apps/box-agent` を Node で書く。box ネットワークのアドレスにだけ結んで待ち受け、世代ごとのトークン（環境変数 `BOX_TOKEN`）を `Authorization` で確かめる。トークンのない/違う要求は何も返さない
+1. box-agentは世代別 `BROWSER_TOKEN` で認証する。VNCも同じブラウザ資格で保護し、SHELL_TOKEN・古い世代・無資格は拒否する（IMP-001）
 2. 起動：Xvfb 等を起こし、Chromium を `--remote-debugging-pipe` で起こす（`stdio` に fd 3・4 のパイプを渡す。TCP のデバッグポートは開かない）。サンドボックスが使えなければ `--no-sandbox` で起こし直し、使ったかどうかを応答に載せる（見分け方は「実装で決めること」）。起動と同時に前の起動のロックファイルを消す。Chromium には `--proxy-server=http://egress:3128` と `--proxy-bypass-list=shell` も付ける（`egress` と `shell` の名前は `box-browser` の `/etc/hosts`（`ExtraHosts`。「実装で決めること」）で引く。`shell` はホスト単位なので `shell` の全ポートが egress を通らない）。egress がまだ立たない 1.2〜1.3 の試験では、この 2 つを外して起こしてよい（外し方は実装で決める）
 3. 操作（API-103 の `action` のうち）：`screenshot`・`mouse_move`・`left_click` など・`type`・`key`・`scroll`・`wait` を xdotool で実行。操作は 1 つずつ。`actionId` を受け取り、実行済みなら前の結果を返す。`controlEpoch` も受け取り、box-agent が覚えている値と違えば 409 `STALE_CONTROL` を返す（値を増やすのは box-manager の API-113 で、ステップ 4 で作る。ここでは受け取って比べるだけ。覚えさせ方は「実装で決めること」）。`zoom` は computer use のツールの版の仕様を確かめてから入れる
 4. `open_url`：CDP の `Page.navigate`。`http`・`https` 以外は 400 `VALIDATION_ERROR`
 5. `read_page`：CDP のアクセシビリティツリーから、見えているボタン・リンク・入力欄・見出しを最大 200 個・16KB の文で返す（役割・名前・中心の座標・入力欄の値）。`input[type=password]` の値は返さない
 6. 前に出ているタブだけを扱う。新しいタブや窓が開いたら前に出して、応答の文で知らせる。JS のダイアログ（alert・confirm・beforeunload）は CDP で拾って文で知らせる。ダイアログへの操作を判定に回すのはステップ 2
 7. スクショの取り方を決めて実装し、PNG（1280×800）を返す（API-105 の元）。縮めない
-8. 試験は `docker run` で起こしたまま、`curl -H "Authorization: Bearer $BOX_TOKEN"` で box-agent を直に叩く
+8. 試験は `docker run` で起こしたまま、`curl -H "Authorization: Bearer $BROWSER_TOKEN"` で box-agent を直に叩く。shell-agentの試験は独立したSHELL_TOKENを使う。交換した資格では拒否されることも試す
 確かめ：`curl` だけで、`open_url`→`screenshot`→`left_click`→`type`→`read_page` が通る。トークンなしは断られる。`kill -9` で止めて起こし直しても、ロックファイルで Chromium が立たなくならない（D-171）。パスワード欄の値が `read_page` に出ない。違う `controlEpoch` つきの操作が 409 `STALE_CONTROL` で断られる。
 
 ### 1.3 box-shell と shell-agent の最小
 1. `docker/box-shell/Dockerfile`：利用者 `agent`（権限なし。`browser` と別の uid）、`/home/agent` を `agent` の持ち物に。bash・git・Node・Python・curl・jq を入れる（`apps/sandbox/Dockerfile` の `apt-get install` の行を移す。`PIP_BREAK_SYSTEM_PACKAGES` など `commandEnv` の環境変数はステップ 7 で移す）
-2. `apps/shell-agent`：box ネットワークのアドレスにだけ結び、`BOX_TOKEN` で確かめ、`GET /healthz` に応答するだけ。コマンドの実行・tar（API-117・118）は作らない（ステップ 7）。`apps/sandbox/src/main.ts` のように、トークンは読んだらプロセスの環境変数から消す
+2. shell-agentはboxネットワークに結び、独立生成した `SHELL_TOKEN` でhealthzも認証。BROWSER_TOKENは渡さない。環境変数削除は初期環境の秘匿を保証しない。コマンド・tarはステップ7
 3. 起こすときの制限は 1.1 と同じ（seccomp は Docker の既定のまま・メモリ 1GB・CPU 1・プロセス 256・`makase-vm-home` を `/home/agent` に）
 4. 以降の試験でコマンドを動かす必要があるときは、ホストから `docker exec -u agent` を使う（shell-agent には作らない）
 確かめ：`healthz` がトークンつきで答え、なしは断る。`docker exec -u agent` で `id` が `agent`、`/` に書けず `/home/agent` と `/tmp` に書ける。ボリュームに置いたファイルがコンテナを消しても残る。
@@ -70,14 +70,14 @@
 確かめ：`docker compose -f compose.vm.yaml up -d` で egress・box-manager・docker-socket-proxy が立つ。box-manager から docker-socket-proxy 越しに、許す口（コンテナ・ネットワーク・ボリューム・イメージ）は通り、許していない口（`exec` など）は断られる。`docker network inspect` で `box` が `internal: true`。box-manager は ctl の :7000 だけで待ち、`BOX_MANAGER_TOKEN` なしは断る。
 
 #### 1.5.b API-101・102・109 と世代
-1. API-101 `POST /internal/v1/boxes`：`{ boxId }` だけを受け、ほかの欄は 400。決まったイメージ・上限・ネットワーク・ボリュームで 2 つのコンテナを一緒に起こす。固定する中身は [07 起こすときの決まり](../design/07_architecture.md#vm-の中身) の通り（capability なし・`no-new-privileges`・読み取りだけのルート・資源の上限・`box-browser` の `/dev/shm` 512MB と seccomp・ボリューム・コンテナ名 `shell`・外の名前を引かない設定）。seccomp はファイルの中身を Docker API に渡す。世代ごとのトークンを作って両方の環境変数に渡す
+1. API-101はboxIdだけを受け他の欄は400。固定イメージ/資源/ネットワーク/ボリュームは[07](../design/07_architecture.md#vm-の中身)のとおり。世代ごとに独立生成したBROWSER_TOKEN/SHELL_TOKENを対応するコンテナだけに渡し、managerだけが両方を保持する。capabilityなし・no-new-privileges・read-only root・browserのshm512MB/seccompを維持。導入/世代labelは[運用契約](../design/11_operations.md)に従う
 2. 世代：両方の box-agent・shell-agent の `healthz` が答えたら `running`、60 秒答えがなければ両方を消して `failed`。動いている間にどちらかが落ちたら、もう一方も止めて世代ごと `failed`（Docker への問い合わせを数秒ごとに行う）。世代の印はコンテナの label に持つ（DB がないので、box-manager を再起動しても API-109 で一覧できる）
 3. API-102 `DELETE`：2 つを止めて消す（ボリュームは残す。`/tmp` を名前なしボリュームにしたならそれも消す）。API-109 `GET /internal/v1/boxes`：動いている世代の一覧だけ（測った値は返さない）
 4. 応答には、`status`・`browserContainerId`・`shellContainerId`・サンドボックスの有無を入れ、TBL-032 の列名に合わせる
 確かめ：`curl` で API-101 を叩くと 2 つが起き、`healthz` が答えて `running` になる。API-101 に余計な欄を付けると 400。片方を `docker kill` すると世代ごと `failed`。API-102 のあとでボリュームのファイルが残る。API-109 が動いている世代だけを返し、box-manager を再起動しても同じ一覧が返る。
 
 #### 1.5.c API-103・105・106 の中継
-1. API-103 `POST .../actions`：世代が違えば 409 `STALE_CONTROL`、box-agent に `BOX_TOKEN` つきで転送して応答を返す（box-agent の `controlEpoch` の 409 もそのまま返す。1.2）。API-105 `GET .../screenshot`：PNG を返す。API-106 `GET`（WebSocket）：`box-browser` の VNC を中継する（`box-browser` の口は box-manager からしか届かない）
+1. API-103 `POST .../actions`：世代が違えば409 `STALE_CONTROL`、box-agentにBROWSER_TOKENで転送して応答を返す（controlEpochの409もそのまま）。API-105のPNG取得・API-106のVNC中継にもBROWSER_TOKENを使い、SHELL_TOKENは使わない。box-browserの管理口はこのブラウザ資格で保護する
 確かめ：API-103 経由で `open_url`→`screenshot`→`left_click` が通り、古い世代の指定は 409 `STALE_CONTROL`。API-105 が PNG（1280×800）を返す。noVNC を API-106 越しにつなぎ直して映る。世代ごとのトークンなしの接続は断られる。
 
 ### 1.6 CLI から computer use のループを回して試験ページを操作する

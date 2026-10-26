@@ -1,5 +1,5 @@
 # 09. API設計：VM・確認・設定の API（v0.6 から引き継ぐ API）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[09 API設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[09 API設計](README.md)
 
 > **3行で**
 > 1. VM は 1 台なので、画面向けの VM の API は `/api/v1/vm/*` になった（v0.6 の `/boxes/:boxId`）。控え・戻す・作り直す（API-133〜135）を足した。VM の実体は `box-browser`・`box-shell` の 2 つのコンテナの組で、画面向けの API では 1 つの VM として見せる。
@@ -43,17 +43,20 @@
 - リクエスト：`{ "note": "ログインしました" }`（任意、200字まで。Claude に渡す）
 - 処理：`control` の接続を閉じ、`control = agent`・`control_epoch` を1増やし、API-113 で `agent` と新しい epoch を VM に伝える（D-160）。交代を `ended`、スクショを撮って残す。画面の番を持つタスクがあれば続ける
 - エラー：409 `NOT_TAKEN_OVER`
+- 撮影不能（FR-075）は画像なしで交代終了を記録し、タスクは `waiting_takeover` として人に安全な画面への対応を要求する。秘密を含むnoteは保存/LLM送信せず拒否する。
 
 ### API-133〜135：VM の控え・戻す・作り直す
 - GET `/api/v1/vm/snapshots`：`{ items: [{ id, kind, sizeBytes, status, createdAt }] }`
 - POST `/api/v1/vm/snapshots`：今すぐ取る。VM を止めてから取る（使っているタスクは `waiting_vm`）→ 202 `{ id }`。終わったら SSE の `vm.updated`
 - POST `/api/v1/vm/restore`：`{ "snapshotId" }` → 202 `{ haltedTasks: 2 }`。POST `/api/v1/vm/rebuild` → 202。どちらも VM を使っているタスク（終わっていないタスクのうち VM の道具を一度でも使ったものと画面の番を持つもの）を `halted`（`vm_replaced`）で閉じ、その `pending` の確認を `expired`（`vm_replaced`）にする（D-268・D-308）。`vm_op` が `none` でなければ 409 `VM_BUSY`。`vmHomeState` が `broken` でも受ける
 - 処理（FR-100）：画面の番を空にし、VM を止め、API-108 でホームを入れ替える（非同期。本体が終わりを確かめる：D-294）。終わったら SSE の `vm.updated`。監査ログ `vm.restored`・`vm.rebuilt`、失敗は `vm.restore_failed`（`vmHomeState` が `broken` になる）
+- API-138：DELETE `/api/v1/vm/browser-data` → 202。FR-079の条件付きclearing_browser取得後API-144へ渡す。競合は409 VM_BUSY/SCREEN_IN_USE/ALREADY_TAKEN_OVER、brokenは409 VM_BUSY。完了は結果確定/ACK後にSSE vm.updated。API-144は停止済みの最終世代にも使え、まだ世代がないときは予約ID `unstarted` を消去に限り許す（起動しない）。
 - 今すぐの控え（POST `/api/v1/vm/snapshots`）は、ホストの空きが「ホームの大きさ＋3GB」に足りなければ 507 `DISK_LOW`（D-300）
 - エラー：404 `SNAPSHOT_NOT_FOUND`、交代中は 409 `ALREADY_TAKEN_OVER`
 
 ### API-087：GET /api/v1/check
 - 概要：確認待ちのもの。今の書き込みのカードに、`kind: "browser"`・`kind: "takeover"`・`kind: "routine"`（ルーチンの提案：API-142）を足す。ブラウザのカードには `taskId`・`taskTitle`・オートレビューが止めた理由（`reviewReason`）を入れる
+- browserカードには `effectiveAction`（TBL-039.contentから取得、安全な完全絶対URLまたは非送信のnull）を追加。T-1はbrowserカードでなくtakeoverカード（IMP-002・004）。
 - レスポンス（200）：
 <details>
 <summary>例</summary>
@@ -140,9 +143,9 @@
 | API-104 | POST | `/internal/v1/boxes/:boxId/inspect` | `box-browser` で確かめだけ（確認カードを作るとき） |
 | API-105 | GET | `/internal/v1/boxes/:boxId/screenshot` | `box-browser` の PNG（1280×800） |
 | API-106 | GET（WebSocket） | `/internal/v1/boxes/:boxId/vnc` | `box-browser` の VNC の中継 |
-| API-108 | POST・GET・DELETE | `/internal/v1/vm/home` | ホーム（`makase-vm-home` と `makase-browser-profile`）を 2 つ一緒に入れ替える（非同期：D-294）。POST `{ action: "restore", snapshotId }` か `{ action: "rebuild" }` → 202（印ファイルを書いてから裏で入れ替える）。VM が止まっているときだけ（動いていれば 409 `BOX_RUNNING`）。GET → `{ action, status: "running" \| "done" \| "failed" \| "none", startedAt, error }`（印ファイルの中身）。DELETE → 打ち切る（止め切ったら `failed` を返す） |
+| API-108 | POST・GET・DELETE・PATCH | `/internal/v1/vm/home` | POST `{ operationId, action: "restore" \| "rebuild", snapshotId? }` → 202。停止済みのみ（409 `BOX_RUNNING`）。GET `?operationId=` → `{ operationId, action, status: "running" \| "done" \| "failed" \| "none", startedAt, error }`。DELETE `{ operationId }` は停止確認後failed、PATCH `{ operationId, acknowledge: true }` は結果のACK（204、再送可）。同一ID・引数のPOSTは既存結果、引数違いは409 `OPERATION_CONFLICT`。結果の保持・DB確定・ACK順は FR-100 |
 | API-143 | POST・GET・DELETE | `/internal/v1/vm/snapshots`・`/internal/v1/vm/snapshots/:snapshotId` | ホームの控えを取る。2 つのボリュームを 1 つの tar にまとめる（非同期：D-295）。POST `{ snapshotId }` → 202。VM が止まっているときだけ。ホストの空きが「ホームの大きさ＋3GB」未満なら 507 `DISK_LOW`。GET → `{ status: "running" \| "done" \| "failed" \| "unknown", path, sizeBytes }`。DELETE → 打ち切り、書きかけのファイルを消す。控えは控え専用のボリューム（`/snapshots`）に書く（D-309） |
-| API-144 | DELETE | `/internal/v1/boxes/:boxId/browser-data` | 世代を止め、`makase-browser-profile` を空にして、次に起こす（画面の番がないときだけ） |
+| API-144 | DELETE・GET・PATCH | `/internal/v1/boxes/:boxId/browser-data` | DELETE `{ operationId }` → 202。停止後プロフィール消去。GET `?operationId=` とPATCH ACKはAPI-108と同じ結果保持契約。DELETE `?cancel=true` は打ち切り。起動・控え・復元・消去の共通排他で競合は409 `VM_BUSY`。本体は先に `clearing_browser` を取得（FR-079） |
 | API-109 | GET | `/internal/v1/boxes` | 動いている VM の世代（本体の起動のとき、止まっていない世代があれば止めさせる：D-327）と、box-manager が毎分測った値（`homeBytes`・`hostFreeBytes`・`measuredAt`）、box-manager が自分で止めた世代と理由（`disk_quota`・`disk_low`）。本体のタイマーが毎分読む（測るのは box-manager だけ：D-309） |
 | API-117 | POST | `/internal/v1/boxes/:boxId/commands` | `box-shell` の shell-agent で、コマンドを1つ実行する。`{ actionId, tool, args, timeoutSec }` → `{ ok, exitCode, output, truncated }`。確かめるのは世代（パスの `boxId`）と `actionId` だけで、`controlEpoch`・画面の番は受けない（交代中も動く：D-258・D-296）。VM の中のコマンドは判定しない（D-178）。`output` は 64KB まで。`actionId` が実行済みなら前の結果を返す。世代が違えば 409 `STALE_CONTROL`、時間切れは `COMMAND_TIMEOUT`、同時に 2 本動いていれば 409 `COMMANDS_FULL`（本体が待って出し直す）。利用者 `agent` で実行する |
 | API-118 | PUT・GET | `/internal/v1/boxes/:boxId/files` | `box-shell` の shell-agent で、tar でファイルを入れる（PUT）・取り出す（GET）。`path` クエリで場所を指す（`/home/agent` の下だけ）。リポジトリの出し入れと成果物の写し（D-244）に使う。tar は shell-agent が利用者 `agent` で作る・広げ、シンボリックリンクはたどらない。本体は広げるときにリンク・装置ファイル・絶対パス・`..` を捨てる（D-306） |
@@ -178,7 +181,7 @@
  "domain": "example.jp",
  "tab": "T1", "frame": "main",
  "target": { "tag": "button", "type": "submit", "autocomplete": null, "role": "button", "name": "予約を確定する", "clickable": true, "editable": false, "inForm": true, "formSubmitName": "予約を確定する", "submitsForm": true, "formMethod": "post", "rect": [760, 588, 104, 32] },
- "form": { "method": "post", "fields": [{ "name": "date", "value": "2026-11-03" }, { "name": "card", "valueHash": "sha256:..." }] },
+  "form": { "method": "post", "effectiveAction": "https://example.jp/reserve", "fields": [{ "name": "date", "value": "2026-11-03" }, { "name": "card", "valueHash": "sha256:..." }] },
  "contentHash": "sha256:...",
  "resolved": true,
  "unresolvedKind": null
@@ -192,6 +195,9 @@
 - `editable`：先が `textarea`・`contenteditable`・文字の入る `input` のとき true（T-4 の行き先に使う）
 - `submitsForm`：先が標準のフォームの送信になるか（`type=submit` のボタン・`input[type=submit|image]`・フォームの中の Enter による暗黙の送信）。`formMethod` は送信ボタンの `formmethod`、なければ `form.method`（`get`・`post`・`dialog`、分からなければ null）。`submitsForm` が true で `formMethod` が `get`・`dialog` でなければ T-7（D-298）
 - JS で `form.submit()`・`fetch` を呼ぶ要素は、DOM からは分からないので `submitsForm` に入らない（T-7 で拾えない：R-76）
+- `effectiveAction` は送信ボタンの `formaction`、なければ `form.action` をブラウザの基準URLで絶対URLに解決したもの（暗黙の送信も実際のsubmitterを反映）。送信なしはnull、送信先不明は実行せず交代。秘密を含むURLや秘密の不在を確認できないURLは返却・保存・ハッシュ化せず交代する。安全と確認したURLはクエリを含む完全な値を確認カードに表示し、`contentHash = sha256(canonicalJson({ action, content, box_id }))` のcontentに含め、実行直前に再取得して比較する。action/formactionだけ変わっても409 `CONTENT_CHANGED`。JS送信の既知の限界とは別の保証（IMP-004）
+- 全画像応答（API-103・105・交代終了）はFR-075の撮影前マスクを必須とする。内部の撮影検査は `{ complete, regions: [{ frame, rect }] }`（出力画像の画素座標）を取得し、`complete = false` なら409 `SECRET_REGIONS_UNVERIFIED`、画像・パスなし。秘密入力実行は409 `SECRET_INPUT_REQUIRES_TAKEOVER`。人が安全な画面に直すまで再撮影・AI続行をしない（IMP-002・003）
+- 操作の結果GET/ACKは現世代の生存に依存せず操作IDで照合する。ACK済みIDのPOST/消去DELETEを新規受付しない（墓標を保持、409 OPERATION_CONFLICT）。API-101は復元/消去の未ACK結果・running・broken印・控え中をすべてVM_BUSYで断る。
 
 </details>
 

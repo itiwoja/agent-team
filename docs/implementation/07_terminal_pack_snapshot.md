@@ -1,5 +1,5 @@
 # ステップ 7. ターミナル・パック・VM の控え
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-24） ／ 設計の版：v1.4 ／ インプット：[04 vm](../design/04_functional_spec/vm.md)（FR-079・086・100）、[04 tools](../design/04_functional_spec/tools.md)（FR-085・088・061）、[08 vm](../design/08_database/vm.md)、[08 resident](../design/08_database/resident.md)、[09 vm](../design/09_api/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)、[10 states](../design/10_diagrams/states.md)、[11](../design/11_tech_spec.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[04 vm](../design/04_functional_spec/vm.md)（FR-079・086・100）、[04 tools](../design/04_functional_spec/tools.md)（FR-085・088・061）、[08 vm](../design/08_database/vm.md)、[08 resident](../design/08_database/resident.md)、[09 vm](../design/09_api/vm.md)、[10 sequences](../design/10_diagrams/sequences.md)、[10 states](../design/10_diagrams/states.md)、[11](../design/11_tech_spec.md)
 
 > **3行で**
 > 1. 振り分け先のエージェントが VM のターミナルでコマンドを動かしてファイルを出し入れでき、パックを入れて使え、VM のホームを毎日控えて戻す・作り直す・ブラウザのデータを消すことができるようになる。
@@ -21,7 +21,7 @@
 | 部品 | 置き場 | 移す元（あれば） | 設計の参照 |
 |---|---|---|---|
 | shell-agent のコマンド実行（API-117 の受け手） | `apps/shell-agent/src/commands.ts` | `packages/sandbox/src/executor.ts` の `executeCommand`（6 つの道具）・`runShell`・`commandEnv`・`clipTail`。作り替え：コマンドを取りに行く形（`claim`・`next`・`result`）をやめ、受ける側の HTTP にする。出力は 20,000 字を 64KB に、時間は既定 120 秒・最大 300 秒を 120 秒に、`timeout_sec` を `timeoutSec` に | FR-086・API-117 |
-| shell-agent の起動・トークン | `apps/shell-agent/src/main.ts` | `apps/sandbox/src/main.ts`（トークンを読んだら環境変数から消す・root なら権限のない利用者に落とす） | 07 shell-agent の行 |
+| shell-agent の起動・トークン | `apps/shell-agent/src/main.ts` | 旧 `apps/sandbox/src/main.ts` は参考だけ。旧資格共有/root降格を移植せず、SHELL_TOKEN専用・非root起動・子環境から資格を除外する。環境変数削除を隔離境界にしない | 07 shell-agent の行、IMP-001 |
 | shell-agent の tar（API-118） | `apps/shell-agent/src/files.ts` | `packages/sandbox/src/tar.ts` の `safeRelativePath`・`createTarGz`・`readTarGz` と `executor.ts` の `resolveInRoot`・`collectFiles`・`extractArchive` | FR-086 4a・D-306 |
 | 本体の tar を広げる側（リンク・絶対パス・`..` を捨てる） | `apps/makase/src/terminal/untar.ts` | `packages/sandbox/src/tar.ts` の `readTarGz`（通常ファイルだけ返し、リンク・装置・`..`・絶対パスを捨てる作りがそのまま D-306 に当たる） | D-306 |
 | box-manager の API-117・118 の中継 | `apps/box-manager/src/shell.ts` | 新規 | 09 内部 API |
@@ -41,17 +41,17 @@
 
 ## 手順
 ### 7.1 shell-agent のコマンド実行（API-117）
-1. `apps/shell-agent` に `POST /commands` を足す（box ネットワークのアドレスにだけ結び、`BOX_TOKEN` で確かめるのはステップ 1 のまま）。受け取る：`{ actionId, tool, args, timeoutSec }`。`tool` は 6 つ（`run_command`・`list_files`・`read_file`・`search`・`write_file`・`delete_file`）。ほかは 400
+1. `apps/shell-agent` に `POST /commands` を足す（boxネットワークのアドレスにだけ結び、SHELL_TOKENで認証。BROWSER_TOKENは受け付けない）。受け取る：`{ actionId, tool, args, timeoutSec }`。`tool` は6つ（`run_command`・`list_files`・`read_file`・`search`・`write_file`・`delete_file`）。ほかは400
 2. `executor.ts` の `executeCommand` の中身を移す。ファイルの道具の根は `/home/agent`（`SANDBOX_ROOT` の既定 `/workspace` をやめる）。`run_command` の `cwd` の既定は `~/work/<taskId>`（強制しない）。`commandEnv` の `HOME` は `/home/agent`、`PIP_USER`・`npm_config_cache`・`PATH` の `~/.local/bin` はそのまま（入れたツールをホームに残す：D-272）
 3. 上限：1 コマンド 120 秒（`timeoutSec` が超えたら 120 に切る）。出力は `clipTail` で 64KB（バイト）に切り、`truncated: true` を返す。時間切れは `ok: false`・出力に打ち切りの文を足して返す（`COMMAND_TIMEOUT`）。プロセスのグループごと止める（`runShell` の `detached` と `kill(-pid)`）
 4. 同時 2 本：3 本目は 409 `COMMANDS_FULL`。`actionId` が実行済みなら前の結果を返す（メモリに最近の分を持つ。shell-agent が再起動したら世代が替わるので足りる）
-5. 利用者 `agent` で動かす（コンテナ自体が `agent`。root から落とす分岐は残さない）。コマンドの子に `BOX_TOKEN` を渡さない（`main.ts` で消す）
+5. 利用者 `agent` で動かす（コンテナ自体がagent。rootから落とす分岐なし）。コマンド/tar等の子プロセスには明示的な環境を渡し、SHELL_TOKEN・BROWSER_TOKENを含めない。BROWSER_TOKENはshellコンテナ自体にも渡さない。環境変数削除だけで管理プロセスの初期環境を秘匿できるとは扱わず、SHELL_TOKENが読まれてもブラウザ権限にはならない分離を試験する
 6. `terminal.allow_hosts`：API-096 に `terminal` 欄はある（09 の表）が、egress への届け方だけが設計にない。届け方は 7.2 の後で決める（「実装で決めること」）。まず `HTTP_PROXY`・`HTTPS_PROXY` を egress に向け、`docker exec -u agent` で `curl` が許可リスト内だけ通ることを確かめる
 確かめ：shell-agent に直に `curl` で `run_command` を送ると出力と `exitCode` が返る。121 秒の `sleep` は打ち切られる。出力 100KB のコマンドが 64KB に切られ `truncated`。3 本同時に送ると 3 本目が 409。同じ `actionId` の 2 回目は実行されず前の結果が返る。`ls /home/browser`・`ls /tmp/.X11-unix` に何もない。
 
 ### 7.2 tar の出し入れ（API-118）と box-manager の中継
 1. shell-agent に `PUT /files?path=`・`GET /files?path=`。`path` は `/home/agent` の下だけ（それ以外は 400）。PUT は tar を受けて広げる（`agent` として）、GET は tar を作って返す。どちらもリンクはたどらない（`tar` のコマンドなら `--no-dereference` が既定。Node で作るなら `lstat` で見て、リンクはリンクのまま入れるか除く：「実装で決めること」）
-2. `apps/box-manager` に API-117・118 の中継（`/internal/v1/boxes/:boxId/commands`・`/files`）。世代が違えば 409 `STALE_CONTROL`、`BOX_TOKEN` つきで shell-agent に転送する。tar は大きいので本文を流す（メモリに溜めない）
+2. `apps/box-manager` にAPI-117・118の中継（`/internal/v1/boxes/:boxId/commands`・`/files`）。世代が違えば409 `STALE_CONTROL`、SHELL_TOKENでshell-agentに転送する。BROWSER_TOKENをこの経路に渡さない。tarは本文を流しメモリに溜めない
 3. 本体の `terminal/untar.ts`：受け取った tar を広げるときに、シンボリックリンク・ハードリンク・装置ファイル・絶対パス・`..` を捨て、捨てた件数をログに残す（D-306）。展開後の合計の上限を持つ（`readTarGz` の `maxBytes` の考え方）
 4. 成果物の写し（D-244）：`report` を閉じるとき、`~/work/<taskId>` の下だけを API-118 の GET で取り、`untar.ts` で広げて `/data/files/<taskId>/` に写す（合わせて 20MB まで）。ステップ 4 の口をここで埋める。VM が眠っていれば写しの前に起こす
 5. リポジトリの入れ：gateway が GitHub から取った tar を API-118 の PUT で `~/work/<taskId>` に入れる。変更の取り出し：GET の tar と入れた時点の tar を並べて差分にし、PR の Intent に乗せる（ステップ 5 の gateway の口へ。確認つき）
@@ -76,7 +76,7 @@
 4. 更新：`version` が上がっていれば、パックのエージェントの設定とスキルを作り直す。手で変えた設定が失われることは、画面（SCR-024）が先に知らせる。API は確かめなしで受けるので、画面側のダイアログで止める
 5. API-116：パックのエージェントが動いていれば 409 `AGENT_BUSY`。なければエージェントを論理削除し、`agent_skills`・`pack_installs` の行を消し、`browser` の追加分をポリシーから戻す（戻し方は「実装で決めること」）。VM のログインは消さない（BR-07）
 6. `read_skill`（ステップ 4 で作った道具）が `agent_skills` を引けること、渡す最初の一覧が名前と `description` だけで本文は読んだときだけ会話に入ること、読むと `last_used_at` が更新されることを、パックのスキルで確かめる。旧 `TRUSTED_SKILLS`（`apps/app/src/packs/catalog.ts`）は使わない。`/data/packs/` のスキルを信頼するかは「実装で決めること」
-7. メインの振り分け先の一覧（FR-061）に、パックのエージェントの `purpose`・`examples` を添える。入れる・外す・更新で一覧が変わるので、次のターンの頭で③を作り直す（ステップ 4 の仕組みに合図を出す）
+7. メインの振り分け先の一覧（FR-061）にpurpose・examplesを添える。入れる・外す・更新のあとも保存済み③を作り直さない。次ターンには変更通知だけをuserメッセージとして追記し、描いた文をinput歩みに保存する（FR-098）。固定部分を更新するのは次の要約で新しいcontext_snapshotsを作るときだけ。パック更新→要約しない次ターン→本体再起動で、fixed_parts_json/parts_hashが更新前と同一、変更通知も同一バイトで再構成されることを試験する
 8. ステップ 6 で骨だけ作った SCR-023 の VM の欄と SCR-024 を、ここで実 API につないで確かめる。この手順では SCR-024 を API-114〜116 につなぐ（SCR-023 の VM の欄は 7.7 の 11）。パック由来のエージェントにパック名のラベルが付くことを SCR-014 で確かめる
 確かめ：試験用の最小のパック（エージェント 1・スキル 1）で、入れる→`agents`・`agent_skills`・`pack_installs` の行ができ、メインの一覧に `purpose` が載る。同じ版の再入れは 409。`version` を上げて更新、`description` 201 字・`formatVersion` が新しすぎる・`id` が kebab-case でないものはすべて 422 `PACK_INVALID`。動いているタスクのあるパックの外しは 409 `AGENT_BUSY`。外したあと `browser` の追加分が消える。
 
@@ -100,10 +100,10 @@
 ### 7.6 box-manager の控え・戻す・作り直す・ホームの測り・ブラウザのデータを消す
 1. ホームの測り（API-109 に足す）：VM が動いている間、毎分、`makase-browser-profile` と `makase-vm-home` の合計の大きさと、ボリュームのあるファイルシステムの空きを測り、`homeBytes`・`hostFreeBytes`・`measuredAt` を返す。ホームが 4GB 超えなら動いているコマンドを止めて VM を止める（`disk_quota`）。空きが 3GB 未満でも止める（`disk_low`）。止めた世代と理由を API-109 に載せる。測り方は「実装で決めること」
 2. 控え（API-143）：POST `{ snapshotId }` は VM が動いていれば 409、空きが「ホームの大きさ＋3GB」未満なら 507 `DISK_LOW`、それ以外は印を書いて 202 を返し、裏で書く。2 つのボリュームを読み取りだけでつなぎ、`browser/` と `home/` を 1 つの tar にして zstd にし、`makase-vm-snapshots` の `/snapshots/<id>.tar.zst` に書く（書きかけは別名で書き、終わったら名前を変える）。GET は `running`・`done`（`path`・`sizeBytes`）・`failed`・`unknown`（知らない `snapshotId`）。DELETE は止めて書きかけを消す
-3. 戻す・作り直す（API-108）：POST `{ action: "restore", snapshotId }` か `{ action: "rebuild" }`。VM が動いていれば 409 `BOX_RUNNING`。印ファイル（`{ action, snapshotId, status: "running" }`）を書いてから 202 を返し、裏で 2 つのボリュームを空にして控えを広げる（作り直しは空のまま、`makase-vm-home` にはイメージの既定のホームを入れる）。終わったら印ファイルを消す。落ちずに失敗したら印ファイルを `status: "failed"` で残す。GET は印ファイルの中身（無ければ `none`）。DELETE は止め切って `failed` を返す
+3. 復元・作り直しはAPI-108のoperationId契約を実装する。ID/引数を永続化して202、done/failedはACKまで保持。GETでnoneなら未受付、同じID/引数で再送可。同じIDで引数違いは409。PATCH ACKは冪等、DELETE打ち切りは停止確認後failed。成功の印を完了直後に消してはならない（IMP-005）
 4. 起こすの側（API-101）に足す：戻し・作り直しの印ファイル（`failed` を含む）がある、または控えを書いている間は 409 `VM_BUSY`。ホストの空きが 3GB 未満なら 507 `DISK_LOW`
 5. box-manager の起動時：印ファイルが `running` のまま残っていれば（box-manager が落ちていた）最初からやり直す（D-251）。控えの書きかけは消し、GET は `unknown` を返す
-6. ブラウザのデータを消す（API-144）：画面の番がないときだけ。世代を止め、`makase-browser-profile` を空にし、次に起こす（`/tmp` の扱いも含め「実装で決めること」）
+6. 消去API-144も同じ操作ID・結果保持・ACK契約。managerは起動/控え/復元/消去の共通排他で競合を拒否。再起動はrunningの同じ消去を停止確認後にやり直し、完了結果は保持（IMP-006）
 7. 新しい控えを書き終えて確かめる（tar を最後まで読めること・大きさ）までは、古い控えを消さない。失敗したら古い控えは消さない（本体が 3 世代の整理をする）
 確かめ：box-manager 単体の試験。2GB のホームで API-143 を叩いて `done`、5 分以内（NFR-084）。控えを戻すと 2 つのボリュームが一緒に戻る（Cookie と `~/work` の両方）。戻しの途中で `docker kill` した box-manager を起こし直すと、印ファイルから最初からやり直す。わざと壊れた控えを戻させると `failed` が印ファイルに残り、API-101 が `VM_BUSY`。ホームを 4GB 超えにすると、1 分以内に動いているコマンドが止まり VM が止まる（`disk_quota`）。
 
@@ -111,10 +111,10 @@
 1. `vm_op` の直列（D-251）：`computer/vm-op.ts` に 1 つの関数 `beginVmOp(op)` を置き、`vm_op = 'none'` のときだけ同じトランザクションで値と `vm_op_started_at` を書く。0 行なら呼び元は `VM_BUSY`（API）または `waiting_vm`（タスク）。終わる関数 `endVmOp()` は `none` と NULL に戻す。遷移の表は [10 states](../design/10_diagrams/states.md#workspacevm_op) と同じにし、表にない遷移を単体で落とす
 2. `vm_snapshots`（TBL-052）の repo：表はステップ 3 の版 4・5 で作成済み（無い列・索引だけ新しい版で足す）。`creating` は 1 つまで。`ready` は 3 つまで（新しいものを `ready` にしたあと、古い順に `deleted` にして box-manager のファイルを消す）
 3. 毎日の控え（タイマー）：`snapshot_hour`（既定 4）に、VM が止まっていて `vm_op` が `none` のとき、`snapshotting` と `creating` を 1 トランザクションで入れて API-143 の POST。動いていれば、止まるまでその日のうちに待つ。API-133 の POST（今すぐ）は VM を止めてから取り（使っているタスクは `waiting_vm`）、空きが足りなければ 507 `DISK_LOW`（D-300）
-4. 5 秒の問い合わせ：`snapshotting`・`restoring`・`rebuilding` の間は 5 秒ごとに API-143・108 の GET。`done` なら控えを `ready`（`size_bytes`）にして `vm_op = none`（戻し・作り直しは `vm_home_state = ok`・監査ログ `vm.restored`・`vm.rebuilt`）。`failed` なら控えは `failed`（古い控えは残す）、戻し・作り直しは `vm_home_state = broken`・監査ログ `vm.restore_failed`・持ち主に知らせる。SSE `vm.updated`
+4. 5秒ごとにGET。控えは従来どおりready/failed。復元・作り直し・消去はFR-100に従いDB結果/監査/ACK待ちを一括確定→ACK→排他解放。ACK待ちの再起動はACKだけ再送。成功はok、失敗はbroken（managerにも残す）。POST前停止/応答消失/5秒未満の完了/完了直後再起動を試験しnoneとdoneを区別する（IMP-005）
 5. 時間の上限（D-294）：タイマーが毎分 `vm_op_started_at` を見て、`starting`・`stopping` 2 分、`snapshotting`・`restoring`・`rebuilding` 30 分を超えたら API-108・143 の DELETE を頼む。止めたと答えたら失敗の道へ（`starting`・`stopping` は世代を `failed` にして `none`）。答えなければ `vm_op` はそのままにして持ち主に知らせる
 6. 戻す・作り直す（API-134・135）：1 つのトランザクションで `vm_op` を `restoring`（`rebuilding`）にし、VM を使っているタスク（終わっていないタスクのうち、`browser_actions` か `sandbox_commands` に行がある、または画面の番を持つもの：D-308）を `halted`（`vm_replaced`）で閉じてメインに報告する。その `pending` の確認を `expired`（`vm_replaced`）、答えを待つオートレビューの結果を捨て、`queued` のコマンドを `expired`、画面の番を空にする。まだ VM を使っていない `waiting_vm` のタスクは止めない。そのあと API-102、API-108 の順。`vm_op` が `none` でなければ 409 `VM_BUSY`、控えがなければ 404 `SNAPSHOT_NOT_FOUND`、交代中は 409 `ALREADY_TAKEN_OVER`（`takeovers` はステップ 4 で作ってある）。`broken` でも受ける
-7. ブラウザのデータを消す（API-138）：画面の番が使われていれば 409 `SCREEN_IN_USE`。そうでなければ API-144 を呼ぶ
+7. API-138はFR-079に従い、画面の番/交代なし・home_state=ok・vm_op=noneを同一トランザクションで検証しclearing_browserと操作ID/引数を保存してAPI-144。再開・30分打切り・ACK解放は復元と同じ。復元/控えとの同時要求は一方だけ開始し、通信不明では解放しない（IMP-006）
 8. ホームの測り：毎分のタイマーで API-109 を読み、`homeBytes`・`hostFreeBytes`・box-manager が自分で止めた世代と理由を `workspace`/`boxes` に反映して `stop_reason`（`disk_quota`・`disk_low`）で世代を閉じる。API-088 の `homeBytes`・`homeLimitBytes`・`vmHomeState`・`lastSnapshot` を返す
 9. 起こす前の確かめ（FR-074 1a・1b）：`vm_home_state` が `broken`、ホームが 4GB 超え、ホストの空きが 3GB 未満のとき、タスクのために起こさない。道具の結果に「VM のホームが容量を超えている・壊れている」と次にやることを書く
 10. 再開の表の行（持ち主は 7）：`restoring`・`rebuilding`（API-108 の GET で聞く。動いていれば待つ）、`snapshotting`（API-143 の GET。終わっていれば `ready`、知らない・失敗なら `failed`）、`vm_snapshots` の `creating`（`vm_op` が `snapshotting` でないとき `failed`）、`sandbox_commands` の `running`（`expired`。7.3 の 7）。ステップ 4 の登録口に足す。`starting`・`stopping`・止まっていない世代はステップ 4 が持つのでここでは書かない。終わるまで VM を起こさない

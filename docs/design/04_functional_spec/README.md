@@ -1,5 +1,5 @@
 # 04. 機能仕様
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ インプット：[03_use_cases](../03_use_cases.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ インプット：[03_use_cases](../03_use_cases.md)
 
 > **3行で**
 > 1. v1.0 で足したのは常駐の仕組み：受付とルーター（FR-090）・メインのターン（FR-091）・振り分けと報告（FR-092）・`send_to_owner`（FR-093）・ルーチン（FR-094）・予約した確認（FR-095）・webhook（FR-096）・記憶（FR-097。プロフィールと検索の 2 層）・文脈の組み方（FR-098）・Web Push（FR-017）。詳細は [resident.md](resident.md)。
@@ -102,7 +102,7 @@ flowchart LR
 | 対象 | 値 | 意味 | 遷移先 |
 |---|---|---|---|
 | `wakes.status` | `queued` | 受けて並んでいる | consumed, dropped |
-| | `consumed` | ターン・タスクに渡した | queued, dropped（失敗したターンから戻す。3 回目は `retry_exceeded`：D-276） |
+| | `consumed` | ターン・タスクに渡した | 副作用未発生を証明できる失敗のみqueued/dropped。確定済み/不明ならconsumed維持（D-337） |
 | | `dropped` | 日次の上限・行き先がない・戻した回数を超えた・webhook が 1 分 60 件を超えた（終わり。重複は `source_key` の UNIQUE で行を作らない） | — |
 | `turns.status` | `running` | メインが歩んでいる | done, halted, failed |
 | | `done`・`halted`・`failed` | 終わり（`halted` は上限、`failed` は LLM の失敗） | — |
@@ -133,7 +133,7 @@ flowchart LR
 | | `expired` | 世代が替わるなどで実行されなかった（終わり） | — |
 | `routines.enabled` | 1・0 | 動かす・止めた | — |
 | `scheduled_wakes.status` | `pending`・`fired`・`cancelled` | 待っている・起こした・消した | — |
-| `workspace.vm_op` | `none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding` | VM の操作は 1 つずつ（D-251）。失敗・打ち切りは `none` に戻す（D-294・D-295） | `none` → ほかの値 → `none`（[10 states](../10_diagrams/states.md#workspacevm_op)） |
+| `workspace.vm_op` | `none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding`・`clearing_browser` | 排他。復元/作り直し/消去は結果DB確定とACK後だけnone。応答不明は維持（D-333・334） | [10 states](../10_diagrams/states.md#workspacevm_op) |
 | `workspace.vm_home_state` | `ok`・`broken` | VM のホームの状態。`broken` は戻す・作り直すだけ受ける（D-294） | [10 states](../10_diagrams/states.md#workspacevm_home_state) |
 | `push_outbox.status` | `pending`・`sent`・`failed`・`expired`・`skipped` | Web Push の送り待ち。購読ごとの行（D-267・D-288）。`skipped` は見えている端末があって送らなかった | — |
 

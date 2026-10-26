@@ -1,5 +1,5 @@
 # ステップ 4. 常駐の仕組み
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-24） ／ 設計の版：v1.4 ／ インプット：[常駐の機能仕様](../design/04_functional_spec/resident.md)・[道具の機能仕様](../design/04_functional_spec/tools.md)・[VM の機能仕様](../design/04_functional_spec/vm.md)・[常駐の表](../design/08_database/resident.md)・[VM の表](../design/08_database/vm.md)・[常駐の API](../design/09_api/resident.md)・[状態遷移](../design/10_diagrams/states.md)・[シーケンス](../design/10_diagrams/sequences.md)・[ユースケース](../design/03_use_cases.md)・[技術仕様 §7・§11](../design/11_tech_spec.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[常駐の機能仕様](../design/04_functional_spec/resident.md)・[道具の機能仕様](../design/04_functional_spec/tools.md)・[VM の機能仕様](../design/04_functional_spec/vm.md)・[常駐の表](../design/08_database/resident.md)・[VM の表](../design/08_database/vm.md)・[常駐の API](../design/09_api/resident.md)・[状態遷移](../design/10_diagrams/states.md)・[シーケンス](../design/10_diagrams/sequences.md)・[ユースケース](../design/03_use_cases.md)・[技術仕様 §7・§11](../design/11_tech_spec.md)
 
 > **3行で**
 > 1. チャットで頼むと、メインが答えるか `delegate` で振り分け、タスクが VM で仕事をして `report` し、メインが起きて `send_to_owner` で持ち主に伝えるところまで動く。確かめは curl と SSE（画面はステップ 6）。
@@ -59,12 +59,12 @@
 4. 道具（`turn/tools/`）：`send_to_owner`・`delegate`（4.5.a）・`list_tasks`・`steer_task`・`cancel_task`（4.5.c）・`search_memory`（4.8。中身は 4.8 が済むまでは空の結果を返す）・`read_skill`・`web_search`・`web_fetch`（ステップ 3 で `apps/makase/src/edge/` に移したものを渡す。`web_fetch` は egress と同じアドレスの判定とリダイレクト先の再判定を通る：D-164）。VM の道具は渡さない（D-236）。`schedule_wake`・`propose_routine`・コネクタの道具はステップ 5 で足す。道具の一覧はターンの始めに決めて途中で変えない（D-238）。使えないときはエラーを返し、文に次にやることを書く。
 5. 作るものを持つ道具（`send_to_owner`・`delegate`・`steer_task`）は、`tool_use` の ID を UNIQUE の列に入れ、作ると `tool:<callId>` の `done` を同じトランザクションで書く。`repeatable = 0`。
 6. `send_to_owner`（FR-093）：`text`・`file`（`/data/files/<taskId>/` の下だけ）・`choices`（2〜4）。`chat_messages`（`role = 'main'`・`notify`）と、`notify` なら購読ごとの `push_outbox` の行、SSE の合図を同じトランザクションで書く。送り手はステップ 5。
-7. 閉じる：記憶の更新（4.8。4.8 が済むまでは何もしない空の関数）を回し、`turns` を `done` にして `kick()`。LLM の失敗が 3 回続いたら `failed` にし、同じトランザクションで、このターンで `consumed` にしたきっかけをすべて `queued` に戻して `retries` を増やす。3 回目は `dropped`（`retry_exceeded`）と `system` の知らせ（D-276）。汚染は `taintFromInputs`・`addTaintSource`（`packages/kernel/src/taint.ts`）で引き継ぐ。
+7. 記憶更新後done・kick。LLM3連続失敗はFR-091に従い副作用未発生を証明できる場合だけ再受付（2回まで）。副作用確定/不明ならfailed・元wakeはconsumed維持、system停止通知/outbox/failure_notice_idを一括確定し自動再開しない。delegate・通知・予約・Intent直後に3連続失敗させ、再起動しても作成数が増えず確定済み/未完了が通知されることを試験（IMP-009）。汚染継承は従来どおり
 確かめ：ScriptedLlm の台本「`send_to_owner` を呼ぶ → 道具なしで終わる」で、`chat_messages` の `main` の行と `push_outbox`（購読があれば）と SSE の `chat.created` が出る。地の文だけの台本ではチャットに何も出ない。`web_search`・`web_fetch` がメインの道具の一覧にある。41 歩目を呼ぼうとすると `halted`（`steps_exceeded`）と `system` の行が出る。
 
 ### 4.4 文脈の組み方・キャッシュ・要約
-1. `context/build.ts`：①共通の指示 ②道具の定義 ③エージェントの指示・スキルの一覧・振り分け先の一覧 ④プロフィールの写し ⑤要約 ⑥履歴 ⑦最新、の順に組む。①〜⑤の部分ごとの sha256（`@open-team/kernel` の `canonicalJson`・`sha256Hex`）を `context_snapshots.parts_hash` に入れて固定する。作るのは、メインは起動時・要約のとき、タスクは始めるとき（`owner_kind = 'task'`）。
-2. ⑥は `task_steps` の `llm:<n>`（返った assistant の content をそのまま）・`tool:<callId>`・`input:<n>` を並べて作る。組み直しは表から描き直さずこの記録だけを使う。記憶・一覧・持ち主の記憶の直しが変わったときは、次の `user` メッセージの中に「（本体から：…）」の text ブロックで足し、その文を `input:<n>` に書く（D-286）。
+1. FR-098の①〜⑤の送信本文を `fixed_parts_json` に保存し、保存した各部分からparts_hashを算出。メインは初回・要約、タスクは開始時（⑤はbrief）に作る。再起動は保存本文だけを使い、エージェント・パック・コネクタ変更後も一致することを試験。欠落/ハッシュ不一致は停止通知し、最新設定から補わない（IMP-008）
+2. ⑥は安全検査を通過したtask_stepsだけから再構成する。秘密混入応答は全体非保存・会話終了（FR-075）、拒否結果をassistant原本として再送しない。通常の安全なcontent/inputは原本のまま。記憶や一覧変更の知らせは次のuserのtextブロックに足しinput歩みに保存（D-286）
 3. `claude.ts`（ステップ 1 で `packages/llm/src/claude.ts` に移したもの）を直す。(a) 思考のブロックを捨てず、返った content を `raw` として返し、`ChatMessage` に `raw` つきの assistant を足して素通しで送る。(b) `system` を text ブロックの配列にして、⑤の終わりと⑥の最後のブロックに `cache_control`（1 時間）を付ける。(c) 要約のとき以外は ①〜⑤ を 1 バイトも変えない。(d) `usage` の `cache_read_input_tokens`・`cache_creation` の 5 分・1 時間を `LlmUsage` に分けて持ち、`usage_records` に書く。
 4. `context_management`（`clear_tool_uses_20250919`、beta `context-management-2025-06-27`）を、スクショを持つタスクの呼び出しに付ける。残す回数は `browser.keep_screenshots`（既定 3）。
 5. 外れの記録：前の呼び出しから 1 時間以内で、①〜⑤のハッシュが前と同じなのに `cache_read_tokens` が先頭の長さの 9 割に届かなければ `cache.miss` を `audit_logs` に書く（部分ごとのハッシュつき）。呼び出しの前の入力が 20 万トークンを超えるなら呼ばず `halted`（`context_exceeded`）。
@@ -133,7 +133,7 @@
 | S4-06 | 受付：`source_key` の重複・3 秒のまとめ・動いている間の `chat` が `queued` のままで、終わりに次のターンが始まる | 単体と結合（4.2 の確かめ） | FR-090・D-324 |
 | S4-07 | タスクの完了が同時に 2 つ届くと 1 ターンにまとまる。実行の途中の再起動でもきっかけを落とさない | 結合（台本 2 本を同時に閉じる・`kill` を入れる） | UC-054・FR-090 |
 | S4-08 | 費用：1 ターン $1・40 歩・10 分、`daily_usd`・`daily_auto_usd` の判定、`auto` は `dropped`、`chat` は待って毎分のタイマーで始まる。見積もりの予約と精算 | 単体 | FR-013・D-322 |
-| S4-09 | 失敗したターンのきっかけの戻し（2 回まで、3 回目は `retry_exceeded`）。`input:<n>` からの組み直しが同じバイト | 単体 | D-276・D-277 |
+| S4-09 | 副作用なしだけ再受付（2回まで）。副作用後は停止通知・元wake維持・再作成0。input/fixed_parts_jsonから同一バイト再構成 | 単体、IMP-008・009受入表 | D-336・337 |
 | S4-10 | `tool_call_id` での再開：タスク・メッセージ・`steer_task`・`cancel_task` を重ねて作らない | 単体（`started` のまま再開） | D-249・D-287 |
 | S4-11 | 再開の表：このステップの行すべて（`takeovers` を含む）。後のステップの表の行は登録の口があること | 単体（行ごと）＋ `kill` を入れた結合 | FR-084・D-327・NFR-071 |
 | S4-12 | 先頭のハッシュとキャッシュの外れの判定。`cache_control` の位置 | 単体（`requests` の中身を見る） | FR-098・NFR-083 |

@@ -1,5 +1,5 @@
 # 08. DB設計：VM と確認の表（v0.6 から引き継ぐ表）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[08 DB設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[08 DB設計](README.md)
 
 > **3行で**
 > 1. v0.6 の TBL-031〜040 を引き継ぐ。`boxes` は「持ち主に 1 台の VM の 1 回の起動（世代）。実体は 2 つのコンテナ（`box-browser`・`box-shell`）の組」になり、エージェントとタスクの列をなくして、画面の番（`screen_task_id`）を持つ。
@@ -19,7 +19,10 @@
 | owner_login | TEXT | NO | — | Tailscale のログイン名。起動のとき `OWNER_LOGIN` と比べ、違えば止まる。`.env` に `OWNER_LOGIN_REPLACE=1` があるときだけ上書きして起動する（D-170） |
 | max_tasks | INTEGER | NO | 3 | 裏のタスクの同時数。CHECK 1〜5（D-217） |
 | snapshot_hour | INTEGER | NO | 4 | VM の控えを取る時刻（0〜23、`TZ`） |
-| vm_op | TEXT | NO | `'none'` | VM の操作：`none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding`（D-251）。`none` 以外の間は起こさない。遷移は [10 states](../10_diagrams/states.md#workspacevm_op) |
+| vm_op | TEXT | NO | `'none'` | `none`・`starting`・`stopping`・`snapshotting`・`restoring`・`rebuilding`・`clearing_browser`。`none` 以外は起こさない。遷移は [10 states](../10_diagrams/states.md#workspacevm_op) |
+| vm_op_id | TEXT | YES | — | 復元・作り直し・消去のUUID。開始から結果のACK完了まで保持 |
+| vm_op_payload | TEXT | YES | — | 不変のJSON（action・snapshotId・消去時boxId）。再送時に再構成しない |
+| vm_op_ack_pending | INTEGER | NO | 0 | 0/1。結果・監査確定時1、ACK完了時0。1なら起動時はPOSTせずACK再送 |
 | vm_op_started_at | TEXT | YES | — | `vm_op` を `none` 以外にした時刻。`none` のとき NULL。上限（`starting`・`stopping` 2 分、`snapshotting`・`restoring`・`rebuilding` 30 分）を超えたら打ち切る（D-294） |
 | vm_home_state | TEXT | NO | `'ok'` | VM のホーム（2 つのボリューム）の状態：`ok`・`broken`（戻し・作り直しに失敗した。戻す・作り直すだけ受ける：D-294） |
 
@@ -167,7 +170,7 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 | owner_id | TEXT | NO | — | PK | タスクかターンの ID |
 | step_key | TEXT | NO | — | PK | 歩みの名前（`llm:<n>`・`tool:<callId>`・`box:<actionId>`・`review:<actionId>`・`input:<n>`（ターンに足した文。`result` に描いた文をそのまま：D-277）・`memory:<n>`（記憶の更新）。`<n>` はその持ち主の中の歩みの番号。要約はターンの外の仕事なので書かない：D-323） |
 | status | TEXT | NO | — | | `started`・`done`（`done` の結果に `aborted`（交代で中止）がある） |
-| result | TEXT | YES | — | | JSON。`done` のとき必須。LLM の歩みは返った assistant の content をそのまま（思考のブロック・署名・`tool_use` の ID を含む。D-256）。画像は入れず、スクショのパスだけ（組み直すときに同じバイトになるよう、パスから元の画像を読む） |
+| result | TEXT | YES | — | | JSON。`done` のとき必須。秘密検査を通過したLLM応答のみcontent原本（思考・署名・tool_use ID含む）を保存。秘密入力を含む応答は本文を破棄し `secret_rejected` の理由コードだけ、会話を終了（FR-075）。画像は安全にマスク済みのパスだけ（再構成時に同じバイトを読む） |
 | repeatable | INTEGER | NO | 1 | | 0 なら、`started` のまま残っても繰り返さない（VM の操作・書き込み） |
 | reserved_micro_usd | INTEGER | NO | 0 | | LLM の歩みの見積もりの費用。`started` の間は日次の残りから引いて数える |
 | started_at | TEXT | NO | NOW | | |
@@ -191,11 +194,11 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 | task_id | TEXT | NO | — | FK tasks | |
 | box_id | TEXT | NO | — | FK boxes | VM の世代 |
 | screen_epoch | INTEGER | NO | — | | 確認を作ったときの `boxes.screen_epoch` を写す。○ の実行の直前に今の値と比べる（D-299） |
-| action_id | TEXT | NO | — | UNIQUE | 実行する操作の ID（`browser_actions.id`） |
+| action_id | TEXT | NO | — | UNIQUE, FK browser_actions | 実行する操作の ID |
 | status | TEXT | NO | `'pending'` | | `pending`・`executing`・`executed`・`rejected`・`expired`・`unknown_outcome` |
 | summary | TEXT | NO | — | | カードの要約（200字まで） |
 | action | TEXT | NO | — | | JSON。操作の引数（秘密は `***`） |
-| content | TEXT | NO | — | | JSON。タブ・フレーム・ページの URL・操作の先・フォームの値の要約（秘密の欄はハッシュ） |
+| content | TEXT | NO | — | | JSON。タブ・フレーム・ページURL・操作の先・フォームの値の要約・`effectiveAction`（実効送信先絶対URL）。秘密を含むURLは保存せず交代（API-103） |
 | content_hash | TEXT | NO | — | | `action`・`content`・`box_id` からの sha256 |
 | tripwires | TEXT | NO | `'[]'` | | 当たった合図（`declared`・`T-1`〜`T-7`） |
 | review_reason | TEXT | YES | — | | オートレビューが止めて人に回したときの理由（200字まで） |
@@ -210,7 +213,7 @@ Web Push の宛先。端末ごとに 1 行（FR-017・ADR-067）。
 
 - 制約：`status = 'expired'` ⇔ `expire_reason IS NOT NULL`。`pending` からの変更は条件つきの UPDATE（`WHERE status = 'pending'`）だけ
 - 中身が変わったとき（`page_changed`）は新しい確認を作らず、Claude に決め直させる（D-159）。同じ操作に2つ目の確認はできない（`action_id` の UNIQUE）
-- `browser_actions.check_id` と `browser_checks.action_id` は相互参照なので、`foreign_keys=ON` では操作の行（`check_id` NULL）→ 確認の行 → 操作の行の `check_id` を UPDATE の順で入れる
+- `foreign_keys=ON` とCHECKを維持する。同一トランザクションで操作を `verdict = allowed`・`check_id = auto_review_id = NULL` の仮行として挿入 → 確認/レビュー行を挿入 → `verdict` と対応する参照IDを同時更新する。仮行はcommit前の内部状態で、実行・通知・他接続への公開は禁止。途中失敗は全体rollback。レビューから人へは `reviewed` を保ち、確認行作成・操作とレビューの `check_id` 更新を一括commitする（IMP-007）
 - 監査ログに `browser.checked`（作った・決めた・結果）を残す
 
 ### TBL-040：sandbox_commands（ターミナルの記録）
@@ -239,4 +242,3 @@ VM の中のコマンド1つ（実行は `box-shell`）。今の表の `session_
 - 制約：`status = 'done'` ⇔ `ok IS NOT NULL`。`length(output) <= 65536`（今の 200000 から変える）。索引は `(box_id, created_at)`
 - `running` のまま VM が落ちた・時間を超えたコマンドは `expired`。再開のときはやり直さず、Claude に「前のコマンドが実行されたか分からない」と伝える（FR-084）
 - 想定：1タスクで最大 200 行（`terminal.max_commands`：NFR-080）
-

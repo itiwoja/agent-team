@@ -1,5 +1,5 @@
 # ステップ 8. 隔離の試験・導入手順書・段 2 と 3
-- プロジェクト：Agent-Team-Open ／ 手順書の版：v1（2026-10-24） ／ 設計の版：v1.4 ／ インプット：[11 技術仕様書](../design/11_tech_spec.md)（§10・§11・§12）、[05 非機能](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)（デプロイ構成・コンテナ表）、[01 要件](../design/01_requirements.md)（§2・REQ-076・077）、[UC-042](../design/03_use_cases.md)、[ADR-041](../design/adr/ADR-041-linux-host.md)・[045](../design/adr/ADR-045-egress.md)・[049](../design/adr/ADR-049-docker-compose.md)・[055](../design/adr/ADR-055-agpl-license.md)・[065](../design/adr/ADR-065-webhook-funnel.md)
+- プロジェクト：Agent-Team-Open ／ 手順書の版：v1.1（2026-10-25） ／ 設計の版：v1.5 ／ インプット：[11 技術仕様書](../design/11_tech_spec.md)（§10・§11・§12）、[05 非機能](../design/05_non_functional.md)、[07 アーキテクチャ](../design/07_architecture.md)（デプロイ構成・コンテナ表）、[01 要件](../design/01_requirements.md)（§2・REQ-076・077）、[UC-042](../design/03_use_cases.md)、[ADR-041](../design/adr/ADR-041-linux-host.md)・[045](../design/adr/ADR-045-egress.md)・[049](../design/adr/ADR-049-docker-compose.md)・[055](../design/adr/ADR-055-agpl-license.md)・[065](../design/adr/ADR-065-webhook-funnel.md)
 
 > **3行で**
 > 1. 段 1（WSL2）でステップ 1〜7 が終わった構成を、(a) 11 §11 の隔離の試験を全体の構成で全部通し、(b) 設計が「手順書に書く」とした項目を集めてルートの `README.md`（導入手順書）に書き、(c) 段 2（クラウドの amd64 の Linux VM）で 1 週間放置し、(d) 段 3（ラズパイの arm64）で実機の計測をして、(e) eval (4) とリリース前の確かめで閉じる。
@@ -64,15 +64,15 @@
 | 3 ホストへの入りを断る | 既定：Docker のゲートウェイの `isolated` モードが使える版なら Compose に書いてある（何もしなくてよい）。任意：使えない版では、box ネットワークのブリッジからホストへの入りを捨てる規則を 1 行入れる（DOCKER-USER。WSL の再起動で消えるときの残し方も）。**入れなくても VM は起きる**（本体は確かめない）ことと、入れない場合に残る危険を 1 文で。Docker が別の VM にある置き先では効かない | 07 ホスト側の手順、D-326、ADR-068 |
 | 4 取ってきて `.env` を書く | `git clone`（またはリリースの tar）、`.env.example` を `.env` にして権限 600。11 §10 の環境変数の表を**必須・任意に分けて**書く（`ANTHROPIC_API_KEY`・`OWNER_LOGIN`・`TS_AUTHKEY`・`BOX_MANAGER_TOKEN`・`ENCRYPTION_KEY`・`VAPID_*`・`TS_HOSTNAME`・`TS_FUNNEL`・`TZ`・`CLAUDE_REVIEW_MODEL`・`OWNER_LOGIN_REPLACE`・Google・GitHub）。足りないと起動が「足りない名前」を出して止まる（UC-042 E2） | 11 §10、NFR-072、UC-042 |
 | 5 鍵の作り方 | `BOX_MANAGER_TOKEN`・`ENCRYPTION_KEY` は `openssl rand -base64 32`（`ENCRYPTION_KEY` は失くすと refresh token と受け口の秘密が読めなくなるので控えを取る）。**VAPID の鍵**（コマンドは実装で決める：`npx web-push generate-vapid-keys` 想定。作り直すと購読が全部無効になるので画面で購読し直す）。`TS_AUTHKEY` の作り方（再利用可・タグ付きにするかは「実装で決めること」）。`VAPID_SUBJECT` は `mailto:` | 11 §10、ADR-067、NFR-072 |
-| 6 起動と最初の画面 | `docker compose pull`（または build）→ `docker compose up -d` → ログの見方 → `https://makase.<tailnet>.ts.net` を tailnet に入った端末で開く → `GET /api/health` が ok。メモリが足りない・必須の値がない・64bit でない場合の出方（UC-042 E1・E2）。`tailscale serve` は `tailscale` コンテナが自動で行う（手で打たない）。持ち主以外（別のログイン名）は 403 | UC-042、NFR-064、ADR-046 |
+| 6 起動と最初の画面 | [運用契約](../design/11_operations.md)のリリースdigest一組を取得。Compose pull/buildに加えBOX_BROWSER_IMAGE・BOX_SHELL_IMAGEを明示pullし存在/CPUを検証してup。HTTPS画面・health・持ち主以外403・資源不足時の表示を確認 | UC-042、NFR-064、IMP-011 |
 | 7 スマホで使う | 端末を tailnet に入れる、**iOS は「ホーム画面に追加」した PWA だけ Web Push が届く**（iOS 16.4 以上）、通知の許可、試しの通知（設定画面） | ADR-067、NFR-074・086 |
 | 8 最初の 1 件 | チャットで頼む、VM の画面で見る、確認の ○/×、パック「告知ページ制作」を入れる、GitHub をつないで PR まで（任意の節へ誘導） | 標準パック、UC-052・053・061 |
 | 9 webhook を使うとき（任意） | tailnet の ACL で `makase` に `funnel` の属性を許す（`nodeAttrs`）。公開は **8443 番だけ**で、URL は `https://makase.<tailnet>.ts.net:8443/hooks/<hookId>`。受け口は画面で作る（URL と秘密は**1 度だけ**表示）。**確かめ**：`curl -si -X POST <URL> -d '{}'` が 401 を返す（404 なら `/hooks/<hookId>` がパスのまま :8081 に届いていない：D-305）。インターネット側から 443 番に届かないこと。GitHub 側の設定（リポジトリの Webhooks に URL・秘密・content type）。汎用の送り方（`curl` と `openssl` の署名の例）。**1 分 60 件を超えると 429 で何も残さず、GitHub は自動では送り直さない**ので、Redeliver を手で押す。使わないなら受け口を作らなければ公開されない | 07、ADR-065、NFR-064・085、D-305、FR-096 |
 | 10 費用と上限 | 1 タスク $3・メイン 1 ターン $1・日次 $10・自動のきっかけ $7、何もない日は $0.05 以下、設定画面で変えられる。API キーは自分持ち | NFR-076・082 |
-| 11 バックアップ・引っ越し・暗号化 | 毎日 SQLite のバックアップ（7 世代）と VM の控え（3 世代）がどこにあるか。**引っ越し**：旧ホストで `docker compose down`→ `makase-data` と VM のホーム（`makase-browser-profile`・`makase-vm-home`。`makase-vm-snapshots` と `makase-ts-state` は要るか書く）を `docker run --rm -v ... tar` でコピー→新ホストで `.env` を同じ `ENCRYPTION_KEY` で置き `up -d`（`OWNER_LOGIN` が違うときは `OWNER_LOGIN_REPLACE=1`）。**ディスクの暗号化を勧める**（VM のホームと控えに Cookie が入る：R-81）。ホストの空きが 3GB を切ると VM が止まる | D-316、NFR-062・070・084、R-81、D-170 |
-| 12 更新 | イメージを入れ替えて `docker compose pull && docker compose up -d`。マイグレーションは起動時に自動で、前にバックアップが 1 回取られる。VM のホームはそのまま。戻したいときの手順（バックアップから戻す） | NFR-070・077 |
+| 11 バックアップ・引っ越し・暗号化 | SQLite7世代/VM控え3世代の場所とディスク暗号化を説明。[運用契約](../design/11_operations.md)で新規受付停止→動的VM停止/削除→ボリューム非使用確認→読み取り専用コピー。移行先は同じ暗号鍵、必要ならOWNER_LOGIN_REPLACE。Compose downだけでコピーを開始しない | D-316、NFR-070・084、IMP-010 |
+| 12 更新 | [運用契約](../design/11_operations.md)のCompose+VM2イメージの一組を先にpull。失敗なら切替中止。旧世代を停止/削除して新digestで起動。起動前DBバックアップと自動migration、ホーム保持、バックアップから戻す手順を記載 | NFR-070・077、IMP-011 |
 | 13 困ったとき | 起動しない（ログ・`.env`）、画面が開かない（tailnet・HTTPS 有効・証明書の待ち）、VM が起きない（空き・メモリ・Docker の版）、「ブラウザのサンドボックスなし」の意味（R-100）、Push が来ない、WSL が止まった | UC-042、R-100、API-111 |
-| 14 止める・消す | `docker compose down`（データは残る）、`down -v` は全部消える | — |
+| 14 止める・消す | [運用契約](../design/11_operations.md)に従い動的VMも止める。通常停止はデータ保持、完全削除は確認後に対象導入のボリュームを明示削除。down/-vだけで完結しない | IMP-010 |
 | 付録 | 環境変数の全表、ポート（ホストは開けない）、ボリュームの一覧、LLM の接続先は Anthropic 直のみ（v1.4・D-315） | 11 §10、07 |
 
 手順：
@@ -89,7 +89,7 @@ README の約束（`TARGETARCH` 依存は arm64 の分岐も書く・Compose と
 2. どこでビルドするか：GitHub Actions に `release.yml` を足す。おすすめは arm64 を **arm64 の runner**（`ubuntu-24.04-arm`）でネイティブにビルドし、amd64 と合わせてマニフェストを作る。QEMU での arm64 は Chromium のイメージで遅い・落ちることがあるので避ける（ためして決める）。アクションは SHA で固定し、権限は `packages: write` だけをそのジョブに
 3. 置き場：GHCR（`ghcr.io/<owner>/makase-*`）が第一候補（リポジトリと同じ GitHub・OSS は無料・匿名で pull できる）。タグはリリースの版と `latest`。`compose.yaml` の `image:` はこれを指す（`build:` は `compose.dev.yaml` に残す）
 4. ビルドの前に `better-sqlite3` が arm64 の prebuilt で入ること、`chromium`（Debian）が arm64 にあること、`TARGETARCH` を使う Dockerfile の行に arm64 の分岐があること、`pnpm-workspace.yaml` の `onlyBuiltDependencies` が arm64 でビルドできるものだけであることを確かめる
-5. amd64 の VM（段 2）と arm64（8.6）の両方で `docker compose pull` が通ることを確かめる
+5. amd64・arm64それぞれイメージなし環境でComposeとVM2イメージを明示pullし、公開手順だけでVM起動まで確認。更新後は新しい世代の解決後digestも記録する（IMP-011）
 6. SBOM と署名は今回の範囲外（要るなら後で）
 
 確かめ：1 つのタグで amd64 と arm64 の両方が pull でき、CI の `check-image-digests` が緑。段 2 の VM で README の `pull` から起動する。

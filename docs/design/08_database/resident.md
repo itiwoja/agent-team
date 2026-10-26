@@ -1,5 +1,5 @@
 # 08. DB設計：常駐の表（v1.0 で足す表）
-- プロジェクト：Agent-Team-Open ／ 版数：v1.4（2026-10-24） ／ 親：[08 DB設計](README.md)
+- プロジェクト：Agent-Team-Open ／ 版数：v1.5（2026-10-25） ／ 親：[08 DB設計](README.md)
 
 > **3行で**
 > 1. きっかけ（`wakes`）・メインのターン（`turns`）・チャット（`chat_messages`）が常駐の中心。どのきっかけも `wakes` の 1 行になり、`source_key` の UNIQUE で重複を捨てる。
@@ -33,7 +33,7 @@
 </details>
 
 - 索引：`(status, target_kind, created_at)`・`(hook_id, created_at)`（件数）。`consumed`・`dropped` の行は 30 日で消す（監査は `audit_logs`）
-- メインのターンが動いている間に届いた `chat`・`approval_done` は `queued` のまま。ターンが終わったら（`done`・`halted`・`failed`）すぐ次のターンを始める（D-324）。`failed` のターンで `consumed` にしたメイン宛ての行は、すべて `queued` に戻して `retries` を 1 増やす。3 回目は `dropped`（`retry_exceeded`。D-276）
+- 動いている間に届いたきっかけは `queued` のまま、終了後に次へ渡す。失敗ターンの元のきっかけを戻すのはFR-091の「副作用未発生を証明できる場合」だけ。確定済み/結果不明の副作用があれば `consumed_turn_id`・`consumed_step_key` と `consumed` を保持し再受付しない（IMP-009）
 
 ### TBL-042：turns（メインのターン）
 <details>
@@ -52,6 +52,8 @@
 | halt_reason | TEXT | YES | — | | `budget_exceeded`（1 ターンの $1）・`daily_budget_exceeded`・`steps_exceeded`・`timeout`・`context_exceeded`（呼び出しの前の入力が 20 万トークンを超えた。次のターンの開始で要約する：D-323） |
 | started_at | TEXT | NO | NOW | | |
 | finished_at | TEXT | YES | — | | |
+
+`turns` には `failure_notice_id TEXT NULL UNIQUE REFERENCES chat_messages(id)` も持つ。副作用後の失敗確定・system通知・outboxを同一トランザクションで作り、このIDを埋める。通知はrole=system/turn_id=対象ターン、pushのsource_refはそのmessage ID。再起動しても再作成しない。副作用判定は当該ターンの歩みと `tool_call_id` の対象を照合し、不明なら停止側に倒す。
 
 </details>
 
@@ -185,7 +187,7 @@
 |---|---|---|---|---|---|
 | id | TEXT | NO | — | PK | |
 | task_id | TEXT | NO | — | FK tasks | |
-| action_id | TEXT | NO | — | UNIQUE | `browser_actions.id` |
+| action_id | TEXT | NO | — | UNIQUE, FK browser_actions | `browser_actions.id` |
 | verdict | TEXT | YES | — | | `pass`・`stop`・`error`。答えを待つ間は NULL |
 | reason | TEXT | YES | — | | 200 字まで |
 | model | TEXT | NO | — | | 使ったモデル |
@@ -219,6 +221,7 @@
 | owner_kind | TEXT | NO | — | | `main`・`task` |
 | owner_id | TEXT | YES | — | | タスクの ID（メインは NULL） |
 | parts_hash | TEXT | NO | — | | JSON。①〜⑤の部分ごとの sha256（FR-098） |
+| fixed_parts_json | TEXT | NO | — | | ①〜⑤の実際に送る固定本文JSON（system・tools・指示・スキル/振分先一覧・記憶・要約、タスクはbrief）。不変。各部分の保存バイトからparts_hashを算出し、再開時検証。memory_copy/summaryはこの本文の投影 |
 | memory_copy | TEXT | NO | — | | ④の記憶の写し（プロフィール） |
 | summary | TEXT | YES | — | | ⑤の要約（メインだけ） |
 | history_from | TEXT | YES | — | | 履歴（⑥）に入れる最初のチャット・歩みの位置 |
