@@ -1,5 +1,7 @@
 #!/bin/bash
-# 手順1.1だけの起動役。Dockerの--initと併用し、root・任意引数では起動しない。
+# 手順1.2の起動役。ChromiumとCDPはbox-agentが所有する。
+# Dockerの--initと併用し、root・任意引数では起動しない。
+set +x
 set -Eeuo pipefail
 set +m
 umask 077
@@ -14,6 +16,17 @@ fail() {
 }
 
 [[ $# -eq 0 ]] || fail '起動引数は受け付けません。設定はイメージ内で固定しています。'
+
+# 外部コマンドを1つでも起こす前に、資格を非export変数へ退避する。
+# unsetは初期環境の/proc上での秘匿まで保証するものではない。
+browser_token=${BROWSER_TOKEN-}
+export -n browser_token
+unset BROWSER_TOKEN SHELL_TOKEN
+[[ -n "$browser_token" ]] || fail 'BROWSER_TOKENは空でない値が必要です。'
+export CONTROL_EPOCH=${CONTROL_EPOCH-0}
+[[ $CONTROL_EPOCH =~ ^(0|[1-9][0-9]*)$ ]] || fail 'CONTROL_EPOCHは非負のsafe integerが必要です。'
+[[ ${#CONTROL_EPOCH} -lt 16 || (${#CONTROL_EPOCH} -eq 16 && "$CONTROL_EPOCH" < 9007199254740992) ]] \
+  || fail 'CONTROL_EPOCHは非負のsafe integerが必要です。'
 [[ $(id -u) == 10000 && $(id -g) == 10000 ]] || fail 'browser（uid/gid 10000）で起動してください。rootでは起動しません。'
 
 export HOME=/home/browser DISPLAY=:99
@@ -34,13 +47,25 @@ cleanup() {
   trap - EXIT
   trap '' TERM INT HUP
   set +e
+  deadline=$((SECONDS + 5))
+  # 押下キー・ボタンの解放にはXが要る。agentの4秒deadlineを先に待ち、
+  # その間はX/WM/VNCを維持する。全体の停止猶予は従来どおり約5秒。
+  for pid in "${child_pids[@]}"; do
+    if [[ ${child_names[$pid]} == box-agent ]]; then
+      kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
+      while ((SECONDS < deadline)); do
+        if ! kill -0 -- "-$pid" 2>/dev/null && ! kill -0 "$pid" 2>/dev/null; then break; fi
+        sleep 0.05
+      done
+      break
+    fi
+  done
   # setsidで分けたプロセスグループを逆順に止め、Chromiumの孫も対象にする。
   for ((index=${#child_pids[@]}-1; index>=0; index--)); do
     pid=${child_pids[index]}
     # setsidがまだ実行前なら、グループでなく直接の子へ送る。
     kill -TERM -- "-$pid" 2>/dev/null || kill -TERM "$pid" 2>/dev/null
   done
-  deadline=$((SECONDS + 5))
   while ((SECONDS < deadline)); do
     remaining=0
     for pid in "${child_pids[@]}"; do
@@ -67,7 +92,8 @@ start_child() {
   local name=$1 pid
   shift
   # ジョブ制御は無効なので、setsidはforkせずにexecし、$!がグループIDになる。
-  setsid "$@" &
+  # 明示的にstdinを継承し、box-agentだけは下の匿名pipeから資格を受け取る。
+  setsid "$@" <&0 &
   pid=$!
   child_pids+=("$pid")
   child_names[$pid]=$name
@@ -97,7 +123,7 @@ wait_ready() {
     fi
     sleep 0.1
   done
-  fail "$name が${seconds}秒以内に準備できませんでした。sandboxを無効化せず停止します。"
+  fail "$name が${seconds}秒以内に準備できませんでした。全体を停止します。"
 }
 
 x_ready() {
@@ -108,10 +134,6 @@ wm_ready() {
   timeout --kill-after=1s 1s xprop -root _NET_SUPPORTING_WM_CHECK | grep -q 'window id # 0x[1-9a-fA-F]'
 }
 
-chromium_ready() {
-  timeout --kill-after=1s 1s xdotool search --onlyvisible --class '[Cc]hromium'
-}
-
 vnc_ready() {
   timeout --kill-after=1s 2s python3 -c '
 import socket
@@ -120,16 +142,23 @@ with socket.create_connection(("127.0.0.1", 5900), timeout=0.5) as sock:
 '
 }
 
-websocket_ready() {
-  timeout --kill-after=1s 2s python3 -c '
-import socket
-with socket.create_connection(("127.0.0.1", 6080), timeout=0.5):
-    pass
+agent_ready() {
+  # 資格はargvにもtimeoutの環境にも置かず、Nodeのstdinへ渡す。
+  # 200以外（X/CDPの準備中の503を含む）はまだ準備完了としない。
+  printf '%s' "$browser_token" | timeout --kill-after=1s 2s node --input-type=module -e '
+import { readFileSync } from "node:fs";
+import { get } from "node:http";
+const token = readFileSync(0, "utf8");
+const request = get("http://127.0.0.1:6080/healthz", {
+  headers: { Authorization: `Bearer ${token}` },
+}, (response) => process.exit(response.statusCode === 200 ? 0 : 1));
+request.on("error", () => process.exit(1));
+request.setTimeout(1000, () => request.destroy());
 '
 }
 
-# 同じプロフィールを同時に複数コンテナへマウントしないこと。
-rm -f -- "$HOME/SingletonLock" "$HOME/SingletonSocket" "$HOME/SingletonCookie"
+# Singletonの除去はbox-agentがプロフィールの排他を取ったあとに行う。
+# ここで先に消すと、誤って同じvolumeで起こした別コンテナのロックを壊してしまう。
 
 start_child Xvfb Xvfb "$DISPLAY" -screen 0 1280x800x24 -nolisten tcp -noreset
 wait_ready Xvfb 10 x_ready
@@ -138,41 +167,22 @@ wait_ready Xvfb 10 x_ready
 start_child Openbox openbox --sm-disable
 wait_ready Openbox 10 wm_ready
 
-# Debianのラッパーが読む追加フラグを避け、実体を固定の引数で起動する。
-# --no-sandbox、--disable-setuid-sandbox、CDPの口は追加しない。
-# WebRTCの設定は非プロキシUDPの禁止であり、API全体の無効化ではない（README参照）。
-start_child Chromium /usr/lib/chromium/chromium \
-  --ozone-platform=x11 \
-  --user-data-dir=/home/browser \
-  --kiosk \
-  --window-size=1280,800 \
-  --window-position=0,0 \
-  --force-device-scale-factor=1 \
-  --no-first-run \
-  --no-default-browser-check \
-  --disable-background-networking \
-  --disable-component-update \
-  --disable-sync \
-  --disable-extensions \
-  --disable-quic \
-  --force-webrtc-ip-handling-policy=disable_non_proxied_udp \
-  --deny-permission-prompts \
-  --disk-cache-dir=/tmp/chromium-cache \
-  --disk-cache-size=536870912 \
-  --lang=ja \
-  file:///opt/box-browser/test-page.html
-wait_ready Chromium 30 chromium_ready
-
-# 手順1.1だけの無認証VNC。5900はコンテナ内のloopback限定。
+# 生のRFBはコンテナ内loopbackだけ。外からはbox-agentの認証付き/vncを使う。
 start_child x11vnc x11vnc -display "$DISPLAY" -rfbport 5900 \
   -localhost -noipv6 -forever -shared -nopw -noxdamage -nolookup
 wait_ready x11vnc 10 vnc_ready
 
-# noVNCのHTML/JSは入れず、WebSocketの中継だけを起こす。
-start_child websockify websockify 0.0.0.0:6080 127.0.0.1:5900
-wait_ready websockify 10 websocket_ready
+# setsidにも資格を渡さない。固定の子shellがpipeを読み、Nodeへのexec時だけ
+# BROWSER_TOKENをexportする。Chromium等への環境の除去はNode側でも行う。
+start_child box-agent /bin/bash -c '
+  IFS= read -r -d "" BROWSER_TOKEN || exit 1
+  export BROWSER_TOKEN
+  exec node /srv/apps/box-agent/src/main.ts
+' < <(printf '%s\0' "$browser_token")
+wait_ready box-agent 30 agent_ready
+unset browser_token
 
-log '準備完了。WebSocketは6080、初期画面はローカル試験ページです。sandboxの実際の状態は別途検証してください。'
+log '準備完了。6080のAPIと/vncはBearer認証が必須です。実アカウントでは使わないでください。'
 # 正常終了も含め、主要プロセスが1つでも止まったらコンテナ全体を失敗にする。
 if wait -n -p exited_pid "${child_pids[@]}"; then status=0; else status=$?; fi
 fail "${child_names[${exited_pid:-0}]:-子プロセス} が終了しました（status=$status）。全体を停止します。"
