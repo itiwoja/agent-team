@@ -422,6 +422,9 @@ D-391〜402は[成長機構の決定ログ](00_learning.md#決定事項ログ)�
 | D-403 | box-browserはNode 24.21.0・Debian bookworm slimのmulti-platform digestを固定し、browserはuid/gid 10000。起動役は非rootのBash＋setsidとDockerのinit。`/tmp`は匿名volume、キャッシュ512MiBは1.7まで暫定 | 実装担当 | [起動手順](../../docker/box-browser/README.md)。amd64のread-only・cap-drop ALLで起動と終了を確認。arm64・容量実測は後続 |
 | D-404 | Docker 29.8.1が依存するMoby seccomp v0.2.3を土台に、Chromium用のnamespace・chrootの5規則を限定追加する | 実装担当 | [出典・差分](../../docker/makase-browser-seccomp.md)、[WSL2実測](../implementation/records/step-1.1-wsl2.md)。上流の既定拒否とclone3 ENOSYSを維持 |
 | D-405 | 1.1のnoVNCクライアントは公式v1.7.0のcommit固定ソースをホストの127.0.0.1で一時配信する | 実装担当 | 公式READMEに公式Dockerイメージの案内がない。[再現手順](../implementation/records/step-1.1-wsl2.md#画面確認の方法) |
+| D-406 | 1.2はCDP pipeを優先し、`DeveloperToolsAvailability: 1`と固定`--kiosk`を採用。TCPのデバッグポートは開かず、外部操作は`BROWSER_TOKEN`で認証するbox-agent経由だけ。policyによるDevTools全面禁止は維持しない | 持ち主 | 2026-10-26確認。policy2ではCDPのpage attachを拒否。導入版ではkioskによるDevTools UI起動抑止とCDP利用の両立を[実測](../implementation/records/step-1.2-wsl2.md)し、親も再検証した。Chromium更新時に同じ対照試験を行う |
+| D-407 | box-agentが`:6080`のHTTPとVNC WebSocketを同じBearer認証で保護し、websockifyを置き換える。生のRFBはloopbackだけ。初期epochは`CONTROL_EPOCH`、撮影操作の画像はbase64、直接取得はPNG。操作結果は世代内で保持し、1000件または32MiB到達で新規実行を止める | 実装担当 | [直接接続の契約](09_api/vm.md#box-agentへの直接接続手順12の内部口)。結果の1件分の容量超過は許すが、既存IDの再送結果を消さず二重実行を防ぐ。VNCの閲覧・操作モードの制御は本体のAPI-089で行う |
+| D-408 | `type`のUTF-8本文は固定X11補助のstdinへ渡し、一時CLIPBOARDとxdotoolの固定Ctrl+Vで入力する。転送後は補助を終了して所有権を解放する。本文をargv・ファイル・ログへ載せない | 実装担当 | xdotoolの文字ごとのUnicodeキー配列更新では実Chromiumに日本語が欠落したため。最大16,000bytesを受ける。既存CLIPBOARDは上書きし復元しない。pasteイベントを禁止するページとの互換性は逐次キー入力と異なる。空文字はCLIPBOARDを変更しない |
 
 ### ID体系
 削除した旧設計書（94b6629 の前）の ID はコードのコメントに残っている。重ならないように続きから振り、今もある画面と API は旧 ID を引き継ぐ。v1.0 では v0.6 の ID を引き継ぎ、意味が変わったものは中身を書き換え、使わなくなったものは「使わない」と書いて残す（[changes/2026-10-24-resident-v1.md](changes/2026-10-24-resident-v1.md)）。

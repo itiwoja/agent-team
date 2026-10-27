@@ -211,6 +211,23 @@ HA につなぐ・機器の一覧・「こわい」の印（TBL-062。FR-113・S
 ### 内部 API（box-manager）
 認証は `Authorization: Bearer <BOX_MANAGER_TOKEN>`。box-manager は ctl ネットワークでだけ待ち受け、box ネットワークでは待ち受けない。パスの `:boxId` は VM の世代（`boxes.id`）で、今の世代と違えば 409 `STALE_CONTROL`。VM の世代は `box-browser` と `box-shell` の 2 つのコンテナの組で、box-manager が一緒に起こし、一緒に止める。画面の操作・スクショ・VNC・ブラウザのデータは `box-browser` の box-agent、コマンドの実行とファイルの出し入れは `box-shell` の shell-agent が受ける。
 
+#### box-agentへの直接接続（手順1.2の内部口）
+
+box-agentは`:6080`で、全経路を`Authorization: Bearer <BROWSER_TOKEN>`で認証する。資格は世代ごとに交換し、SHELL_TOKENと共用しない。ブラウザからの直接接続用Cookie・URL内のトークン・CORSは提供しない。VNCもmanagerが認証ヘッダーを付けて中継する。
+
+| メソッド | パス | 手順1.2の契約 |
+|---|---|---|
+| GET | `/healthz` | X・ChromiumのCDPと操作対象の準備完了後に200。それまでは503。sandbox使用状態を返す |
+| POST | `/actions` | `{ actionId, controlEpoch, action }`。操作を直列化し、同一ID・同一内容の再送は実行中も含め1回。同一IDで内容が違えば409 `ACTION_CONFLICT`。古いepochはキャッシュ取得より先に409 `STALE_CONTROL` |
+| GET | `/screenshot` | 操作と同じ列で撮影し、`image/png`で1280×800の画像を返す |
+| WebSocket | `/vnc` | upgrade前に同じBearer認証。コンテナ内の`127.0.0.1:5900`へRFBを中継する |
+
+`controlEpoch`は環境変数`CONTROL_EPOCH`（非負整数、既定0）から初期化する。更新口は手順4のAPI-113で追加する。操作結果・失敗は世代内で保持し、既定1000件または本文合計32MiBに達したら新規IDを503 `ACTION_CAPACITY`で断る（D-407）。1件分の容量超過は許すが、キュー実行直前にも上限を確認し、後続の実行を止める。古いIDを追い出して再実行する形にはしない。
+
+手順1.2の`screenshot`操作は`{ executed: true, screenshot: { mimeType: "image/png", data: "<base64>" } }`、`read_page`は`page`の一覧と`text`を返す。画像を返すのは撮影操作だけ。`dryRun`・`expect`・inspectは手順2で追加し、それまでは指定を無視せず400で断る。秘密領域の撮影前マスク（IMP-003）を含む本番要件は下の契約が正であり、手順1.2の試験ページでの撮影成功だけでは達成としない。
+
+`type`は最大16,000 UTF-8 bytesを一時CLIPBOARD＋固定Ctrl+Vで入力する（D-408）。非空文字では既存CLIPBOARDを上書きし、終了後に所有権を解放する。以前の内容は復元せず、paste禁止ページでは逐次キー入力と挙動が異なる。`open_url`の成功はCDPによる遷移開始の受理であり、ロード完了は後続の`read_page`等で確かめる。
+
 | ID | メソッド | パス | 概要 |
 |---|---|---|---|
 | API-101 | POST | `/internal/v1/boxes` | 起こす。2 つのコンテナを一緒に起こす。`{ boxId }` だけを受ける（イメージ・上限・ネットワーク・ボリュームは固定）。戻し・作り直しの印ファイルがある（`failed` を含む）・控えを書いている間は 409 `VM_BUSY`（D-294・D-295）。ホストの空きが 3GB 未満なら 507 `DISK_LOW` |

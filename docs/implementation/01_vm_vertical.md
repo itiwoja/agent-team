@@ -16,7 +16,7 @@
 ## 作るもの
 | 部品 | 置き場 | 移す元（あれば） | 設計の参照 |
 |---|---|---|---|
-| box-browser のイメージ（Xvfb・軽いウィンドウマネージャ・Chromium・x11vnc＋websockify・box-agent） | `docker/box-browser/Dockerfile` | `apps/sandbox/Dockerfile`（digest 固定・本番の依存だけ入れる作りを真似る） | [07 VM の中身](../design/07_architecture.md#vm-の中身) |
+| box-browser のイメージ（Xvfb・軽いウィンドウマネージャ・Chromium・x11vnc＋box-agentの認証付きVNC中継） | `docker/box-browser/Dockerfile` | `apps/sandbox/Dockerfile`（digest 固定・本番の依存だけ入れる作りを真似る） | [07 VM の中身](../design/07_architecture.md#vm-の中身)、D-407 |
 | box-shell のイメージ（bash・git・Node・Python・shell-agent） | `docker/box-shell/Dockerfile` | `apps/sandbox/Dockerfile`（Python・git・curl・jq を入れる行） | [ADR-068](../design/adr/ADR-068-browser-shell-split.md) |
 | Chromium 用の seccomp | `docker/makase-browser-seccomp.json` | なし（Docker の既定に `CLONE_NEWUSER` を足したもの） | [07 Chromium のサンドボックス](../design/07_architecture.md) |
 | box-agent | `apps/box-agent`（新規） | なし | FR-075、API-103・105 |
@@ -41,6 +41,8 @@
 確かめ：noVNC に Chromium が全画面で映る。`docker inspect` で capability なし・`ReadonlyRootfs`・`no-new-privileges` が付いている。サンドボックスつきで立った/立たなかったの両方を、WSL2 のこの機械で記録した。
 
 ### 1.2 box-agent（スクショ・xdotool・CDP のパイプ・`read_page`・`open_url`）
+進捗（2026-10-26）：**手順1.2の実装・WSL2実機検証を完了**。単体297件、API通し19項目、終了・異常停止7ケースが成功した。[D-406〜408](../design/00_overview.md#決定事項ログ)に従い、CDP pipe＋固定kiosk、`:6080`のHTTP/VNC共通Bearer認証、日本語を欠落させない一時CLIPBOARD入力を採用した。websockifyはbox-agentの中継で置き換えた。起動・APIは[README](../../docker/box-browser/README.md)、結果と後続範囲は[実測記録](records/step-1.2-wsl2.md)を参照。次は1.3。1.1の無認証noVNC接続手順は現在の構成には適用しない。
+
 1. box-agentは世代別 `BROWSER_TOKEN` で認証する。VNCも同じブラウザ資格で保護し、SHELL_TOKEN・古い世代・無資格は拒否する（IMP-001）
 2. 起動：Xvfb 等を起こし、Chromium を `--remote-debugging-pipe` で起こす（`stdio` に fd 3・4 のパイプを渡す。TCP のデバッグポートは開かない）。サンドボックスが使えなければ `--no-sandbox` で起こし直し、使ったかどうかを応答に載せる（見分け方は「実装で決めること」）。起動と同時に前の起動のロックファイルを消す。Chromium には `--proxy-server=http://egress:3128` と `--proxy-bypass-list=shell` も付ける（`egress` と `shell` の名前は `box-browser` の `/etc/hosts`（`ExtraHosts`。「実装で決めること」）で引く。`shell` はホスト単位なので `shell` の全ポートが egress を通らない）。egress がまだ立たない 1.2〜1.3 の試験では、この 2 つを外して起こしてよい（外し方は実装で決める）
 3. 操作（API-103 の `action` のうち）：`screenshot`・`mouse_move`・`left_click` など・`type`・`key`・`scroll`・`wait` を xdotool で実行。操作は 1 つずつ。`actionId` を受け取り、実行済みなら前の結果を返す。`controlEpoch` も受け取り、box-agent が覚えている値と違えば 409 `STALE_CONTROL` を返す（値を増やすのは box-manager の API-113 で、ステップ 4 で作る。ここでは受け取って比べるだけ。覚えさせ方は「実装で決めること」）。`zoom` は computer use のツールの版の仕様を確かめてから入れる

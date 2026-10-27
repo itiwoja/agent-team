@@ -166,11 +166,13 @@ flowchart TB
 |---|---|
 | Xvfb（`box-browser`） | 1280×800 の仮想画面。`-nolisten tcp`。X は `box-browser` の中にしかなく、`box-shell` のコマンドからは届かない |
 | 軽いウィンドウマネージャ（`box-browser`） | Chromium を全画面にする |
-| Chromium（`box-browser`） | 利用者 `browser` で動く。キオスクの形（アドレスバー・タブの帯・メニューなし）で、画面いっぱいに1枚。表示の倍率は 1、ページの拡大は 100% に固定。ユーザーデータは `/home/browser`（ボリューム `makase-browser-profile`）。起動のときに、ロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから起こす（D-171）。プロキシは egress。WebRTC・QUIC は切る。開発者ツール・ダウンロード・権限の求め（位置・カメラなど）は切る。リモートデバッグは TCP では開かず、box-agent が Chromium を起こすときのパイプ（`--remote-debugging-pipe`）だけ。`--proxy-bypass-list` に `shell` を書き、box ネットワーク上の `box-shell` のコンテナ名 `shell` だけ egress を通さない（VM の中で作ったページの点検は `http://shell:8000`〜`8099`。簡易サーバーは `box-shell` の中で立てる）。`box-shell` の shell-agent の管理の口はトークンで守られているので、Chromium から届いても何もできない。サンドボックスは下の「Chromium のサンドボックス」 |
-| x11vnc＋websockify（`box-browser`） | 画面の配信（VNC over WebSocket）。見るだけ・操作の2つの口。box ネットワークのアドレスにだけ結び、世代ごとのトークンで確かめる（127.0.0.1 では待ち受けない） |
+| Chromium（`box-browser`） | 利用者 `browser` で動く。キオスクの形（アドレスバー・タブの帯・メニューなし）で、画面いっぱいに1枚。表示の倍率は 1、ページの拡大は 100% に固定。ユーザーデータは `/home/browser`（ボリューム `makase-browser-profile`）。起動のときに、ロックファイル（`SingletonLock`・`SingletonSocket`・`SingletonCookie`）を消してから起こす（D-171）。プロキシは egress。WebRTC・QUIC は切る。ダウンロード・権限の求め（位置・カメラなど）は切る。開発者ツールの全面禁止policyはCDPも制限するため、1.2ではCDP pipeを優先し、DevTools画面の全面禁止は未達として扱う（D-406）。リモートデバッグは TCP では開かず、box-agent が Chromium を起こすときのパイプ（`--remote-debugging-pipe`）だけ。`--proxy-bypass-list` に `shell` を書き、box ネットワーク上の `box-shell` のコンテナ名 `shell` だけ egress を通さない（VM の中で作ったページの点検は `http://shell:8000`〜`8099`。簡易サーバーは `box-shell` の中で立てる）。`box-shell` の shell-agent の管理の口はトークンで守られているので、Chromium から届いても何もできない。サンドボックスは下の「Chromium のサンドボックス」 |
+| x11vnc＋box-agentのVNC中継（`box-browser`） | 画面の配信（VNC over WebSocket）。生のRFBは`127.0.0.1:5900`だけで待ち、box-agentの`:6080/vnc`が世代ごとの`BROWSER_TOKEN`をupgrade前に検証して中継する（D-407）。boxネットワークへ出すのは認証付きの口だけ。見るだけ・操作の切り替えは本体のAPI-089で行う |
 | box-agent（`box-browser`） | 操作の実行（xdotool）・スクショ・操作の先の確かめ（CDP）・`open_url`（CDP の `Page.navigate`。`http`・`https` だけ）・`read_page`。操作は1つずつ実行し、操作 ID と `control_epoch` を確かめる（`screen_epoch` は本体が確かめる：D-299）。box ネットワークのアドレスにだけ結ぶ |
 | シェル（bash）・git・Node・Python・よく使う CLI（`box-shell`） | ターミナル。コマンドは利用者 `agent` で動く（D-178）。入れたツールは `/home/agent`（ボリューム `makase-vm-home`）に残る。`box-browser` のプロフィール・X・CDP には別のコンテナなので届かない |
 | shell-agent（`box-shell`） | コマンドの実行（API-117。同時に 2 本まで）・tar の出し入れ（API-118。利用者 `agent` で作る：D-306）。box ネットワークのアドレスにだけ結び、世代ごとのトークンで確かめる。コマンドのプロセスは egress の `terminal.allow_hosts` の許可リストを通る |
+
+D-406の実測：導入版Chromiumでは、固定`--kiosk`がDevTools画面の作成を拒否し、policy1でCDPのページ検査は使える。policyによる全面禁止とは区別し、版を更新するときに[同じ対照試験](../implementation/records/step-1.2-wsl2.md#devtools画面の抑止)を行う。
 
 画面の座標と CDP の対応：
 - キオスクで倍率 1 なので、画面の座標はそのまま、前に出ているタブのページの座標になる。box-agent は前に出ているタブを1つだけ扱う。新しいタブ・窓が開いたら、そのタブを前に出して Claude に知らせる
