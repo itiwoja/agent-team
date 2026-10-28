@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
-import type { AssistantPart, ChatMessage } from "@open-team/runner";
+import type { AssistantPart } from "@open-team/runner";
 import { GeminiClient } from "./gemini.ts";
+import { anthropicMessages, openAiMessages, validateHistory } from "./http-provider-messages.ts";
 import { computeMicroUsd } from "./pricing.ts";
 import { profilePrice, providerBaseUrl, providerModelIdentity, PROVIDER_KEY_NAMES, ModelProfileSchema, LlmConfigurationError, type LlmConfig, type LlmProvider, type ModelProfile } from "./provider-config.ts";
 import { SessionBudgetClient } from "./session-budget.ts";
-import { buildToolDeclarations, fromGeminiFunctionCall, toGeminiFunctionCall, type McpFunctionTable } from "./tools.ts";
+import { buildToolDeclarations, fromGeminiFunctionCall, type McpFunctionTable } from "./tools.ts";
 import { LlmError, type LlmClient, type LlmRequest, type LlmResponse, type LlmUsage } from "./types.ts";
 
 type Obj = Record<string, unknown>;
@@ -174,43 +175,6 @@ export class HttpProviderClient implements LlmClient {
   }
 }
 
-function validateHistory(messages: readonly ChatMessage[]): void {
-  const seen = new Set<string>(), pending = new Set<string>();
-  for (const m of messages) {
-    if (m.role === "tool") {
-      if (!pending.delete(m.content.toolCallId)) fail("ツール結果に対応する呼び出しがありません");
-      continue;
-    }
-    if (pending.size) fail("ツール結果が不足しています");
-    if (m.role === "assistant") for (const p of m.content) if (p.type === "tool_call") {
-      if (!p.id || seen.has(p.id)) fail("ツール呼び出しIDが重複しています");
-      seen.add(p.id); pending.add(p.id);
-    }
-  }
-  if (pending.size) fail("ツール結果が不足しています");
-}
-function openAiMessages(messages: readonly ChatMessage[], table: McpFunctionTable): Obj[] {
-  return messages.map(m => {
-    if (m.role === "user") return { role: "user", content: m.content };
-    if (m.role === "tool") return { role: "tool", tool_call_id: m.content.toolCallId, content: m.content.result };
-    const calls = m.content.filter(p => p.type === "tool_call").map(p => { const f = toGeminiFunctionCall(p, table); return { id: p.id, type: "function", function: { name: f.name, arguments: JSON.stringify(f.args) } }; });
-    return { role: "assistant", content: m.content.filter(p => p.type === "text").map(p => p.text).join("\n") || null, ...(calls.length ? { tool_calls: calls } : {}) };
-  });
-}
-function anthropicMessages(messages: readonly ChatMessage[], table: McpFunctionTable): Obj[] {
-  const out: Array<{ role: string; content: Obj[] }> = [];
-  for (const m of messages) {
-    const role = m.role === "assistant" ? "assistant" : "user";
-    const content: Obj[] = m.role === "user" ? [{ type: "text", text: m.content }] : m.role === "tool" ? [{ type: "tool_result", tool_use_id: m.content.toolCallId, content: m.content.result }] : m.content.map(p => {
-      if (p.type === "text") return { type: "text", text: p.text };
-      const f = toGeminiFunctionCall(p, table);
-      return { type: "tool_use", id: p.id, name: f.name, input: f.args };
-    });
-    const prev = out.at(-1);
-    if (prev?.role === role) prev.content.push(...content); else out.push({ role, content });
-  }
-  return out;
-}
 interface Parsed { parts: AssistantPart[]; stopReason: string }
 function parseOpenAi(raw: Obj): Parsed {
   if (!Array.isArray(raw.choices) || raw.choices.length !== 1 || !object(raw.choices[0])) return malformed();
